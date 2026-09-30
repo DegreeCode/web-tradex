@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { SiteDisclaimer } from "@/components/site-disclaimer";
+import { BrandLogo } from "@/components/brand-logo";
 
 export interface LegalSection {
   id: string;
@@ -29,7 +30,7 @@ export function LegalDocument({
           prefetch={false}
           className="text-[20px] font-extrabold tracking-[-0.04em] text-app-gray-900"
         >
-          Trade<span className="text-app-blue">X</span>
+          <BrandLogo />
         </Link>
         <h1 className="mt-6 text-[26px] font-bold tracking-[-0.02em] text-app-gray-900">
           {title}

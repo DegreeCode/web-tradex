@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/drawer";
 import { formatUnreadBadge } from "@/lib/notifications";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
+import { BrandLogo } from "@/components/brand-logo";
 
 const PRIMARY_NAV = [
   { href: "/", label: "홈", icon: Home },
@@ -105,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             href="/"
             className="text-[21px] font-extrabold tracking-[-0.04em] text-app-gray-900"
           >
-            Trade<span className="text-app-blue">X</span>
+            <BrandLogo />
           </Link>
         </div>
         <nav aria-label="주 메뉴" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
@@ -200,7 +201,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href="/"
               className="text-[19px] font-extrabold tracking-[-0.04em] text-app-gray-900"
             >
-              Trade<span className="text-app-blue">X</span>
+              <BrandLogo />
             </Link>
           )}
           <div className="flex shrink-0 items-center gap-2">
