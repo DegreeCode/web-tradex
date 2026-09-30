@@ -135,7 +135,7 @@ function ManagerTransferInboxResults({ instrument, userId }: { instrument: Instr
 
 function issuanceRejection(preview: IssuancePreview, maxDilutionPpm: number | undefined): string {
   if (preview.cooldown_until) {
-    return `직전 발행 후 쿨다운 중이에요. ${fmtDateTime(preview.cooldown_until)}부터 다시 발행할 수 있어요.`;
+    return `상장 직후 발행 금지 기간이거나 직전 발행 후 쿨다운 중이에요. ${fmtDateTime(preview.cooldown_until)}부터 발행할 수 있어요.`;
   }
   const limit = maxDilutionPpm !== undefined ? `(${fmtPercentFromPPM(maxDilutionPpm)})` : "";
   return `가격 희석이 한도${limit}를 넘어요. 예치 금액을 최대 예치 가능 금액 이하로 줄여주세요.`;
@@ -145,6 +145,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
   const { data: exchangeInfo } = useExchangeInfo();
   const maxDilutionPpm = exchangeInfo?.listing.issuance_max_price_dilution_ppm;
   const cooldownHours = exchangeInfo?.listing.issuance_cooldown_hours;
+  const postListingHours = exchangeInfo?.listing.issuance_post_listing_block_hours;
   const [deposit, setDeposit] = useState("");
   const [debouncedDeposit, setDebouncedDeposit] = useState("");
 
@@ -193,6 +194,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
         비율대로 락업과 풀에 배분돼요.
         {maxDilutionPpm !== undefined ? ` 한 번에 가격을 ${fmtPercentFromPPM(maxDilutionPpm)}까지 희석할 수 있고,` : ""}
         {cooldownHours !== undefined ? ` 발행 후 ${cooldownHours}시간 동안은 다시 발행할 수 없어요.` : ""}
+        {postListingHours ? ` 상장 후 ${postListingHours}시간 동안은 발행할 수 없어요.` : ""}
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="issuance-deposit">예치 금액 (Credit)</Label>

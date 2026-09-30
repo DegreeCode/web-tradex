@@ -6,6 +6,7 @@ import {
   iconPolicyError,
   transferAllowed,
   managerMarginSideBlocked,
+  lockedSupplyPpmFromPercent,
   type ExchangeInfo,
 } from "../src/lib/exchange-info";
 
@@ -91,4 +92,16 @@ test("manager own-symbol margin block follows the configured side", () => {
   assert.equal(managerMarginSideBlocked("LONG", "BOTH"), true);
   // Older servers omit the setting; the API still rejects if it applies.
   assert.equal(managerMarginSideBlocked("SHORT", undefined), false);
+});
+
+test("typed locked ratio snaps to 0.1% steps inside the published range", () => {
+  const within = (text: string) => lockedSupplyPpmFromPercent(text, 50_000, 900_000);
+  assert.equal(within("25"), 250_000);
+  assert.equal(within("10.3"), 103_000);
+  assert.equal(within(" 7.5 "), 75_000);
+  assert.equal(within("1"), 50_000);
+  assert.equal(within("95"), 900_000);
+  for (const text of ["", ".", "10.25", "abc", "-5", "1e1"]) {
+    assert.equal(within(text), null, text);
+  }
 });

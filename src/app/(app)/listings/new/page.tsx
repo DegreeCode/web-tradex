@@ -9,7 +9,15 @@ import { ErrorBlock, Surface } from "@/components/primitives";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useExchangeInfo, tagPolicyError, iconPolicyError, type ExchangeInfo, type ListingEvaluationCriteria } from "@/lib/exchange-info";
+import {
+  useExchangeInfo,
+  tagPolicyError,
+  iconPolicyError,
+  lockedSupplyPpmFromPercent,
+  LOCKED_SUPPLY_STEP_PPM,
+  type ExchangeInfo,
+  type ListingEvaluationCriteria,
+} from "@/lib/exchange-info";
 import { errorMessage } from "@/lib/api";
 import { isDecimalInput, toNumber, fmtCredit, fmtPercentFromPPM } from "@/lib/format";
 import { useCreateListing } from "@/lib/hooks";
@@ -19,15 +27,16 @@ function criteriaText(criteria: ListingEvaluationCriteria) {
   return `외부 보유자 ${criteria.min_external_holders}명 이상, 외부 거래자 ${criteria.min_external_traders}명 이상, 외부 거래량이 총발행량의 ${fmtPercentFromPPM(criteria.min_qualified_activity_ppm)} 이상`;
 }
 
-// The API accepts locked ratios in 0.1% (1000 ppm) steps.
-const LOCKED_SUPPLY_STEP_PPM = 1_000;
-
 function lockedSupplyRange(listing: ExchangeInfo["listing"] | undefined) {
   const min = listing?.min_locked_supply_ppm;
   const max = listing?.max_locked_supply_ppm;
   const defaultPpm = listing?.default_locked_supply_ppm;
   if (min === undefined || max === undefined || defaultPpm === undefined || min > max) return null;
   return { min, max, defaultPpm };
+}
+
+function percentText(ppm: number) {
+  return String(ppm / 10_000);
 }
 
 function periodText(hours: number) {
@@ -48,8 +57,24 @@ export default function NewListingPage() {
   const [deposit, setDeposit] = useState("");
   // null keeps the server default; only an explicit choice is sent.
   const [lockedPpm, setLockedPpm] = useState<number | null>(null);
+  // Text typed into the percent field; null shows the committed ratio.
+  const [lockedDraft, setLockedDraft] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const lockedRange = lockedSupplyRange(exchangeInfo?.listing);
+
+  // Commits the typed percent: 0.1% steps, clamped to the published range.
+  function commitLockedDraft() {
+    if (lockedDraft === null || !lockedRange) return;
+    const text = lockedDraft.trim();
+    setLockedDraft(null);
+    if (text === "") return;
+    const ppm = lockedSupplyPpmFromPercent(text, lockedRange.min, lockedRange.max);
+    if (ppm === null) {
+      toast.error("락업 비율은 0.1% 단위 숫자로 입력해주세요");
+      return;
+    }
+    setLockedPpm(ppm);
+  }
 
   function submit() {
     if (!/^[A-Za-z]{1,8}$/.test(symbol.trim())) {
@@ -171,8 +196,22 @@ export default function NewListingPage() {
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-3">
               <Label htmlFor="listing-locked-ratio">발행사 락업 비율</Label>
-              <span className="numeric text-[14px] font-bold text-app-gray-900">
-                {fmtPercentFromPPM(lockedPpm ?? lockedRange.defaultPpm)}
+              <span className="flex items-center gap-1">
+                <Input
+                  value={lockedDraft ?? percentText(lockedPpm ?? lockedRange.defaultPpm)}
+                  onChange={(event) => setLockedDraft(event.target.value)}
+                  onBlur={commitLockedDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitLockedDraft();
+                    }
+                  }}
+                  inputMode="decimal"
+                  aria-label="발행사 락업 비율 직접 입력 (%)"
+                  className="numeric h-8 w-20 rounded-lg text-right text-[14px] font-bold text-app-gray-900"
+                />
+                <span className="text-[14px] font-bold text-app-gray-900">%</span>
               </span>
             </div>
             <input
@@ -182,7 +221,10 @@ export default function NewListingPage() {
               max={lockedRange.max}
               step={LOCKED_SUPPLY_STEP_PPM}
               value={lockedPpm ?? lockedRange.defaultPpm}
-              onChange={(event) => setLockedPpm(Number(event.target.value))}
+              onChange={(event) => {
+                setLockedDraft(null);
+                setLockedPpm(Number(event.target.value));
+              }}
               aria-valuetext={fmtPercentFromPPM(lockedPpm ?? lockedRange.defaultPpm)}
               className="h-2 w-full cursor-pointer accent-app-blue"
             />
