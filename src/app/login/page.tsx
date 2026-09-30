@@ -23,6 +23,7 @@ import type { CeremonyEnvelope } from "@/lib/webauthn";
 import type { User } from "@/lib/types";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { safeRedirectPath } from "@/lib/routes";
+import { BrandLogo } from "@/components/brand-logo";
 
 function LoginScreen() {
   const router = useRouter();
@@ -96,7 +97,7 @@ function LoginScreen() {
       <div className="w-full max-w-[400px]">
         <div className="mb-8 text-center">
           <p className="text-[26px] font-extrabold tracking-[-0.04em] text-app-gray-900">
-            Trade<span className="text-app-blue">X</span>
+            <BrandLogo />
           </p>
           <h1 className="mt-6 text-[22px] leading-tight font-bold tracking-[-0.02em] text-app-gray-900">
             패스키로 안전하게
