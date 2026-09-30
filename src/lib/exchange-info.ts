@@ -22,6 +22,8 @@ export interface ExchangeInfo {
     warning_ppm: number;
     maintenance_ppm: number;
     liquidation_confirm_seconds: number;
+    /** Margin side a symbol's current manager may not open on that symbol. */
+    manager_own_symbol_block?: "LONG" | "SHORT" | "BOTH";
     interest_period_seconds: number;
     interest_collection: string;
     interest_rate_scope: string;
@@ -31,6 +33,11 @@ export interface ExchangeInfo {
   listing: {
     user_fee_credit: string;
     user_daily_limit: number;
+    default_locked_supply_ppm?: number;
+    min_locked_supply_ppm?: number;
+    max_locked_supply_ppm?: number;
+    issuance_max_price_dilution_ppm?: number;
+    issuance_cooldown_hours?: number;
     maintenance: {
       after_24h: ListingEvaluationCriteria;
       after_72h: ListingEvaluationCriteria;
@@ -124,4 +131,12 @@ export function iconPolicyError(
     return "올바른 아이콘 URL을 입력해주세요";
   }
   return null;
+}
+
+/** Whether a symbol's manager is barred from opening this margin side on it. */
+export function managerMarginSideBlocked(
+  side: "LONG" | "SHORT",
+  block: NonNullable<ExchangeInfo["margin"]["manager_own_symbol_block"]> | undefined,
+): boolean {
+  return block === "BOTH" || block === side;
 }

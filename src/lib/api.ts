@@ -46,6 +46,8 @@ export class ApiError extends Error {
 const MESSAGES: Record<string, string> = {
   ICON_INVALID: "아이콘 URL과 이미지 형식·크기가 현재 거래소 규격에 맞는지 확인해주세요",
   ICON_REQUEST_CONFLICT: "아이콘 심사 상태가 변경됐어요. 내역을 새로고침해주세요",
+  ISSUANCE_LIMIT: "가격 희석 한도를 넘어요. 예치 금액을 줄여주세요",
+  ISSUANCE_COOLDOWN: "직전 발행 후 쿨다운 중이에요. 잠시 후 다시 시도해주세요",
   USER_LISTING_DAILY_LIMIT: "오늘 상장할 수 있는 횟수를 모두 사용했어요",
   NETWORK_ERROR: "네트워크에 연결하지 못했어요",
   INVALID_RESPONSE: "서버 응답을 확인하지 못했어요",
