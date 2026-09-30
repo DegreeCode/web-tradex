@@ -8,8 +8,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   CalendarClock,
-  ChartCandlestick,
-  ChartLine,
   Clock,
   FilePenLine,
   FileText,
@@ -447,6 +445,35 @@ function disclosureSummary(disclosure: Disclosure): string | null {
     .join(" · ") || null;
 }
 
+// Chart-mode icons drawn in the chart's own colors: a falling (blue) and a
+// rising (red) candle, or the line in the color the line view is drawn with.
+function CandleModeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="size-4">
+      <path d="M3 3v16a2 2 0 0 0 2 2h16" stroke="currentColor" />
+      <g stroke="var(--app-blue)">
+        <path d="M9 5v4" />
+        <rect width="4" height="6" x="7" y="9" rx="1" />
+        <path d="M9 15v2" />
+      </g>
+      <g stroke="var(--app-red)">
+        <path d="M17 3v2" />
+        <rect width="4" height="8" x="15" y="5" rx="1" />
+        <path d="M17 13v3" />
+      </g>
+    </svg>
+  );
+}
+
+function LineModeIcon({ rising }: { rising: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="size-4">
+      <path d="M3 3v16a2 2 0 0 0 2 2h16" stroke="currentColor" />
+      <path d="m19 9-5 5-4-4-3 3" stroke={rising ? "var(--app-red)" : "var(--app-blue)"} />
+    </svg>
+  );
+}
+
 function SymbolDetail() {
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol")?.trim() ?? "";
@@ -523,6 +550,15 @@ function SymbolDetail() {
   const instrument = instrumentQuery.data;
   const trades = tradesQuery.data?.data ?? [];
   const candles = candlesQuery.data?.data ?? [];
+  // Same rule as the line view's color: the loaded period's latest close
+  // against its earliest open. The chart sorts candles by time, so do too.
+  let first = candles[0];
+  let last = candles[0];
+  for (const candle of candles) {
+    if (Date.parse(candle.timestamp) < Date.parse(first.timestamp)) first = candle;
+    if (Date.parse(candle.timestamp) > Date.parse(last.timestamp)) last = candle;
+  }
+  const periodRising = !first || Number(last.close) >= Number(first.open);
   const disclosures: Disclosure[] = disclosuresQuery.data?.pages.flatMap((page) => page.data) ?? [];
   const newest = trades[0];
   const oldest = trades[trades.length - 1];
@@ -648,7 +684,7 @@ function SymbolDetail() {
                 title={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
                 className="flex shrink-0 items-center rounded-lg px-2 py-1 text-app-gray-500 hover:bg-app-gray-100"
               >
-                {chartSeriesType === "candle" ? <ChartCandlestick className="size-4" /> : <ChartLine className="size-4" />}
+                {chartSeriesType === "candle" ? <CandleModeIcon /> : <LineModeIcon rising={periodRising} />}
               </button>
             </div>
 
