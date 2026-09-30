@@ -657,11 +657,14 @@ function SymbolDetail() {
               </div>
               <div className="min-w-0 max-w-full break-all text-right">
                 <ChangeIndicator value={change} />
-                {showLastTrade ? (
-                  <p className="mt-0.5 text-[12px] text-app-gray-400">
-                    최근 체결 {fmtPrice(instrument.last_price)}
-                  </p>
-                ) : null}
+                {/* Always laid out so the chart below doesn't jump when the
+                    last trade matches the spot price and the line hides. */}
+                <p
+                  aria-hidden={!showLastTrade}
+                  className={`mt-0.5 text-[12px] text-app-gray-400${showLastTrade ? "" : " invisible"}`}
+                >
+                  최근 체결 {instrument.last_price ? fmtPrice(instrument.last_price) : "-"}
+                </p>
               </div>
             </div>
 
