@@ -86,6 +86,7 @@ import {
   readSymbolMetadataCache,
   runInitialSymbolMetadataValidation,
   runSymbolMetadataSync,
+  withTagList,
   writeSymbolMetadataCache,
   type SymbolMetadataCache,
 } from "./symbol-metadata";
@@ -1333,8 +1334,8 @@ export function useLogout() {
 export function useCreateListing() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: ListingRequest) =>
-      postIdempotentData<MarketSymbol>("/api/v1/symbols", payload),
+    mutationFn: async (payload: ListingRequest) =>
+      withTagList(await postIdempotentData<MarketSymbol>("/api/v1/symbols", payload)),
     onSuccess: (symbol) => {
       cacheSymbolMetadata(queryClient, symbol);
       const ticker = queryClient.getQueryData<Ticker[]>(["ticker-cache"])?.find((row) => row.symbol === symbol.symbol);
@@ -1348,8 +1349,8 @@ export function useCreateListing() {
 export function useUpdateMetadata(symbol: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { name?: string; description?: string; tags?: string[]; icon_url?: string }) =>
-      patchIdempotentData<MarketSymbol>(`/api/v1/symbols/${symbol}`, payload),
+    mutationFn: async (payload: { name?: string; description?: string; tags?: string[]; icon_url?: string }) =>
+      withTagList(await patchIdempotentData<MarketSymbol>(`/api/v1/symbols/${symbol}`, payload)),
     onSuccess: (metadata) => {
       cacheSymbolMetadata(queryClient, metadata);
       void queryClient.invalidateQueries({ queryKey: ["icon-requests", symbol] });
