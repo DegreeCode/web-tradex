@@ -5,6 +5,7 @@ import {
   tagPolicyError,
   iconPolicyError,
   transferAllowed,
+  managerMarginSideBlocked,
   type ExchangeInfo,
 } from "../src/lib/exchange-info";
 
@@ -82,4 +83,12 @@ test("external transfer restrictions preserve the own-account exception", () => 
   assert.equal(transferAllowed("STOCK", false, "CREDIT_ONLY"), false);
   assert.equal(transferAllowed("STOCK", false, "STOCK_ONLY"), true);
   assert.equal(transferAllowed("CREDIT", false, "CREDIT_ONLY"), true);
+});
+
+test("manager own-symbol margin block follows the configured side", () => {
+  assert.equal(managerMarginSideBlocked("SHORT", "SHORT"), true);
+  assert.equal(managerMarginSideBlocked("LONG", "SHORT"), false);
+  assert.equal(managerMarginSideBlocked("LONG", "BOTH"), true);
+  // Older servers omit the setting; the API still rejects if it applies.
+  assert.equal(managerMarginSideBlocked("SHORT", undefined), false);
 });

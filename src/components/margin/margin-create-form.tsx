@@ -1,6 +1,7 @@
 "use client";
 
-import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
+import { useAuth } from "@/components/auth-provider";
+import { managerMarginSideBlocked, useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy, MarginInterestPolicy } from "@/components/exchange-policy";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -94,6 +95,12 @@ export function MarginCreateForm({
   const isGlobalHalted = marketState?.state === "GLOBAL_HALTED";
   const isSymbolTrading = Boolean(selectedInstrument && selectedInstrument.state === "TRADING");
   const isEligibleToOpen = Boolean(eligibility?.can_open);
+  const { user } = useAuth();
+  const managerSideBlocked = Boolean(
+    user &&
+    selectedInstrument?.manager_user_id === user.user_id &&
+    managerMarginSideBlocked(side, exchangeInfo?.margin.manager_own_symbol_block),
+  );
 
   const payload =
     !collateralError &&
@@ -117,6 +124,7 @@ export function MarginCreateForm({
     !isGlobalHalted &&
     isSymbolTrading &&
     isEligibleToOpen &&
+    !managerSideBlocked &&
     Boolean(currentAccountId) &&
     Boolean(resolvedSymbol) &&
     Boolean(collateral) &&
@@ -249,6 +257,11 @@ export function MarginCreateForm({
             { value: "SHORT", label: "숏 · 내리면 수익", tone: "sell" },
           ]}
         />
+        {managerSideBlocked ? (
+          <p role="note" className="-mt-2 text-[12px] font-medium text-app-red">
+            발행사(매니저)는 자기 종목에 {side === "LONG" ? "롱" : "숏"} 포지션을 열 수 없어요.
+          </p>
+        ) : null}
 
         <div>
           <label htmlFor="margin-collateral" className="text-[13px] font-semibold text-app-gray-500">담보</label>

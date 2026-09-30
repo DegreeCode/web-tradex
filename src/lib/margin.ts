@@ -140,6 +140,7 @@ export interface MarginSimulation {
 const MARGIN_ERROR_MESSAGES: Record<string, string> = {
   MARGIN_NOT_ELIGIBLE: "마진 거래 자격(거래일 수 등)을 충족하지 않아요",
   MARGIN_BLOCKED: "마진 포지션 생성이 제한되어 있어요",
+  MARGIN_MANAGER_OWN_SYMBOL: "발행사(매니저)는 자기 종목에 이 방향의 포지션을 열 수 없어요",
   MARGIN_BORROW_LIMIT: "차입 가능 한도를 초과했어요",
   MARGIN_POSITION_STATE: "현재 상태에서는 처리할 수 없는 포지션이에요",
   MARGIN_LIQUIDITY: "정산 유동성이 부족하여 주문을 체결할 수 없어요",

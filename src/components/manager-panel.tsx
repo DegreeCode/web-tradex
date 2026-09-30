@@ -16,7 +16,7 @@ import {
   errorMessage,
   isApiError,
 } from "@/lib/api";
-import { fmtCredit, fmtPercentFromPPM, fmtPrice, isDecimalInput, isPositiveDecimal } from "@/lib/format";
+import { fmtCredit, fmtDateTime, fmtPercentFromPPM, fmtPrice, isDecimalInput, isPositiveDecimal } from "@/lib/format";
 import {
   useCreateIssuance,
   useCreateManagerRequest,
@@ -25,7 +25,7 @@ import {
   useRespondManagerRequest,
   useUpdateMetadata,
 } from "@/lib/hooks";
-import type { Instrument } from "@/lib/types";
+import type { Instrument, IssuancePreview } from "@/lib/types";
 
 export function ManagerPanel({ instrument, userId }: { instrument: Instrument; userId: string }) {
   const [tab, setTab] = useState<"ISSUANCE" | "METADATA" | "TRANSFER">("ISSUANCE");
@@ -133,7 +133,18 @@ function ManagerTransferInboxResults({ instrument, userId }: { instrument: Instr
   );
 }
 
+function issuanceRejection(preview: IssuancePreview, maxDilutionPpm: number | undefined): string {
+  if (preview.cooldown_until) {
+    return `직전 발행 후 쿨다운 중이에요. ${fmtDateTime(preview.cooldown_until)}부터 다시 발행할 수 있어요.`;
+  }
+  const limit = maxDilutionPpm !== undefined ? `(${fmtPercentFromPPM(maxDilutionPpm)})` : "";
+  return `가격 희석이 한도${limit}를 넘어요. 예치 금액을 최대 예치 가능 금액 이하로 줄여주세요.`;
+}
+
 function IssuanceSection({ instrument }: { instrument: Instrument }) {
+  const { data: exchangeInfo } = useExchangeInfo();
+  const maxDilutionPpm = exchangeInfo?.listing.issuance_max_price_dilution_ppm;
+  const cooldownHours = exchangeInfo?.listing.issuance_cooldown_hours;
   const [deposit, setDeposit] = useState("");
   const [debouncedDeposit, setDebouncedDeposit] = useState("");
 
@@ -178,8 +189,10 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
   return (
     <div className="space-y-3">
       <p className="text-[13px] leading-relaxed text-app-gray-500">
-        Credit을 예치하면 커브 용량이 늘어나고 새 주식이 발행돼요. 발행된 주식은 락업과 풀에
-        배분됩니다.
+        Credit을 예치하면 커브 용량이 늘어나고 새 주식이 발행돼요. 발행된 주식은 상장 때 정한 락업
+        비율대로 락업과 풀에 배분돼요.
+        {maxDilutionPpm !== undefined ? ` 한 번에 가격을 ${fmtPercentFromPPM(maxDilutionPpm)}까지 희석할 수 있고,` : ""}
+        {cooldownHours !== undefined ? ` 발행 후 ${cooldownHours}시간 동안은 다시 발행할 수 없어요.` : ""}
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="issuance-deposit">예치 금액 (Credit)</Label>
@@ -201,12 +214,12 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
           <DataRow label="발행 후 가격" value={fmtPrice(data.price_after)} />
           <DataRow label="현재 가격" value={fmtPrice(data.price_before)} />
           <DataRow label="가격 희석" value={fmtPercentFromPPM(data.price_dilution_ppm)} />
-          <DataRow label="공급 증가" value={fmtPercentFromPPM(data.supply_increase_ppm)} />
-          <DataRow label="24시간 공급 증가" value={fmtPercentFromPPM(data.rolling_24h_supply_increase_ppm)} />
+          <DataRow label="공급 증가 (참고)" value={fmtPercentFromPPM(data.supply_increase_ppm)} />
+          <DataRow label="24시간 공급 증가 (참고)" value={fmtPercentFromPPM(data.rolling_24h_supply_increase_ppm)} />
           <DataRow label="최대 예치 가능" value={`${fmtCredit(data.maximum_acceptable_deposit, 4)} Credit`} />
           {!data.accepted ? (
             <p className="mt-2 text-[12px] font-medium text-app-red">
-              {data.reason || "현재 조건으로는 발행할 수 없어요"}
+              {issuanceRejection(data, maxDilutionPpm)}
             </p>
           ) : null}
         </div>

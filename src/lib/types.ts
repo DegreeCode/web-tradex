@@ -267,6 +267,8 @@ export interface IssuancePreview {
   supply_increase_ppm: number;
   rolling_24h_supply_increase_ppm: number;
   maximum_acceptable_deposit: string;
+  /** Present only while the symbol's issuance cooldown is running. */
+  cooldown_until?: string;
   reason?: string;
 }
 
@@ -306,6 +308,8 @@ export interface ListingRequest {
   description: string;
   tags: string[];
   deposit_credit: string;
+  /** Share of supply locked to the lister; omitted to use the server default. */
+  locked_supply_ppm?: number;
 }
 
 export interface Candle {
