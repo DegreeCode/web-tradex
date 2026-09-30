@@ -38,6 +38,7 @@ export interface ExchangeInfo {
     max_locked_supply_ppm?: number;
     issuance_max_price_dilution_ppm?: number;
     issuance_cooldown_hours?: number;
+    issuance_post_listing_block_hours?: number;
     maintenance: {
       after_24h: ListingEvaluationCriteria;
       after_72h: ListingEvaluationCriteria;
@@ -85,6 +86,21 @@ export function slippageError(
   if (trade && ppmFromPercent(value.trim()) > trade.max_slippage_ppm)
     return `슬리피지는 0~${fmtPercentFromPPM(trade.max_slippage_ppm, 4)} 사이로 입력해주세요`;
   return null;
+}
+
+// The API accepts locked ratios in 0.1% (1000 ppm) steps.
+export const LOCKED_SUPPLY_STEP_PPM = 1_000;
+
+/**
+ * Converts a typed percent into a locked ratio: the nearest 0.1% step, clamped
+ * to the published range. Returns null when the text is not a decimal with at
+ * most one fractional digit.
+ */
+export function lockedSupplyPpmFromPercent(text: string, min: number, max: number): number | null {
+  const trimmed = text.trim();
+  if (!isDecimalInput(trimmed, 1) || trimmed === ".") return null;
+  const stepped = Math.round(ppmFromPercent(trimmed) / LOCKED_SUPPLY_STEP_PPM) * LOCKED_SUPPLY_STEP_PPM;
+  return Math.min(max, Math.max(min, stepped));
 }
 
 export function tagPolicyError(
