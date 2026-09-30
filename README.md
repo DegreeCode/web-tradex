@@ -151,3 +151,7 @@ npm run start    # out/ 정적 미리보기 (serve)
 npm run lint     # ESLint
 npm test         # 단위 테스트 (node:test + tsx, tests/*.test.{ts,mjs})
 ```
+
+## 라이선스
+
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only)을 따릅니다.
