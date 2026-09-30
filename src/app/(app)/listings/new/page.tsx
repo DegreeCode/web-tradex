@@ -19,8 +19,8 @@ function criteriaText(criteria: ListingEvaluationCriteria) {
   return `외부 보유자 ${criteria.min_external_holders}명 이상, 외부 거래자 ${criteria.min_external_traders}명 이상, 외부 거래량이 총발행량의 ${fmtPercentFromPPM(criteria.min_qualified_activity_ppm)} 이상`;
 }
 
-// The API accepts locked ratios in whole-percent steps.
-const LOCKED_SUPPLY_STEP_PPM = 10_000;
+// The API accepts locked ratios in 0.1% (1000 ppm) steps.
+const LOCKED_SUPPLY_STEP_PPM = 1_000;
 
 function lockedSupplyRange(listing: ExchangeInfo["listing"] | undefined) {
   const min = listing?.min_locked_supply_ppm;
