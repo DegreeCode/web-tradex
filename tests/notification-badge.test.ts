@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUnreadBadge } from "../src/lib/notifications";
-import { updateNotificationCache } from "../src/lib/hooks";
+import { pinChangeNeedsRefetch, updateNotificationCache } from "../src/lib/hooks";
 import type { Notification, Page } from "../src/lib/types";
 
 const notification = (id: number): Notification => ({
@@ -28,4 +28,38 @@ test("complete unread pages cross the cap without requiring a REST refresh", () 
   assert.equal(formatUnreadBadge(50, false), "50");
   assert.equal(formatUnreadBadge(51, false), "50+");
   assert.equal(formatUnreadBadge(49, true), "50+");
+});
+
+const ids = (page: Page<Notification>) => page.data.map((row) => row.notification_id);
+const pinned = (id: number, version = 1): Notification => ({ ...notification(id), pinned: true, version });
+
+test("private updates keep the pinned sort order", () => {
+  // Server order: ntf_1 pinned most recently, then ntf_9, then unpinned newest first.
+  let cache: Page<Notification> = {
+    data: [pinned(1), pinned(9), notification(8), notification(5), notification(2)],
+    page: { has_more: false, next_cursor: null },
+  };
+  cache = updateNotificationCache(cache, notification(6), false) as Page<Notification>;
+  assert.deepEqual(ids(cache), ["ntf_1", "ntf_9", "ntf_8", "ntf_6", "ntf_5", "ntf_2"]);
+  cache = updateNotificationCache(cache, pinned(3), false) as Page<Notification>;
+  assert.deepEqual(ids(cache), ["ntf_3", "ntf_1", "ntf_9", "ntf_8", "ntf_6", "ntf_5", "ntf_2"]);
+  // Editing a pinned notice keeps its place.
+  cache = updateNotificationCache(cache, { ...pinned(9, 2), title: "Edited" }, false) as Page<Notification>;
+  assert.deepEqual(ids(cache), ["ntf_3", "ntf_1", "ntf_9", "ntf_8", "ntf_6", "ntf_5", "ntf_2"]);
+  // Pinning moves to the top; unpinning goes back by creation time.
+  cache = updateNotificationCache(cache, pinned(5, 2), false) as Page<Notification>;
+  assert.deepEqual(ids(cache), ["ntf_5", "ntf_3", "ntf_1", "ntf_9", "ntf_8", "ntf_6", "ntf_2"]);
+  cache = updateNotificationCache(cache, { ...pinned(1, 2), pinned: false }, false) as Page<Notification>;
+  assert.deepEqual(ids(cache), ["ntf_5", "ntf_3", "ntf_9", "ntf_8", "ntf_6", "ntf_2", "ntf_1"]);
+});
+
+test("pin changes refetch lists that are only partly loaded", () => {
+  const complete: Page<Notification> = { data: [notification(2)], page: { has_more: false, next_cursor: null } };
+  const partial: Page<Notification> = { ...complete, page: { has_more: true, next_cursor: "cursor" } };
+  const pages = { pages: [complete, { ...complete, data: [notification(1)] }], pageParams: [null, "cursor"] };
+  assert.equal(pinChangeNeedsRefetch(complete, pinned(2, 2)), false);
+  assert.equal(pinChangeNeedsRefetch(partial, pinned(2, 2)), true);
+  assert.equal(pinChangeNeedsRefetch(pages, pinned(1, 2)), true);
+  assert.equal(pinChangeNeedsRefetch(partial, { ...notification(2), version: 2 }), false);
+  assert.equal(pinChangeNeedsRefetch(partial, pinned(7)), false);
 });

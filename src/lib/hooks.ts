@@ -319,23 +319,59 @@ function notificationFromPrivateFrame(frame: WsFrame): Notification | null {
   return isNotification(outer.data) ? outer.data : null;
 }
 
+function createdTime(row: Notification): number {
+  const time = Date.parse(row.created_at);
+  return Number.isFinite(time) ? time : 0;
+}
+
+// Lists use sort=pinned: the most recently pinned rows first, then unpinned
+// rows newest first. The pin time isn't exposed, so a row that becomes pinned
+// is treated as the latest pin.
+function insertNotification(rows: Notification[], incoming: Notification): Notification[] {
+  const index = incoming.pinned
+    ? 0
+    : rows.findIndex((row) => !row.pinned && createdTime(row) < createdTime(incoming));
+  return index < 0 ? [...rows, incoming] : [...rows.slice(0, index), incoming, ...rows.slice(index)];
+}
+
 function mergeNotificationRows(
   rows: Notification[],
   incoming: Notification,
   unreadOnly: boolean,
   allowInsert: boolean,
 ): Notification[] {
-  const existing = rows.find((row) => row.notification_id === incoming.notification_id);
+  const index = rows.findIndex((row) => row.notification_id === incoming.notification_id);
+  const existing = index >= 0 ? rows[index] : undefined;
   if (existing && incoming.version < existing.version) return rows;
-  const withoutIncoming = rows.filter((row) => row.notification_id !== incoming.notification_id);
-  const next = existing || allowInsert ? [...withoutIncoming, incoming] : withoutIncoming;
-  return next
-    .filter((row) => !unreadOnly || !row.read)
-    .sort((left, right) => {
-      const rightTime = Date.parse(right.created_at);
-      const leftTime = Date.parse(left.created_at);
-      return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
-    });
+  let next = rows;
+  if (existing && existing.pinned === incoming.pinned) {
+    // Edits keep their place in the server order.
+    next = rows.map((row, i) => (i === index ? incoming : row));
+  } else if (existing || allowInsert) {
+    next = insertNotification(rows.filter((row) => row !== existing), incoming);
+  }
+  return next.filter((row) => !unreadOnly || !row.read);
+}
+
+function notificationPages(value: unknown): Page<Notification>[] {
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const pages = Array.isArray(record.pages) ? record.pages : [value];
+  return pages.filter((page): page is Page<Notification> =>
+    Boolean(page) && typeof page === "object" && Array.isArray((page as { data?: unknown }).data));
+}
+
+/**
+ * A pin change moves a row to where the server's pin order puts it, which a
+ * partially loaded list can't place, so such lists are refetched instead.
+ */
+export function pinChangeNeedsRefetch(value: unknown, incoming: Notification): boolean {
+  const pages = notificationPages(value);
+  const existing = pages
+    .flatMap((page) => page.data)
+    .find((row) => row.notification_id === incoming.notification_id);
+  if (!existing || existing.pinned === incoming.pinned || incoming.version < existing.version) return false;
+  return pages.length > 1 || Boolean(pages[0]?.page?.has_more);
 }
 
 export function updateNotificationCache(
@@ -381,6 +417,10 @@ function updateNotificationCaches(
 ): void {
   for (const [queryKey, current] of queryClient.getQueriesData({ queryKey: ["notifications"] })) {
     if (!Array.isArray(queryKey)) continue;
+    if (pinChangeNeedsRefetch(current, incoming)) {
+      void queryClient.invalidateQueries({ queryKey, exact: true });
+      continue;
+    }
     const unreadOnly = queryKey[1] === "unread" || queryKey[2] === "unread";
     queryClient.setQueryData(queryKey, updateNotificationCache(current, incoming, unreadOnly));
   }
@@ -1600,6 +1640,7 @@ export function useNotifications(options: { unread?: boolean; limit?: number } =
     queryFn: ({ pageParam }) =>
       apiPage<Notification>(
         `/api/v1/notifications${buildQuery({
+          sort: "pinned",
           unread: unread ? "true" : undefined,
           limit,
           cursor: pageParam,
@@ -1618,7 +1659,7 @@ export function useUnreadNotifications(enabled = true) {
   return useQuery({
     queryKey: ["notifications", "unread"],
     queryFn: () =>
-      apiPage<Notification>(`/api/v1/notifications${buildQuery({ unread: "true", limit: 50 })}`),
+      apiPage<Notification>(`/api/v1/notifications${buildQuery({ sort: "pinned", unread: "true", limit: 50 })}`),
     enabled,
     staleTime: Infinity,
     refetchOnMount: false,
