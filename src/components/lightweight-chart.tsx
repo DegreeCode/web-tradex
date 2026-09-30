@@ -10,11 +10,9 @@ import {
   HistogramSeries,
   type IChartApi,
   type IPaneApi,
-  type IPriceLine,
   type LogicalRange,
   type ISeriesApi,
   LastPriceAnimationMode,
-  LineStyle,
   type MouseEventParams,
   type Time,
   type UTCTimestamp,
@@ -22,7 +20,7 @@ import {
 import { useTheme } from "next-themes";
 
 import { fmtPrice, fmtQuantity } from "@/lib/format";
-import { canIncrementallyUpdate, resolveEffectivePriceLine } from "@/lib/chart-updates";
+import { canIncrementallyUpdate } from "@/lib/chart-updates";
 import { calculateVolumePaneHeight, setVolumePaneRatio } from "@/lib/preferences";
 
 const UP_COLOR = "#f04452";
@@ -71,7 +69,6 @@ interface LineChartProps {
   color: string;
   valueLabel: string;
   valueFormatter: (value: number) => string;
-  lastPrice?: string | number | null;
   pricePrecision?: number;
   volume?: LightweightVolumePoint[];
   emptyMessage: string;
@@ -214,6 +211,14 @@ function rawDecimal(value: string | undefined, fallback: number, formatter: (val
   return formatter(fallback);
 }
 
+function areaColors(color: string) {
+  return { lineColor: color, topColor: `${color}28`, bottomColor: `${color}00` };
+}
+
+function closeLinePoint({ time, close, timestamp, closeText }: LightweightCandlePoint): LightweightLinePoint {
+  return { time, value: close, timestamp, valueText: closeText };
+}
+
 function chartThemeOptions(resolvedTheme: string | undefined) {
   const theme = resolvedTheme === "dark" ? CHART_THEMES.dark : CHART_THEMES.light;
   return {
@@ -226,11 +231,16 @@ function chartThemeOptions(resolvedTheme: string | undefined) {
   };
 }
 
-function useChartTheme(chartRef: React.RefObject<IChartApi | null>, hasData: boolean, height: number) {
+function useChartTheme(
+  chartRef: React.RefObject<IChartApi | null>,
+  hasData: boolean,
+  height: number,
+  seriesType?: ChartSeriesType,
+) {
   const { resolvedTheme } = useTheme();
   useEffect(() => {
     chartRef.current?.applyOptions(chartThemeOptions(resolvedTheme));
-  }, [chartRef, hasData, height, resolvedTheme]);
+  }, [chartRef, hasData, height, resolvedTheme, seriesType]);
 }
 
 function chartOptions(height: number) {
@@ -240,7 +250,6 @@ function chartOptions(height: number) {
     layout: {
       background: { type: ColorType.Solid, color: "transparent" },
       textColor: CHART_THEMES.light.text,
-      attributionLogo: false,
     },
     grid: {
       vertLines: { color: CHART_THEMES.light.grid },
@@ -304,7 +313,6 @@ export function LightweightLineChart({
   color,
   valueLabel,
   valueFormatter,
-  lastPrice,
   pricePrecision,
   volume = [],
   emptyMessage,
@@ -314,7 +322,6 @@ export function LightweightLineChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area", Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
-  const priceLineRef = useRef<IPriceLine | null>(null);
   const previousRef = useRef<LightweightLinePoint[]>([]);
   const previousVolumeRef = useRef<LightweightVolumePoint[]>([]);
   const dataRef = useRef(data);
@@ -326,16 +333,6 @@ export function LightweightLineChart({
   const hasData = data.length >= 2;
 
   const latest = data[data.length - 1];
-  const priceLineResult = lastPrice == null ? null : resolveEffectivePriceLine({
-    lastPrice,
-    latestPointPrice: latest?.value ?? null,
-    baselinePrice: data[0]?.value ?? null,
-    upColor: color,
-    downColor: color,
-  });
-
-  const linePrice = priceLineResult?.price;
-  const lineColor = priceLineResult?.color;
 
   useEffect(() => {
     dataRef.current = data;
@@ -353,12 +350,8 @@ export function LightweightLineChart({
     if (!container) return;
     const chart = createChart(container, chartOptions(height));
     const series = chart.addSeries(AreaSeries, {
-      lineColor: colorRef.current,
-      topColor: `${colorRef.current}28`,
-      bottomColor: `${colorRef.current}00`,
+      ...areaColors(colorRef.current),
       lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
       lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
       ...(pricePrecisionRef.current === undefined
         ? {}
@@ -399,10 +392,6 @@ export function LightweightLineChart({
       chart.unsubscribeCrosshairMove(crosshairHandler);
       chart.timeScale().unsubscribeSizeChange(setPlotWidth);
       resizeObserver.disconnect();
-      if (seriesRef.current && priceLineRef.current) {
-        seriesRef.current.removePriceLine(priceLineRef.current);
-      }
-      priceLineRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -416,37 +405,7 @@ export function LightweightLineChart({
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
-    if (linePrice === undefined) {
-      if (priceLineRef.current) {
-        series.removePriceLine(priceLineRef.current);
-        priceLineRef.current = null;
-      }
-      return;
-    }
-    if (priceLineRef.current) {
-      priceLineRef.current.applyOptions({
-        price: linePrice,
-        color: lineColor,
-        axisLabelColor: lineColor,
-      });
-    } else {
-      priceLineRef.current = series.createPriceLine({
-        price: linePrice,
-        color: lineColor,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: "",
-        axisLabelColor: lineColor,
-        axisLabelTextColor: "#ffffff",
-      });
-    }
-  }, [linePrice, lineColor, hasData, height]);
-
-  useEffect(() => {
-    const series = seriesRef.current;
-    if (!series) return;
-    series.applyOptions({ lineColor: color, topColor: `${color}28`, bottomColor: `${color}00` });
+    series.applyOptions(areaColors(color));
     if (pricePrecision !== undefined) series.applyOptions({ priceFormat: priceFormat(pricePrecision) });
     updateLineSeries(series, previousRef.current, data);
     previousRef.current = data;
@@ -487,10 +446,12 @@ export function LightweightLineChart({
   );
 }
 
+export type ChartSeriesType = "candle" | "line";
+
 interface CandleChartProps {
   data: LightweightCandlePoint[];
   height: number;
-  lastPrice?: string | number | null;
+  seriesType?: ChartSeriesType;
   pricePrecision?: number;
   emptyMessage: string;
   ariaLabel: string;
@@ -502,7 +463,7 @@ interface CandleChartProps {
 export function LightweightCandleChart({
   data,
   height,
-  lastPrice,
+  seriesType = "candle",
   pricePrecision,
   emptyMessage,
   ariaLabel,
@@ -512,9 +473,8 @@ export function LightweightCandleChart({
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
-  const priceLineRef = useRef<IPriceLine | null>(null);
   const previousRef = useRef<LightweightCandlePoint[]>([]);
   const previousVolumeRef = useRef<LightweightVolumePoint[]>([]);
   const dataRef = useRef(data);
@@ -525,18 +485,9 @@ export function LightweightCandleChart({
   const hasData = data.length > 0;
 
   const latest = data[data.length - 1];
-  const priceLineResult = resolveEffectivePriceLine({
-    // Use the same committed candle for the line and OHLC. Tickers and trades
-    // can arrive before a candle catch-up finishes, or lag behind its response.
-    lastPrice: latest?.close ?? lastPrice,
-    latestPointPrice: latest?.close ?? null,
-    baselinePrice: latest?.open ?? null,
-    upColor: UP_COLOR,
-    downColor: DOWN_COLOR,
-  });
-
-  const linePrice = priceLineResult?.price;
-  const lineColor = priceLineResult?.color;
+  // The line view follows the direction of the whole loaded period.
+  const lineColor = latest && latest.close < data[0].open ? DOWN_COLOR : UP_COLOR;
+  const lineColorRef = useRef(lineColor);
 
   useEffect(() => {
     dataRef.current = data;
@@ -544,23 +495,31 @@ export function LightweightCandleChart({
   useEffect(() => {
     pricePrecisionRef.current = pricePrecision;
   }, [pricePrecision]);
+  useEffect(() => {
+    lineColorRef.current = lineColor;
+  }, [lineColor]);
 
   useEffect(() => {
     if (!hasData) return;
     const container = containerRef.current;
     if (!container) return;
     const chart = createChart(container, chartOptions(height));
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: UP_COLOR,
-      downColor: DOWN_COLOR,
-      borderUpColor: UP_COLOR,
-      borderDownColor: DOWN_COLOR,
-      wickUpColor: UP_COLOR,
-      wickDownColor: DOWN_COLOR,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      priceFormat: priceFormat(pricePrecisionRef.current),
-    });
+    const series = seriesType === "line"
+      ? chart.addSeries(AreaSeries, {
+          ...areaColors(lineColorRef.current),
+          lineWidth: 2,
+          lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
+          priceFormat: priceFormat(pricePrecisionRef.current),
+        })
+      : chart.addSeries(CandlestickSeries, {
+          upColor: UP_COLOR,
+          downColor: DOWN_COLOR,
+          borderUpColor: UP_COLOR,
+          borderDownColor: DOWN_COLOR,
+          wickUpColor: UP_COLOR,
+          wickDownColor: DOWN_COLOR,
+          priceFormat: priceFormat(pricePrecisionRef.current),
+        });
     const volumeSeries = dataRef.current.some((point) => point.volumeValue > 0 || point.volume === "0")
       ? chart.addSeries(HistogramSeries, {
           priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
@@ -595,10 +554,6 @@ export function LightweightCandleChart({
       chart.unsubscribeCrosshairMove(crosshairHandler);
       chart.timeScale().unsubscribeSizeChange(setPlotWidth);
       resizeObserver.disconnect();
-      if (seriesRef.current && priceLineRef.current) {
-        seriesRef.current.removePriceLine(priceLineRef.current);
-      }
-      priceLineRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -606,44 +561,20 @@ export function LightweightCandleChart({
       previousRef.current = [];
       previousVolumeRef.current = [];
     };
-  }, [hasData, height]);
-  useChartTheme(chartRef, hasData, height);
-
-  useEffect(() => {
-    const series = seriesRef.current;
-    if (!series) return;
-    if (linePrice === undefined) {
-      if (priceLineRef.current) {
-        series.removePriceLine(priceLineRef.current);
-        priceLineRef.current = null;
-      }
-      return;
-    }
-    if (priceLineRef.current) {
-      priceLineRef.current.applyOptions({
-        price: linePrice,
-        color: lineColor,
-        axisLabelColor: lineColor,
-      });
-    } else {
-      priceLineRef.current = series.createPriceLine({
-        price: linePrice,
-        color: lineColor,
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: "",
-        axisLabelColor: lineColor,
-        axisLabelTextColor: "#ffffff",
-      });
-    }
-  }, [linePrice, lineColor, hasData, height]);
+  }, [hasData, height, seriesType]);
+  useChartTheme(chartRef, hasData, height, seriesType);
 
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
     if (pricePrecision !== undefined) series.applyOptions({ priceFormat: priceFormat(pricePrecision) });
-    updateCandleSeries(series, previousRef.current, data);
+    if (series.seriesType() === "Area") {
+      const area = series as ISeriesApi<"Area", Time>;
+      area.applyOptions(areaColors(lineColor));
+      updateLineSeries(area, previousRef.current.map(closeLinePoint), data.map(closeLinePoint));
+    } else {
+      updateCandleSeries(series as ISeriesApi<"Candlestick", Time>, previousRef.current, data);
+    }
     previousRef.current = data;
     if (volumeSeriesRef.current) {
       updateVolumeSeries(
@@ -662,7 +593,7 @@ export function LightweightCandleChart({
       color: point.close >= point.open ? `${UP_COLOR}99` : `${DOWN_COLOR}99`,
     }));
     setHovered((current) => (current && data.some((item) => item.time === current.time) ? current : null));
-  }, [data, height, pricePrecision]);
+  }, [data, height, lineColor, pricePrecision, seriesType]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -685,7 +616,7 @@ export function LightweightCandleChart({
     };
     timeScale.subscribeVisibleLogicalRangeChange(onRangeChange);
     return () => timeScale.unsubscribeVisibleLogicalRangeChange(onRangeChange);
-  }, [hasData, height, hasOlder, loadingOlder, onLoadOlder]);
+  }, [hasData, height, seriesType, hasOlder, loadingOlder, onLoadOlder]);
 
   const active = hovered ?? latest;
   if (data.length === 0 || !active) {
