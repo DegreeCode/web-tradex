@@ -66,6 +66,11 @@ export async function fetchAllPages<T>(path: string): Promise<T[]> {
   return collected;
 }
 
+// The listing create response encodes an empty tag list as null.
+export function withTagList(symbol: MarketSymbol): MarketSymbol {
+  return Array.isArray(symbol.tags) ? symbol : { ...symbol, tags: [] };
+}
+
 export function isMarketSymbol(value: unknown): value is MarketSymbol {
   if (!value || typeof value !== "object") return false;
   const row = value as Record<string, unknown>;
