@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import {
+  type ChartSeriesType,
   LightweightCandleChart,
   type LightweightCandlePoint,
 } from "@/components/lightweight-chart";
@@ -11,14 +12,14 @@ import type { Candle } from "@/lib/types";
 
 export function CandleChart({
   candles,
-  lastPrice,
-  height = 260,
+  seriesType,
+  height = 300,
   onLoadOlder,
   hasOlder,
   loadingOlder,
 }: {
   candles: Candle[];
-  lastPrice?: string | number | null;
+  seriesType?: ChartSeriesType;
   height?: number;
   onLoadOlder?: () => void;
   hasOlder?: boolean;
@@ -67,10 +68,10 @@ export function CandleChart({
     <LightweightCandleChart
       data={data}
       height={height}
-      lastPrice={lastPrice}
-      pricePrecision={Math.max(pricePrecision, decimalPrecision(String(lastPrice ?? "")))}
+      seriesType={seriesType}
+      pricePrecision={pricePrecision}
       emptyMessage="캔들 데이터가 아직 없어요"
-      ariaLabel="가격 캔들 차트"
+      ariaLabel={seriesType === "line" ? "가격 라인 차트" : "가격 캔들 차트"}
       onLoadOlder={onLoadOlder}
       hasOlder={hasOlder}
       loadingOlder={loadingOlder}

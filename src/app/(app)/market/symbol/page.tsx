@@ -8,6 +8,8 @@ import {
   ArrowLeft,
   ArrowUpRight,
   CalendarClock,
+  ChartCandlestick,
+  ChartLine,
   Clock,
   FilePenLine,
   FileText,
@@ -24,6 +26,7 @@ import {
 
 import { useAuth } from "@/components/auth-provider";
 import { CandleChart } from "@/components/candle-chart";
+import type { ChartSeriesType } from "@/components/lightweight-chart";
 import { ManagerPanel, ManagerTransferInbox } from "@/components/manager-panel";
 import { ResponsiveOrderForm } from "@/components/responsive-order-form";
 import { PriceChart } from "@/components/price-chart";
@@ -450,6 +453,7 @@ function SymbolDetail() {
   const { user } = useAuth();
   const { interval, updateInterval, hydrated: intervalHydrated } = useCandleIntervalPreference();
   const [selectedDisclosure, setSelectedDisclosure] = useState<Disclosure | null>(null);
+  const [chartSeriesType, setChartSeriesType] = useState<ChartSeriesType>("candle");
   const instrumentQuery = useInstrument(symbol || undefined);
   const canonicalSymbol = instrumentQuery.data?.symbol;
   const tradesQuery = useSymbolTrades(canonicalSymbol, 150);
@@ -494,7 +498,7 @@ function SymbolDetail() {
               {failed ? (
                 <ErrorBlock message={errorMessage(instrumentQuery.error)} onRetry={() => void instrumentQuery.refetch()} />
               ) : (
-                <LoadingBlock className="h-[220px] rounded-xl bg-app-gray-50 py-0" />
+                <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
               )}
               <Segmented<CandleInterval> value={interval} onChange={updateInterval} options={INTERVALS} className="mt-3" />
             </Surface>
@@ -637,6 +641,15 @@ function SymbolDetail() {
                   {option.label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setChartSeriesType((current) => (current === "candle" ? "line" : "candle"))}
+                aria-label={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
+                title={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
+                className="flex shrink-0 items-center rounded-lg px-2 py-1 text-app-gray-500 hover:bg-app-gray-100"
+              >
+                {chartSeriesType === "candle" ? <ChartCandlestick className="size-4" /> : <ChartLine className="size-4" />}
+              </button>
             </div>
 
             <div className="mt-2">
@@ -644,17 +657,17 @@ function SymbolDetail() {
                 <ErrorBlock message={errorMessage(candlesQuery.error)} onRetry={() => void candlesQuery.refetch()} />
               ) : !intervalHydrated ||
               (candles.length === 0 && (candlesQuery.isLoading || candlesQuery.isPending)) ? (
-                <LoadingBlock className="h-[220px] rounded-xl bg-app-gray-50 py-0" />
+                <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
               ) : candles.length > 0 ? (
                 <CandleChart
                   candles={candles}
-                  lastPrice={instrument.last_price}
+                  seriesType={chartSeriesType}
                   onLoadOlder={candlesQuery.loadOlder}
                   hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
                   loadingOlder={candlesQuery.isLoadingOlder}
                 />
               ) : (
-                <PriceChart trades={trades} lastPrice={instrument.last_price} />
+                <PriceChart trades={trades} />
               )}
               {candlesQuery.olderError ? (
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-app-gray-500">

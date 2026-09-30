@@ -18,11 +18,9 @@ function toChartTime(timestamp: string): number | null {
 
 export function PriceChart({
   trades,
-  lastPrice,
-  height = 220,
+  height = 300,
 }: {
   trades: PublicTrade[];
-  lastPrice?: string | number | null;
   height?: number;
 }) {
   const chartData = useMemo<{ points: LightweightLinePoint[]; volume: LightweightVolumePoint[]; pricePrecision: number }>(() => {
@@ -85,8 +83,7 @@ export function PriceChart({
       color={color}
       valueLabel="최근 체결"
       valueFormatter={fmtPrice}
-      lastPrice={lastPrice ?? points[points.length - 1]?.value}
-      pricePrecision={Math.max(chartData.pricePrecision, decimalPrecision(String(lastPrice ?? "")))}
+      pricePrecision={chartData.pricePrecision}
       volume={chartData.volume}
       emptyMessage={points.length === 0 ? "체결 데이터가 아직 없어요" : "차트를 그릴 체결이 더 필요해요"}
       ariaLabel="최근 체결 가격 차트"
