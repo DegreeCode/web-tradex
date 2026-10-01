@@ -1,13 +1,14 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { onSessionExpired } from "@/lib/api";
-import { useMe } from "@/lib/hooks";
+import { authStatus, type AuthStatus } from "@/lib/auth-status";
+import { clearSessionCache, useMe } from "@/lib/hooks";
 import type { User } from "@/lib/types";
 
-export type AuthStatus = "loading" | "authenticated" | "anonymous" | "recovery";
+export type { AuthStatus };
 
 interface AuthValue {
   status: AuthStatus;
@@ -36,19 +37,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? String((query.error as { code?: string }).code)
         : undefined;
 
-    let status: AuthStatus = "loading";
-    if (data) status = "authenticated";
-    else if (data === null) status = "anonymous";
-    else if (query.isError) status = errorCode === "RECOVERY_RESTRICTED" ? "recovery" : "anonymous";
+    const status = authStatus(data, query.isError, errorCode);
 
     return {
       status,
-      user: data ?? null,
+      user: status === "authenticated" ? data ?? null : null,
       refresh: () => {
         void queryClient.invalidateQueries({ queryKey: ["me"] });
       },
     };
   }, [query.data, query.error, query.isError, queryClient]);
+
+  // Private queries aren't keyed by user, so the cache must not outlive the
+  // account that filled it: a session that ends drops it, and a different
+  // account signing in refetches what is on screen.
+  const signedInUserId = useRef<string | null>(null);
+  const userId = value.status === "authenticated" ? value.user?.user_id ?? null : null;
+  useEffect(() => {
+    if (value.status === "loading") return;
+    const previous = signedInUserId.current;
+    signedInUserId.current = userId;
+    if (previous === null || previous === userId) return;
+    if (userId === null) {
+      void clearSessionCache(queryClient);
+    } else {
+      void queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== "me" });
+    }
+  }, [value.status, userId, queryClient]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

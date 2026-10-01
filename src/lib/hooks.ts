@@ -90,7 +90,7 @@ import {
   writeSymbolMetadataCache,
   type SymbolMetadataCache,
 } from "./symbol-metadata";
-import { closeSocket, getSocket, type WsKind, type WsStatus } from "./ws";
+import { closeSocket, getSocket, type TradexSocket, type WsKind, type WsStatus } from "./ws";
 import { isPositiveDecimal } from "./format";
 
 const PAGE_SIZE = 30;
@@ -1355,18 +1355,28 @@ export function useRotateRecoveryKeys() {
   });
 }
 
+/**
+ * Drops everything cached under the current session except the observed auth
+ * query, so the next account never sees the previous one's data.
+ */
+export async function clearSessionCache(queryClient: QueryClient): Promise<void> {
+  const notMe = (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== "me";
+  closeSocket("private");
+  await queryClient.cancelQueries({ predicate: notMe });
+  queryClient.removeQueries({ predicate: notMe });
+  queryClient.getMutationCache().clear();
+}
+
 export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => postData<{ status: string }>("/api/v1/auth/logout", {}),
     onSettled: async () => {
-      closeSocket("private");
-      await queryClient.cancelQueries();
+      await queryClient.cancelQueries({ queryKey: ["me"], exact: true });
       // Keep the observed auth query so AuthProvider receives the anonymous
       // state before navigation, even when the logout request failed.
       queryClient.setQueryData(["me"], null);
-      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "me" });
-      queryClient.getMutationCache().clear();
+      await clearSessionCache(queryClient);
     },
   });
 }
@@ -2220,6 +2230,40 @@ function invalidateNotificationKeys(
   invalidateBatched(queryClient, passive, { passive: true });
 }
 
+/**
+ * Private streams have no replay/resume, so a gap is reconciled over REST:
+ * once when it happens, and again when the next connection opens, because
+ * changes made between that refetch and the reconnect were never delivered.
+ * Repeated failed reconnects must not turn this into a poller.
+ */
+export function resyncPrivateStreamGaps(
+  socket: Pick<TradexSocket, "onFrame" | "onGap" | "onStatus">,
+  reconcile: () => void,
+): () => void {
+  let reconciliationRequested = false;
+  let resyncOnOpen = false;
+  const offFrame = socket.onFrame((frame) => {
+    if (frame.type === "update") reconciliationRequested = false;
+  });
+  const offGap = socket.onGap(() => {
+    resyncOnOpen = true;
+    if (reconciliationRequested) return;
+    reconciliationRequested = true;
+    reconcile();
+  });
+  const offStatus = socket.onStatus((status) => {
+    if (status !== "open" || !resyncOnOpen) return;
+    resyncOnOpen = false;
+    reconciliationRequested = false;
+    reconcile();
+  });
+  return () => {
+    offFrame();
+    offGap();
+    offStatus();
+  };
+}
+
 export function usePrivateStream(enabled: boolean) {
   const queryClient = useQueryClient();
   const handlerRef = useRef<(frame: WsFrame) => void>(() => {});
@@ -2284,16 +2328,8 @@ export function usePrivateStream(enabled: boolean) {
     if (!enabled) return;
     const socket = getSocket("private");
     const release = socket.retain();
-    let reconciliationRequested = false;
-    const off = socket.onFrame((frame) => {
-      if (frame.type === "update") reconciliationRequested = false;
-      handlerRef.current(frame);
-    });
-    const offGap = socket.onGap(() => {
-      // Private streams have no replay/resume. Reconcile once for this gap;
-      // repeated failed reconnects must not turn this into a poller.
-      if (reconciliationRequested) return;
-      reconciliationRequested = true;
+    const off = socket.onFrame((frame) => handlerRef.current(frame));
+    const offResync = resyncPrivateStreamGaps(socket, () => {
       invalidateMarginQueries(queryClient);
       invalidateNotificationKeys(queryClient, [
         "notifications",
@@ -2310,7 +2346,7 @@ export function usePrivateStream(enabled: boolean) {
     });
     return () => {
       off();
-      offGap();
+      offResync();
       release();
     };
   }, [enabled, queryClient]);
