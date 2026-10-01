@@ -323,7 +323,7 @@ function SymbolDetail() {
                 onClick={() => setChartSeriesType((current) => (current === "candle" ? "line" : "candle"))}
                 aria-label={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
                 title={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
-                className="ml-auto flex min-h-8 shrink-0 items-center rounded-lg px-2 text-app-gray-500 hover:bg-app-gray-100"
+                className="flex min-h-8 shrink-0 items-center rounded-lg px-2 text-app-gray-500 hover:bg-app-gray-100"
               >
                 {chartSeriesType === "candle" ? <CandleModeIcon /> : <LineModeIcon rising={periodRising} />}
               </button>
