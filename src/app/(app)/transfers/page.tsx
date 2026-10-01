@@ -23,8 +23,7 @@ import type { Transfer } from "@/lib/types";
 type Tab = "INBOX" | "SENT" | "ALL";
 
 interface MergedTransfer {
-  base: Transfer;
-  detail: Transfer | undefined;
+  transfer: Transfer;
   direction: "SENT" | "RECEIVED" | null;
 }
 
@@ -40,10 +39,14 @@ export default function TransfersPage() {
     () => transfersQuery.data?.pages.flatMap((page) => page.data) ?? [],
     [transfersQuery.data],
   );
-  // The list omits party IDs, so direction needs the detail. Pending transfers
-  // need it for the inbox/sent tabs and actions; settled ones only for "ALL".
+  // List rows carry the party IDs. Only a backend that predates them needs the
+  // detail per row: for pending rows (inbox/sent tabs and actions), and for
+  // settled ones on "ALL".
   const detailTargets = useMemo(
-    () => (tab === "ALL" ? items : items.filter((item) => item.status === "PENDING")),
+    () =>
+      items.filter(
+        (item) => !item.sender_user_id && (tab === "ALL" || item.status === "PENDING"),
+      ),
     [items, tab],
   );
   const details = useTransferDetails(detailTargets);
@@ -53,21 +56,21 @@ export default function TransfersPage() {
       detailTargets.map((item, index) => [item.transfer_id, details[index]?.data]),
     );
     return items.map((item) => {
-      const detail = detailById.get(item.transfer_id);
-      const direction = detail
-        ? detail.sender_user_id === user?.user_id
+      const transfer = detailById.get(item.transfer_id) ?? item;
+      const direction = transfer.sender_user_id
+        ? transfer.sender_user_id === user?.user_id
           ? "SENT"
           : "RECEIVED"
         : null;
-      return { base: item, detail, direction };
+      return { transfer, direction };
     });
   }, [items, details, detailTargets, user?.user_id]);
 
   const inbox = merged.filter(
-    (entry) => entry.direction === "RECEIVED" && entry.base.status === "PENDING",
+    (entry) => entry.direction === "RECEIVED" && entry.transfer.status === "PENDING",
   );
   const sent = merged.filter(
-    (entry) => entry.direction === "SENT" && entry.base.status === "PENDING",
+    (entry) => entry.direction === "SENT" && entry.transfer.status === "PENDING",
   );
   const visible = tab === "INBOX" ? inbox : tab === "SENT" ? sent : merged;
   const detailsLoading = details.some((detail) => detail.isLoading);
@@ -147,7 +150,7 @@ export default function TransfersPage() {
       ) : (
         <div className="grid gap-2 xl:grid-cols-2">
           {visible.map((entry) => {
-            const transfer = entry.detail ?? entry.base;
+            const { transfer } = entry;
             const pending = transfer.status === "PENDING";
             const incoming = entry.direction === "RECEIVED";
             return (
