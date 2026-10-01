@@ -86,7 +86,7 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 | 주문 | `/orders` | `GET /orders`, `POST /orders/{id}/cancellation`, `GET /me/trades` |
 | 투자 | `/portfolio` | `GET /me/nav`, `/me/nav/history`, `/me/accounts/{id}/portfolio/history`, `/me/realized-pnl` |
 | 마진 | `/margin` | `GET/POST /margin/positions`, `/margin/positions/{id}/…`, `POST …/simulation` |
-| 송금 | `/transfers` | `GET/POST /transfers`, `GET /transfers/{id}`, `PATCH /transfers/{id}/recipient-decision`, `POST /transfers/{id}/cancellation` |
+| 송금 | `/transfers` | `GET/POST /transfers`, `GET /transfers/{id}` (목록에 당사자 ID가 없는 이전 백엔드에서만), `PATCH /transfers/{id}/recipient-decision`, `POST /transfers/{id}/cancellation` |
 | 계좌 | `/accounts` | `GET/POST /me/accounts`, `DELETE /me/accounts/{id}` |
 | 보안 | `/security` | `/me/passkeys*`, `/me/sessions*`, `/me/recovery-keys/rotate`, `/auth/logout` |
 | 종목 상장 | `/listings/new` | `POST /symbols` |
