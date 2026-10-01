@@ -22,6 +22,8 @@ import {
   isDecimalInput,
   isPositiveDecimal,
   multiplyDecimal,
+  fmtCredit,
+  fmtQuantity,
   ppmFromPercent,
   toNumber,
 } from "./format";
@@ -48,6 +50,8 @@ export interface MarginEligibility {
 }
 
 export interface MarginPosition {
+  /** Only on the response of the entry/reduction/closure that produced it. */
+  execution?: MarginExecution;
   position_id: string;
   account_id: string;
   symbol: string;
@@ -70,6 +74,33 @@ export interface MarginPosition {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+}
+
+export type MarginLimitReason =
+  | "BORROW_LIMIT"
+  | "SLIPPAGE"
+  | "POOL_INVENTORY"
+  | "CREDIT_BALANCE"
+  | "POOL_CREDIT"
+  | "RISK_LIMIT"
+  | "NUMERIC_LIMIT";
+
+/** Actual (or simulated) fill of one margin request; the server may clip it to what is executable. */
+export interface MarginExecution {
+  action: "OPEN" | "REDUCE" | "CLOSE";
+  // OPEN only.
+  requested_collateral?: string;
+  used_collateral?: string;
+  unused_collateral?: string;
+  // REDUCE / CLOSE only.
+  requested_quantity?: string;
+  filled_quantity: string;
+  partially_filled: boolean;
+  limit_reasons: string[];
+  principal: string;
+  fee: string;
+  total_debit: string;
+  net_proceeds: string;
 }
 
 export interface MarginPositionsPage {
@@ -109,6 +140,9 @@ export interface MarginClosureRequest {
 }
 
 export interface MarginSimulation {
+  execution?: MarginExecution;
+  /** Entry simulation only: the largest collateral executable right now, not capped by the request. */
+  max_collateral?: string;
   action: "OPEN" | "REDUCE" | "CLOSE";
   account_id: string;
   symbol: string;
@@ -153,6 +187,41 @@ const MARGIN_ERROR_MESSAGES: Record<string, string> = {
   SYMBOL_DELISTED: "상장폐지된 종목이에요",
   IDEMPOTENCY_KEY_REUSED: "동일한 요청이 이미 처리 중이거나 완료되었어요",
 };
+
+const MARGIN_LIMIT_REASON_LABELS: Record<MarginLimitReason, string> = {
+  BORROW_LIMIT: "차입 한도",
+  SLIPPAGE: "슬리피지",
+  POOL_INVENTORY: "풀 재고",
+  CREDIT_BALANCE: "가용 Credit",
+  POOL_CREDIT: "풀 지급 여력",
+  RISK_LIMIT: "위험 기준",
+  NUMERIC_LIMIT: "금액·수량 한도",
+};
+
+export function marginLimitReasonLabel(reason: string): string {
+  return MARGIN_LIMIT_REASON_LABELS[reason as MarginLimitReason] ?? reason;
+}
+
+/** One-line explanation of how much of a clipped margin request was filled and why. */
+export function marginPartialFillText(execution: MarginExecution): string {
+  const amount = execution.action === "OPEN"
+    ? `요청 담보 ${fmtCredit(execution.requested_collateral)} Credit 중 ${fmtCredit(execution.used_collateral)} Credit 사용`
+    : `요청 ${fmtQuantity(execution.requested_quantity)}주 중 ${fmtQuantity(execution.filled_quantity)}주 정산`;
+  const reasons = execution.limit_reasons.map(marginLimitReasonLabel).join("·");
+  return reasons ? `${amount} · 제한: ${reasons}` : amount;
+}
+
+/**
+ * Validates the server's maximum collateral (from a simulation or the
+ * details of a zero-fill rejection) without converting it to a Number.
+ */
+export function marginMaxCollateral(source: unknown): string | null {
+  const value =
+    source instanceof ApiError ? source.details?.max_collateral : source;
+  if (typeof value !== "string") return null;
+  if (value === "0") return "0";
+  return isDecimalInput(value, 16) && isPositiveDecimal(value) ? value : null;
+}
 
 // risk_ratio_ppm = equity ÷ debt × 1,000,000; lower is riskier.
 export function isMarginRiskAtOrBelow(
