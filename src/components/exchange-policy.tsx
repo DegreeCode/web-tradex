@@ -35,11 +35,8 @@ export function TradePolicy() {
   return (
     <div className="space-y-1 text-[12px] leading-5 text-app-gray-500">
       {data && (
-        <p>
-          거래 수수료 {fmtPercentFromPPM(data.trade.fee_ppm, 4)} · 기본 슬리피지{" "}
-          {fmtPercentFromPPM(data.trade.default_slippage_ppm, 4)} · 최대{" "}
-          {fmtPercentFromPPM(data.trade.max_slippage_ppm, 4)}
-        </p>
+        // Slippage default and maximum are explained in the slippage field's tooltip.
+        <p>거래 수수료 {fmtPercentFromPPM(data.trade.fee_ppm, 4)}</p>
       )}
       <ExchangeInfoNotice />
     </div>
