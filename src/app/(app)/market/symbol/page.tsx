@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState, useSyncExternalStore } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Activity,
@@ -50,6 +50,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { errorMessage } from "@/lib/api";
+import { updatePreferences, usePreferences } from "@/lib/preferences";
 import {
   changePercent,
   compareDecimal,
@@ -83,7 +84,6 @@ const INTERVALS: { value: CandleInterval; label: string }[] = [
 ];
 
 const DEFAULT_CANDLE_INTERVAL: CandleInterval = "1h";
-const CANDLE_INTERVAL_STORAGE_KEY = "tradex:candle-interval:v1";
 const SUPPORTED_CANDLE_INTERVALS: readonly CandleInterval[] = [
   "1s",
   "1m",
@@ -102,65 +102,14 @@ function isSupportedCandleInterval(value: string | null): value is CandleInterva
   return value !== null && SUPPORTED_CANDLE_INTERVALS.includes(value as CandleInterval);
 }
 
-let candleIntervalPreference: CandleInterval | undefined;
-const candleIntervalListeners = new Set<() => void>();
-
-function readStoredCandleInterval(): CandleInterval {
-  try {
-    const stored = window.localStorage.getItem(CANDLE_INTERVAL_STORAGE_KEY);
-    return isSupportedCandleInterval(stored) ? stored : DEFAULT_CANDLE_INTERVAL;
-  } catch {
-    return DEFAULT_CANDLE_INTERVAL;
-  }
-}
-
-function getCandleIntervalSnapshot(): CandleInterval | null {
-  if (typeof window === "undefined") return null;
-  if (!candleIntervalPreference) candleIntervalPreference = readStoredCandleInterval();
-  return candleIntervalPreference;
-}
-
-function subscribeToCandleInterval(onChange: () => void) {
-  if (typeof window === "undefined") return () => {};
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== CANDLE_INTERVAL_STORAGE_KEY) return;
-    candleIntervalPreference = isSupportedCandleInterval(event.newValue)
-      ? event.newValue
-      : DEFAULT_CANDLE_INTERVAL;
-    candleIntervalListeners.forEach((listener) => listener());
-  };
-  candleIntervalListeners.add(onChange);
-  window.addEventListener("storage", onStorage);
-  return () => {
-    candleIntervalListeners.delete(onChange);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-function getServerCandleIntervalSnapshot(): null {
-  return null;
-}
-
 function useCandleIntervalPreference() {
-  const storedInterval = useSyncExternalStore(
-    subscribeToCandleInterval,
-    getCandleIntervalSnapshot,
-    getServerCandleIntervalSnapshot,
-  );
-  const interval = storedInterval ?? DEFAULT_CANDLE_INTERVAL;
-
+  const stored = usePreferences();
+  const storedInterval = stored?.candleInterval ?? null;
+  const interval = isSupportedCandleInterval(storedInterval) ? storedInterval : DEFAULT_CANDLE_INTERVAL;
   const updateInterval = (next: CandleInterval) => {
-    if (!SUPPORTED_CANDLE_INTERVALS.includes(next)) return;
-    candleIntervalPreference = next;
-    try {
-      window.localStorage.setItem(CANDLE_INTERVAL_STORAGE_KEY, next);
-    } catch {
-      // Keep the in-memory preference when browser storage is unavailable.
-    }
-    candleIntervalListeners.forEach((listener) => listener());
+    if (SUPPORTED_CANDLE_INTERVALS.includes(next)) updatePreferences({ candleInterval: next });
   };
-
-  return { interval, updateInterval, hydrated: storedInterval !== null };
+  return { interval, updateInterval, hydrated: stored !== null };
 }
 
 type DisclosureTone = "blue" | "green" | "orange" | "red" | "gray";
