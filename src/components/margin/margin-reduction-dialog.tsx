@@ -1,9 +1,15 @@
 "use client";
 
-import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
+import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
-import { useSlippagePreference } from "@/lib/preferences";
+import { useInstrument } from "@/lib/hooks";
+import {
+  liveReferencePrice,
+  slippageRequestFields,
+  slippageSettingsError,
+  useSlippageSettings,
+} from "@/lib/slippage";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
@@ -26,7 +32,6 @@ import {
   isMarginRiskAtOrBelow,
   marginErrorMessage,
   marginPartialFillText,
-  marginSlippageFields,
   useReduceMarginPosition,
   validateReductionQuantity,
   type MarginPosition,
@@ -45,8 +50,8 @@ export function MarginReductionDialog({
   const inputId = useId();
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [slippagePercent, setSlippagePercent] = useSlippagePreference();
-  const [referencePrice, setReferencePrice] = useState("");
+  const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
+  const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
   const reduceMutation = useReduceMarginPosition(position?.position_id ?? "");
 
   if (!position) return null;
@@ -57,18 +62,23 @@ export function MarginReductionDialog({
     position.risk_ratio_ppm,
     exchangeInfo?.margin.maintenance_ppm,
   );
+  // Exiting a Long sells and exiting a Short buys back.
+  const exitSide = position.side === "LONG" ? "SELL" : "BUY";
+  const referencePrice = liveReferencePrice(slippageSettings, curvePrice);
   const isValid = !errorText && !belowMaintenance;
-  const payload = isValid && !slippageError(slippagePercent, exchangeInfo?.trade)
-    ? { quantity: quantity.trim(), ...marginSlippageFields(slippagePercent, referencePrice) }
+  const payload = isValid && !slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
+    ? { quantity: quantity.trim(), ...slippageRequestFields(slippageSettings) }
     : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const invalidSlippage = slippageError(slippagePercent, exchangeInfo?.trade);
+    const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!payload || !position) return;
     try {
-      const result = await reduceMutation.mutateAsync(payload);
+      const result = await reduceMutation.mutateAsync(
+        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
+      );
       if (result.execution?.partially_filled) {
         toast.warning("요청 수량 중 일부만 정산했어요", {
           description: `${marginPartialFillText(result.execution)}. 나머지는 자동으로 다시 주문되지 않아요.`,
@@ -186,15 +196,17 @@ export function MarginReductionDialog({
                 aria-hidden="true"
                 className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
               />
-              고급 설정 (슬리피지)
+              고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
             {showAdvanced ? (
               <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
-                  slippage={slippagePercent}
-                  onSlippageChange={setSlippagePercent}
-                  referencePrice={referencePrice}
-                  onReferencePriceChange={setReferencePrice}
+                  side={exitSide}
+                  settings={slippageSettings}
+                  onModeChange={setSlippageMode}
+                  onSlippageChange={setSlippage}
+                  onLimitPriceChange={setLimitPrice}
+                  currentPrice={curvePrice}
                 />
               </div>
             ) : null}
@@ -203,6 +215,7 @@ export function MarginReductionDialog({
           <MarginSimulationPreview
             path={`/api/v1/margin/positions/${position.position_id}/reductions/simulation`}
             payload={payload}
+            referencePrice={referencePrice}
           />
 
           <div className="flex flex-wrap justify-end gap-2 pt-2">

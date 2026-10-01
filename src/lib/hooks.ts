@@ -439,13 +439,17 @@ function invalidateTrading(queryClient: QueryClient) {
   }
 }
 
-export function useOrderSimulation(payload: OrderSimulationRequest | null) {
+/**
+ * The live reference price stays out of the key so a price tick does not drop
+ * a shown quote; each explicit refetch sends the price current at that moment.
+ */
+export function useOrderSimulation(payload: OrderSimulationRequest | null, referencePrice?: string) {
   return useQuery({
     queryKey: ["order-simulation", payload],
     queryFn: ({ signal }) =>
       apiData<OrderSimulation>("/api/v1/orders/simulation", {
         method: "POST",
-        body: payload,
+        body: payload && referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
         signal,
       }),
     // Quotes are requested explicitly and never reused after the inputs change.

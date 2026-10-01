@@ -1,11 +1,17 @@
 "use client";
 
 import { useAuth } from "@/components/auth-provider";
-import { managerMarginSideBlocked, useExchangeInfo, slippageError } from "@/lib/exchange-info";
+import { managerMarginSideBlocked, useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy, MarginInterestPolicy } from "@/components/exchange-policy";
 import { InfoTip } from "@/components/info-tip";
 import { SlippageFields } from "@/components/slippage-fields";
-import { useSlippagePreference } from "@/lib/preferences";
+import {
+  liveReferencePrice,
+  slippageRequestFields,
+  slippageSettingsError,
+  slippageSummary,
+  useSlippageSettings,
+} from "@/lib/slippage";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react";
@@ -28,7 +34,6 @@ import {
   getLeverageOptions,
   marginErrorMessage,
   marginPartialFillText,
-  marginSlippageFields,
   useCreateMarginPosition,
   validateCollateralAmount,
   validateLeverage,
@@ -69,10 +74,11 @@ export function MarginCreateForm({
   const [leverage, setLeverage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
-  const [slippagePercent, setSlippagePercent] = useSlippagePreference();
-  const [referencePrice, setReferencePrice] = useState("");
+  const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
 
   const selectedInstrument = useInstrument(resolvedSymbol).data;
+  // A Long opens by buying, a Short by selling.
+  const tradeSide = side === "LONG" ? "BUY" : "SELL";
   const createMutation = useCreateMarginPosition();
 
   // Active leverage cap from eligibility
@@ -110,16 +116,17 @@ export function MarginCreateForm({
     !leverageError &&
     currentAccountId &&
     resolvedSymbol &&
-    !slippageError(slippagePercent, exchangeInfo?.trade)
+    !slippageSettingsError(slippageSettings, tradeSide, exchangeInfo?.trade)
       ? {
           account_id: currentAccountId,
           symbol: resolvedSymbol,
           side,
           collateral: collateral.trim(),
           leverage: resolvedLeverage,
-          ...marginSlippageFields(slippagePercent, referencePrice),
+          ...slippageRequestFields(slippageSettings),
         }
       : null;
+  const referencePrice = liveReferencePrice(slippageSettings, selectedInstrument?.curve_spot_price);
 
   const canSubmit =
     !collateralError &&
@@ -151,12 +158,14 @@ export function MarginCreateForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const invalidSlippage = slippageError(slippagePercent, exchangeInfo?.trade);
+    const invalidSlippage = slippageSettingsError(slippageSettings, tradeSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!canSubmit || !payload) return;
 
     try {
-      const position = await createMutation.mutateAsync(payload);
+      const position = await createMutation.mutateAsync(
+        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
+      );
       const label = `${resolvedSymbol} ${side === "LONG" ? "롱" : "숏"} 포지션`;
       // The server clips entry to the executable collateral; the rest stays in the account.
       if (position.execution?.partially_filled) {
@@ -182,7 +191,6 @@ export function MarginCreateForm({
         ? `강제청산이 누적되어 ${fmtDateTime(eligibility.blocked_until)}까지 신규 개설이 제한돼요.`
         : "신규 개설 요건(유효 거래일 수 등)을 아직 충족하지 않았어요."
     : null;
-  const defaultSlippage = exchangeInfo ? `${exchangeInfo.trade.default_slippage_ppm / 10_000}%` : null;
 
   return (
     <Surface className="min-w-0 break-words">
@@ -237,7 +245,10 @@ export function MarginCreateForm({
             id="margin-symbol"
             disabled={instrumentsQuery.isPending || instruments.length === 0}
             value={resolvedSymbol}
-            onChange={(e) => setSymbol(e.target.value)}
+            onChange={(e) => {
+              setSymbol(e.target.value);
+              setLimitPrice("");
+            }}
             className="mt-1.5 w-full min-w-0 max-w-full rounded-xl bg-app-gray-100 px-3 py-2.5 text-base md:text-[15px] font-semibold text-app-gray-900 focus:outline-2 focus:outline-app-blue"
           >
             {instruments.length === 0 ? <option value="">{instrumentsQuery.isPending ? "종목 불러오는 중…" : "선택할 종목이 없어요"}</option> : null}
@@ -260,7 +271,11 @@ export function MarginCreateForm({
 
         <Segmented
           value={side}
-          onChange={(val) => setSide(val as MarginSide)}
+          onChange={(val) => {
+            setSide(val as MarginSide);
+            // A Long's buy cap means nothing as a Short's sell floor.
+            setLimitPrice("");
+          }}
           options={[
             { value: "LONG", label: "롱 · 오르면 수익", tone: "buy" },
             { value: "SHORT", label: "숏 · 내리면 수익", tone: "sell" },
@@ -383,6 +398,7 @@ export function MarginCreateForm({
         <MarginSimulationPreview
           path="/api/v1/margin/positions/simulation"
           payload={payload}
+          referencePrice={referencePrice}
           onApplyMaxCollateral={setCollateral}
         />
 
@@ -395,17 +411,19 @@ export function MarginCreateForm({
           >
             고급 설정
             <span className="flex items-center gap-1 font-medium text-app-gray-400">
-              {slippagePercent.trim() ? `슬리피지 ${slippagePercent.trim()}%` : defaultSlippage ? `슬리피지 ${defaultSlippage}` : null}
+              {slippageSummary(slippageSettings, tradeSide, exchangeInfo?.trade.default_slippage_ppm, fmtPrice)}
               <ChevronDown className={`size-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
             </span>
           </button>
           {showAdvanced ? (
             <div className="space-y-2.5 rounded-xl bg-app-gray-50 p-3">
               <SlippageFields
-                slippage={slippagePercent}
-                onSlippageChange={setSlippagePercent}
-                referencePrice={referencePrice}
-                onReferencePriceChange={setReferencePrice}
+                side={tradeSide}
+                settings={slippageSettings}
+                onModeChange={setSlippageMode}
+                onSlippageChange={setSlippage}
+                onLimitPriceChange={setLimitPrice}
+                currentPrice={selectedInstrument?.curve_spot_price}
               />
             </div>
           ) : null}

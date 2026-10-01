@@ -24,7 +24,6 @@ import {
   multiplyDecimal,
   fmtCredit,
   fmtQuantity,
-  ppmFromPercent,
   toNumber,
 } from "./format";
 import { invalidateBatched } from "./query-batch";
@@ -231,17 +230,6 @@ export function isMarginRiskAtOrBelow(
   return riskRatioPpm !== null && thresholdPpm !== undefined && riskRatioPpm <= thresholdPpm;
 }
 
-/** Optional slippage fields shared by margin previews and their real requests. */
-export function marginSlippageFields(
-  slippagePercent: string,
-  referencePrice: string,
-): { slippage_ppm?: number; slippage_reference_price?: string } {
-  return {
-    ...(slippagePercent.trim() ? { slippage_ppm: ppmFromPercent(slippagePercent.trim()) } : {}),
-    ...(referencePrice.trim() ? { slippage_reference_price: referencePrice.trim() } : {}),
-  };
-}
-
 export type MarginRiskLevel = "SAFE" | "WARNING" | "MAINTENANCE";
 
 export function marginRiskLevel(
@@ -434,11 +422,16 @@ export function useMarginPosition(positionId: string | null) {
 }
 
 /** Read-only preview; requested explicitly and never reused after the inputs change. */
-export function useMarginSimulation(path: string | null, payload: object | null) {
+/** Like useOrderSimulation, the live reference price is sent but kept out of the key. */
+export function useMarginSimulation(path: string | null, payload: object | null, referencePrice?: string) {
   return useQuery({
     queryKey: ["margin-simulation", path, payload],
     queryFn: ({ signal }) =>
-      apiData<MarginSimulation>(path ?? "", { method: "POST", body: payload, signal }),
+      apiData<MarginSimulation>(path ?? "", {
+        method: "POST",
+        body: payload && referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
+        signal,
+      }),
     enabled: false,
     gcTime: 0,
     retry: false,

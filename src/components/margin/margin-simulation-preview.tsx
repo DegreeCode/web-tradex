@@ -21,14 +21,17 @@ function ResultRow({ label, value }: { label: string; value: string }) {
 export function MarginSimulationPreview({
   path,
   payload,
+  referencePrice,
   onApplyMaxCollateral,
 }: {
   path: string;
   payload: object | null;
+  /** Live slippage reference, sent with each check but not part of the request identity. */
+  referencePrice?: string;
   /** Entry only: lets the user copy the server's maximum collateral into the form. */
   onApplyMaxCollateral?: (collateral: string) => void;
 }) {
-  const simulation = useMarginSimulation(payload ? path : null, payload);
+  const simulation = useMarginSimulation(payload ? path : null, payload, referencePrice);
   const quote = simulation.data;
   // A zero-fill rejection still reports the maximum in error.details.
   const maxCollateral = simulation.isFetching
