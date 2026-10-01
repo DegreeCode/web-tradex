@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { markNotificationsReadInCaches } from "../src/lib/hooks";
+import { markNotificationsReadInCaches } from "../src/lib/notification-cache";
 import type { Notification, Page } from "../src/lib/types";
 
 const notification = (id: number, read = false): Notification => ({

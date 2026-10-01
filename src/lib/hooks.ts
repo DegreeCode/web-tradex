@@ -26,13 +26,64 @@ import {
   appendCandleHistoryWithGaps,
   applyTradeToCandlePage,
   fillCandleGaps,
-  isCandleInterval,
   mergeCandles,
   type CandlePage,
 } from "./candle-data";
-import { parseTradingNotification, parseNotificationBody, eventKeyFromTitle } from "./notifications";
+import {
+  candleFetchTrades,
+  candleRuntime,
+  candleTradeRuntimes,
+  rememberTradeSequence,
+  requestCandleRecovery,
+  updateCachedCandleQueries,
+  type CandleTradeRuntime,
+} from "./candle-cache";
+import { isPositiveDecimal } from "./format";
 import { invalidateMarginQueries } from "./margin";
+import {
+  MARKET_STATE_CACHE_KEY,
+  applySymbolMetadataCache,
+  applySymbolMetadataDelta,
+  applySymbolTradingState,
+  applyTradePriceOverlay,
+  applyTradingNotification,
+  cacheSymbolMetadata,
+  canonicalSymbol,
+  clearTradePriceOverlay,
+  composeCachedInstruments,
+  composeInstrument,
+  findCachedTicker,
+  isMarketState,
+  noteMarketStateTime,
+  noteSymbolMetadataTimes,
+  readMarketStateCache,
+  refreshSymbolMetadata,
+  updateTradePriceOverlay,
+  writeMarketStateCache,
+} from "./market-cache";
+import {
+  isNotification,
+  markNotificationsReadInCaches,
+  notificationFromPrivateFrame,
+  updateNotificationCaches,
+} from "./notification-cache";
+import { eventKeyFromTitle, parseNotificationBody } from "./notifications";
 import { invalidateBatched } from "./query-batch";
+import {
+  SYMBOL_METADATA_CACHE_KEY,
+  SYMBOL_METADATA_SYNC_MS,
+  adoptSymbolMetadataCache,
+  clearSymbolMetadataCache,
+  ensureSymbolMetadataCache,
+  fetchAllPages,
+  isInitialSymbolMetadataValidationDone,
+  parseSymbolMetadataCache,
+  readSymbolMetadataCache,
+  runInitialSymbolMetadataValidation,
+  runSymbolMetadataSync,
+  withTagList,
+  type SymbolMetadataCache,
+} from "./symbol-metadata";
 import type {
   Account,
   Candle,
@@ -73,144 +124,11 @@ import type {
   User,
   WsFrame,
 } from "./types";
-import {
-  SYMBOL_METADATA_CACHE_KEY,
-  SYMBOL_METADATA_SYNC_MS,
-  adoptSymbolMetadataCache,
-  clearSymbolMetadataCache,
-  ensureSymbolMetadataCache,
-  fetchAllPages,
-  isInitialSymbolMetadataValidationDone,
-  isMarketSymbol,
-  parseSymbolMetadataCache,
-  readSymbolMetadataCache,
-  runInitialSymbolMetadataValidation,
-  runSymbolMetadataSync,
-  withTagList,
-  writeSymbolMetadataCache,
-  type SymbolMetadataCache,
-} from "./symbol-metadata";
 import { closeSocket, getSocket, type TradexSocket, type WsKind, type WsStatus } from "./ws";
-import { isPositiveDecimal } from "./format";
 
 const PAGE_SIZE = 30;
 const TICKER_ORDER_LIMIT = 100;
 const TICKER_ORDER_CACHE_MS = 60_000;
-export const MARKET_STATE_CACHE_KEY = "tradex:market-state:v1";
-const MAX_TRACKED_TRADE_SEQUENCES = 2_000;
-
-interface CandleTradeRuntime {
-  snapshotReady: boolean;
-  lastSequence?: number;
-  seenSequences: Set<number>;
-  pendingSequences: Set<number>;
-  recoveryInFlight: boolean;
-  awaitingSnapshotRecovery: boolean;
-}
-
-interface TradePriceOverlay {
-  sequence: number;
-  price: string;
-}
-
-const candleTradeRuntimes = new Map<string, CandleTradeRuntime>();
-const candleFetchTrades = new Map<string, PublicTrade[]>();
-// Public trades carry a per-symbol sequence, while Ticker has no sequence or
-// as-of field. Keep the newest accepted trade price as a small detail-view
-// overlay so a slower ticker frame cannot visibly roll the last execution back.
-const tradePriceOverlays = new Map<string, TradePriceOverlay>();
-
-function candleRuntime(symbol: string): CandleTradeRuntime {
-  let runtime = candleTradeRuntimes.get(symbol);
-  if (!runtime) {
-    runtime = {
-      snapshotReady: false,
-      seenSequences: new Set(),
-      pendingSequences: new Set(),
-      recoveryInFlight: false,
-      awaitingSnapshotRecovery: false,
-    };
-    candleTradeRuntimes.set(symbol, runtime);
-  }
-  return runtime;
-}
-
-function rememberTradeSequence(runtime: CandleTradeRuntime, sequence: number): void {
-  runtime.seenSequences.add(sequence);
-  while (runtime.seenSequences.size > MAX_TRACKED_TRADE_SEQUENCES) {
-    const oldest = runtime.seenSequences.values().next().value;
-    if (oldest === undefined) break;
-    runtime.seenSequences.delete(oldest);
-  }
-}
-
-function updateCachedCandleQueries(
-  queryClient: QueryClient,
-  symbol: string,
-  trade: PublicTrade,
-): { updated: boolean; needsRecovery: boolean } {
-  let updated = false;
-  let needsRecovery = false;
-  for (const [queryKey, unknownPage] of queryClient.getQueriesData<unknown>({
-    queryKey: ["candles", symbol],
-  })) {
-    if (!Array.isArray(queryKey) || queryKey[1] !== symbol) continue;
-    const interval = queryKey[2];
-    const limit = queryKey[3];
-    if (!isCandleInterval(interval) || typeof limit !== "number" || !Number.isInteger(limit)) continue;
-    const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-    if (!query?.isActive()) continue;
-    if (query.state.fetchStatus === "fetching") {
-      const pending = candleFetchTrades.get(JSON.stringify(queryKey));
-      if (pending) pending.push(trade);
-      else needsRecovery = true;
-      continue;
-    }
-    if (!unknownPage || typeof unknownPage !== "object" || !Array.isArray((unknownPage as Page<Candle>).data)) {
-      continue;
-    }
-    if (query.state.status === "error") {
-      needsRecovery = true;
-      continue;
-    }
-    const syncedThrough = (unknownPage as CandlePage).syncedThrough;
-    if (syncedThrough && Date.parse(trade.timestamp) < Date.parse(syncedThrough)) continue;
-    const result = applyTradeToCandlePage(unknownPage as Page<Candle>, interval, limit, trade);
-    if (result.status === "recovery") {
-      needsRecovery = true;
-    } else if (result.data) {
-      updated = true;
-      const nextData = result.data;
-      queryClient.setQueryData<Page<Candle>>(queryKey, (current) => {
-        if (!current) return current;
-        return { ...current, data: nextData };
-      });
-    }
-  }
-  return { updated, needsRecovery };
-}
-
-function requestCandleRecovery(
-  queryClient: QueryClient,
-  symbol: string,
-  runtime: CandleTradeRuntime,
-  requiresSnapshot = false,
-): void {
-  if (requiresSnapshot) {
-    if (runtime.awaitingSnapshotRecovery) return;
-    runtime.awaitingSnapshotRecovery = true;
-  }
-  if (runtime.recoveryInFlight) return;
-  runtime.recoveryInFlight = true;
-  runtime.pendingSequences.clear();
-  void queryClient
-    .invalidateQueries({ queryKey: ["candles", symbol], refetchType: "active" }, { cancelRefetch: false })
-    .catch(() => undefined)
-    .finally(() => {
-      runtime.recoveryInFlight = false;
-      runtime.pendingSequences.clear();
-    });
-}
 
 export function useMe() {
   return useQuery({
@@ -219,30 +137,6 @@ export function useMe() {
     retry: false,
     staleTime: 60_000,
   });
-}
-
-export function readMarketStateCache(): MarketState | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const raw = window.localStorage.getItem(MARKET_STATE_CACHE_KEY);
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw);
-    if (parsed && (parsed.state === "RUNNING" || parsed.state === "GLOBAL_HALTED")) {
-      return parsed as MarketState;
-    }
-  } catch {
-    // Ignore storage issues
-  }
-  return undefined;
-}
-
-export function writeMarketStateCache(state: MarketState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(MARKET_STATE_CACHE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage issues
-  }
 }
 
 export function useMarketState() {
@@ -254,667 +148,6 @@ export function useMarketState() {
     refetchInterval: publicStatus === "open" ? false : 15_000,
     staleTime: 10_000,
   });
-}
-
-function composeInstrument(symbol: MarketSymbol, ticker?: Ticker): Instrument {
-  return {
-    ...symbol,
-    symbol: symbol.symbol,
-    last_price: ticker?.last_price ?? "0",
-    curve_spot_price: ticker?.curve_spot_price ?? "0",
-    market_value: ticker?.market_value ?? "0",
-    holder_count: ticker?.holder_count ?? 0,
-    open: ticker?.open ?? "0",
-    high: ticker?.high ?? "0",
-    low: ticker?.low ?? "0",
-    volume_shares: ticker?.volume_shares ?? "0",
-    volume_credit: ticker?.volume_credit ?? "0",
-    change_ppm: ticker?.change_ppm ?? 0,
-    trade_count: ticker?.trade_count ?? 0,
-    window_start: ticker?.window_start ?? "",
-  };
-}
-
-function updateTradePriceOverlay(symbol: string, trade: PublicTrade): void {
-  if (!Number.isSafeInteger(trade.sequence) || typeof trade.price !== "string" || !trade.price) return;
-  const previous = tradePriceOverlays.get(symbol);
-  if (previous && trade.sequence <= previous.sequence) return;
-  tradePriceOverlays.set(symbol, { sequence: trade.sequence, price: trade.price });
-}
-
-function clearTradePriceOverlay(symbol: string): void {
-  tradePriceOverlays.delete(symbol);
-}
-
-function clearAllTradePriceOverlays(): void {
-  tradePriceOverlays.clear();
-}
-
-function applyTradePriceOverlay(instrument: Instrument): Instrument {
-  const overlay = tradePriceOverlays.get(instrument.symbol);
-  return overlay ? { ...instrument, last_price: overlay.price } : instrument;
-}
-
-function isNotification(value: unknown): value is Notification {
-  if (!value || typeof value !== "object") return false;
-  const row = value as Record<string, unknown>;
-  return (
-    typeof row.notification_id === "string" &&
-    typeof row.kind === "string" &&
-    typeof row.title === "string" &&
-    typeof row.body === "string" &&
-    typeof row.version === "number" &&
-    Number.isSafeInteger(row.version) &&
-    typeof row.pinned === "boolean" &&
-    typeof row.read === "boolean" &&
-    typeof row.created_at === "string" &&
-    typeof row.updated_at === "string" &&
-    (row.expires_at === null || typeof row.expires_at === "string")
-  );
-}
-
-function notificationFromPrivateFrame(frame: WsFrame): Notification | null {
-  if (!frame.data || typeof frame.data !== "object") return null;
-  const outer = frame.data as Record<string, unknown>;
-  return isNotification(outer.data) ? outer.data : null;
-}
-
-function createdTime(row: Notification): number {
-  const time = Date.parse(row.created_at);
-  return Number.isFinite(time) ? time : 0;
-}
-
-// Lists use sort=pinned: the most recently pinned rows first, then unpinned
-// rows newest first. The pin time isn't exposed, so a row that becomes pinned
-// is treated as the latest pin.
-function insertNotification(rows: Notification[], incoming: Notification): Notification[] {
-  const index = incoming.pinned
-    ? 0
-    : rows.findIndex((row) => !row.pinned && createdTime(row) < createdTime(incoming));
-  return index < 0 ? [...rows, incoming] : [...rows.slice(0, index), incoming, ...rows.slice(index)];
-}
-
-function mergeNotificationRows(
-  rows: Notification[],
-  incoming: Notification,
-  unreadOnly: boolean,
-  allowInsert: boolean,
-): Notification[] {
-  const index = rows.findIndex((row) => row.notification_id === incoming.notification_id);
-  const existing = index >= 0 ? rows[index] : undefined;
-  if (existing && incoming.version < existing.version) return rows;
-  let next = rows;
-  if (existing && existing.pinned === incoming.pinned) {
-    // Edits keep their place in the server order.
-    next = rows.map((row, i) => (i === index ? incoming : row));
-  } else if (existing || allowInsert) {
-    next = insertNotification(rows.filter((row) => row !== existing), incoming);
-  }
-  return next.filter((row) => !unreadOnly || !row.read);
-}
-
-function notificationPages(value: unknown): Page<Notification>[] {
-  if (!value || typeof value !== "object") return [];
-  const record = value as Record<string, unknown>;
-  const pages = Array.isArray(record.pages) ? record.pages : [value];
-  return pages.filter((page): page is Page<Notification> =>
-    Boolean(page) && typeof page === "object" && Array.isArray((page as { data?: unknown }).data));
-}
-
-/**
- * A pin change moves a row to where the server's pin order puts it, which a
- * partially loaded list can't place, so such lists are refetched instead.
- */
-export function pinChangeNeedsRefetch(value: unknown, incoming: Notification): boolean {
-  const pages = notificationPages(value);
-  const existing = pages
-    .flatMap((page) => page.data)
-    .find((row) => row.notification_id === incoming.notification_id);
-  if (!existing || existing.pinned === incoming.pinned || incoming.version < existing.version) return false;
-  return pages.length > 1 || Boolean(pages[0]?.page?.has_more);
-}
-
-export function updateNotificationCache(
-  value: unknown,
-  incoming: Notification,
-  unreadOnly: boolean,
-): unknown {
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  if (Array.isArray(record.pages)) {
-    const pages = record.pages as unknown[];
-    return {
-      ...record,
-      pages: pages.map((page, index) => {
-        if (!page || typeof page !== "object" || !Array.isArray((page as { data?: unknown }).data)) {
-          return page;
-        }
-        const pageRecord = page as Record<string, unknown>;
-        return {
-          ...pageRecord,
-          data: mergeNotificationRows(
-            pageRecord.data as Notification[],
-            incoming,
-            unreadOnly,
-            index === 0,
-          ),
-        };
-      }),
-    };
-  }
-  if (Array.isArray(record.data) && record.page && typeof record.page === "object") {
-    return {
-      ...record,
-      data: mergeNotificationRows(record.data as Notification[], incoming, unreadOnly, true),
-    };
-  }
-  return value;
-}
-
-function updateNotificationCaches(
-  queryClient: QueryClient,
-  incoming: Notification,
-): void {
-  for (const [queryKey, current] of queryClient.getQueriesData({ queryKey: ["notifications"] })) {
-    if (!Array.isArray(queryKey)) continue;
-    if (pinChangeNeedsRefetch(current, incoming)) {
-      void queryClient.invalidateQueries({ queryKey, exact: true });
-      continue;
-    }
-    const unreadOnly = queryKey[1] === "unread" || queryKey[2] === "unread";
-    queryClient.setQueryData(queryKey, updateNotificationCache(current, incoming, unreadOnly));
-  }
-  // A truncated unread page cannot tell how many unseen rows remain after a read.
-  const unread = queryClient.getQueryData<Page<Notification>>(["notifications", "unread"]);
-  if (incoming.read && unread?.page.has_more) {
-    void queryClient.invalidateQueries({ queryKey: ["notifications", "unread"] });
-  }
-}
-
-function mapNotificationRows(
-  value: unknown,
-  map: (rows: Notification[]) => Notification[],
-  exhausted: boolean,
-): unknown {
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  const mapPage = (page: unknown) => {
-    if (!page || typeof page !== "object" || !Array.isArray((page as { data?: unknown }).data)) return page;
-    const pageRecord = page as Page<Notification>;
-    return {
-      ...pageRecord,
-      data: map(pageRecord.data),
-      page: exhausted ? { has_more: false, next_cursor: null } : pageRecord.page,
-    };
-  };
-  if (Array.isArray(record.pages)) return { ...record, pages: record.pages.map(mapPage) };
-  return mapPage(value);
-}
-
-/**
- * Applies a successful read to cached lists instead of refetching them. `all`
- * means every notification was read, so unread lists become complete and empty.
- */
-export function markNotificationsReadInCaches(
-  queryClient: QueryClient,
-  ids: ReadonlySet<string> | "all",
-): void {
-  const matches = (row: Notification) => ids === "all" || ids.has(row.notification_id);
-  for (const [queryKey, current] of queryClient.getQueriesData({ queryKey: ["notifications"] })) {
-    if (!Array.isArray(queryKey)) continue;
-    const unreadOnly = queryKey[1] === "unread" || queryKey[2] === "unread";
-    queryClient.setQueryData(queryKey, mapNotificationRows(
-      current,
-      (rows) => unreadOnly
-        ? rows.filter((row) => !matches(row))
-        : rows.map((row) => (matches(row) && !row.read ? { ...row, read: true } : row)),
-      unreadOnly && ids === "all",
-    ));
-  }
-  // Unread rows beyond a truncated page may now move into it.
-  const unread = queryClient.getQueryData<Page<Notification>>(["notifications", "unread"]);
-  if (ids !== "all" && unread?.page.has_more) {
-    void queryClient.invalidateQueries({ queryKey: ["notifications", "unread"] });
-  }
-}
-
-function composeInstruments(symbols: MarketSymbol[], tickers: Ticker[] = []): Instrument[] {
-  const tickerBySymbol = new Map(tickers.map((ticker) => [ticker.symbol, ticker]));
-  return symbols.map((symbol) => composeInstrument(symbol, tickerBySymbol.get(symbol.symbol)));
-}
-
-function composeCachedInstruments(
-  symbols: MarketSymbol[],
-  queryClient: QueryClient,
-): Instrument[] {
-  return composeInstruments(symbols, queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? []);
-}
-
-function applySymbolMetadataCache(
-  queryClient: QueryClient,
-  cache: SymbolMetadataCache,
-): void {
-  queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
-    const previous = new Map(old?.map((instrument) => [instrument.symbol, instrument]));
-    const tickers = new Map(
-      (queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? []).map((ticker) => [
-        ticker.symbol,
-        ticker,
-      ]),
-    );
-    return cache.symbols.map((symbol) =>
-      composeInstrument(symbol, tickers.get(symbol.symbol) ?? previous.get(symbol.symbol)),
-    );
-  });
-}
-
-function applySymbolMetadataDelta(
-  queryClient: QueryClient,
-  previous: SymbolMetadataCache,
-  next: SymbolMetadataCache,
-): void {
-  const previousBySymbol = new Map(previous.symbols.map((symbol) => [symbol.symbol, symbol]));
-  const nextBySymbol = new Map(next.symbols.map((symbol) => [symbol.symbol, symbol]));
-  for (const symbol of previous.symbols) {
-    if (!nextBySymbol.has(symbol.symbol)) queryClient.removeQueries({ queryKey: ["instrument", symbol.symbol] });
-  }
-  const tickers = queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? [];
-  for (const symbol of next.symbols) {
-    const before = previousBySymbol.get(symbol.symbol);
-    if (
-      before?.version === symbol.version &&
-      before.updated_at === symbol.updated_at &&
-      before.state === symbol.state
-    ) {
-      continue;
-    }
-    const ticker = tickers.find((item) => item.symbol === symbol.symbol);
-    for (const key of [symbol.symbol, symbol.symbol.replace(/\.M$/, "")]) {
-      queryClient.setQueryData<Instrument>(["instrument", key], (old) =>
-        applyTradePriceOverlay(composeInstrument(symbol, ticker ?? old)),
-      );
-    }
-  }
-}
-
-export function compareVersion(a: string | undefined, b: string | undefined): number {
-  if (!a || !b) return 0;
-  if (a === b) return 0;
-  if (/^\d+$/.test(a) && /^\d+$/.test(b)) {
-    try {
-      const diff = BigInt(a) - BigInt(b);
-      return diff > 0n ? 1 : diff < 0n ? -1 : 0;
-    } catch {
-      return a.localeCompare(b);
-    }
-  }
-  return a.localeCompare(b);
-}
-
-export const lastTradingEventTimestamps = new Map<string, number>();
-
-export function applySymbolToQueryCaches(
-  queryClient: QueryClient,
-  symbol: MarketSymbol,
-): void {
-  const sym = symbol.symbol;
-  const shortSym = sym.replace(/\.M$/, "");
-  const tickers = queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? [];
-  const ticker = tickers.find((item) => item.symbol === sym);
-
-  queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
-    if (!old) return old;
-    const idx = old.findIndex((inst) => inst.symbol === sym);
-    if (idx >= 0) {
-      return old.map((inst, i) =>
-        i === idx ? applyTradePriceOverlay(composeInstrument(symbol, ticker ?? inst)) : inst,
-      );
-    }
-    return [...old, applyTradePriceOverlay(composeInstrument(symbol, ticker))];
-  });
-
-  for (const key of [sym, shortSym]) {
-    queryClient.setQueryData<Instrument>(["instrument", key], (old) => {
-      if (!old) return old;
-      return applyTradePriceOverlay(composeInstrument(symbol, ticker ?? old));
-    });
-  }
-}
-
-export function applySymbolTradingState(
-  queryClient: QueryClient,
-  rawSymbol: string,
-  state: InstrumentState,
-  reason?: string | null,
-  haltedAt?: string | null,
-  haltedUntil?: string | null,
-  updatedAt?: string | null,
-  eventTime?: number,
-  version?: string | number,
-): boolean {
-  const symbol = canonicalSymbol(rawSymbol);
-  if (!symbol) return false;
-
-  const parsedEventTime = Number.isFinite(eventTime)
-    ? eventTime
-    : updatedAt
-      ? Date.parse(updatedAt)
-      : haltedAt
-        ? Date.parse(haltedAt)
-        : undefined;
-
-  const lastSeen = lastTradingEventTimestamps.get(symbol);
-  if (lastSeen !== undefined) {
-    if (parsedEventTime === undefined || !Number.isFinite(parsedEventTime) || parsedEventTime <= lastSeen) {
-      return false;
-    }
-  }
-
-  const cache = readSymbolMetadataCache();
-  const existing = cache?.symbols.find((s) => s.symbol === symbol);
-
-  if (existing) {
-    if (version !== undefined && version !== null) {
-      const vComp = compareVersion(String(version), existing.version);
-      if (vComp < 0) return false;
-    }
-
-    const existingTimeStr = existing.updated_at || existing.halted_at;
-    const existingTime = existingTimeStr ? Date.parse(existingTimeStr) : undefined;
-    if (existingTime !== undefined && Number.isFinite(existingTime)) {
-      if (parsedEventTime === undefined || !Number.isFinite(parsedEventTime) || parsedEventTime < existingTime) {
-        return false;
-      }
-    }
-  }
-
-  if (parsedEventTime !== undefined && Number.isFinite(parsedEventTime)) {
-    lastTradingEventTimestamps.set(symbol, parsedEventTime);
-  }
-
-  const effectiveUpdatedAt = updatedAt || (parsedEventTime !== undefined && Number.isFinite(parsedEventTime)
-    ? new Date(parsedEventTime).toISOString()
-    : existing?.updated_at || new Date().toISOString());
-
-  if (cache && existing) {
-    const updatedSymbol: MarketSymbol = {
-      ...existing,
-      state,
-      halt_reason: state === "TRADING" ? null : (reason !== undefined ? reason : existing.halt_reason),
-      halted_at: state === "TRADING" ? null : (haltedAt !== undefined ? haltedAt : (state === "HALTED" ? effectiveUpdatedAt : existing.halted_at)),
-      halted_until: state === "TRADING" ? null : (haltedUntil !== undefined ? haltedUntil : existing.halted_until),
-      updated_at: effectiveUpdatedAt,
-      version: version !== undefined && version !== null ? String(version) : existing.version,
-    };
-
-    const nextCache: SymbolMetadataCache = {
-      ...cache,
-      symbols: cache.symbols.map((s) => (s.symbol === symbol ? updatedSymbol : s)),
-      saved_at: Date.now(),
-    };
-
-    writeSymbolMetadataCache(nextCache);
-    applySymbolToQueryCaches(queryClient, updatedSymbol);
-    return true;
-  }
-
-  return false;
-}
-
-/** Applies an authoritative symbol response to persistent and mounted caches. */
-export function cacheSymbolMetadata(
-  queryClient: QueryClient,
-  fresh: MarketSymbol,
-): void {
-  const current = readSymbolMetadataCache();
-  const existing = current?.symbols.find((s) => s.symbol === fresh.symbol);
-
-  if (existing) {
-    const vComp = compareVersion(fresh.version, existing.version);
-    if (vComp < 0) {
-      return;
-    }
-  }
-
-  const freshTime = Date.parse(fresh.updated_at || "0");
-  if (Number.isFinite(freshTime)) {
-    const currentWatermark = lastTradingEventTimestamps.get(fresh.symbol);
-    lastTradingEventTimestamps.set(
-      fresh.symbol,
-      currentWatermark !== undefined ? Math.max(currentWatermark, freshTime) : freshTime,
-    );
-  }
-
-  if (current) {
-    const idx = current.symbols.findIndex((s) => s.symbol === fresh.symbol);
-    const nextSymbols = idx >= 0
-      ? current.symbols.map((s, i) => (i === idx ? fresh : s))
-      : [...current.symbols, fresh];
-    const nextCache: SymbolMetadataCache = {
-      ...current,
-      symbols: nextSymbols,
-      saved_at: Date.now(),
-    };
-    writeSymbolMetadataCache(nextCache);
-  }
-
-  applySymbolToQueryCaches(queryClient, fresh);
-}
-
-const symbolMetadataRefreshes = new Map<string, Promise<void>>();
-
-/** Shares one in-flight batch request per symbol across WS and notification paths. */
-export function refreshSymbolMetadata(
-  queryClient: QueryClient,
-  rawSymbol: string,
-): Promise<void> {
-  const symbol = canonicalSymbol(rawSymbol);
-  if (!symbol) return Promise.resolve();
-  const inFlight = symbolMetadataRefreshes.get(symbol);
-  if (inFlight) return inFlight;
-  const refresh = fetchSymbolMetadata(queryClient, symbol).finally(() => {
-    symbolMetadataRefreshes.delete(symbol);
-  });
-  symbolMetadataRefreshes.set(symbol, refresh);
-  return refresh;
-}
-
-async function fetchSymbolMetadata(
-  queryClient: QueryClient,
-  symbol: string,
-): Promise<void> {
-  try {
-    const batch = await apiData<MarketSymbol[]>(
-      `/api/v1/market/symbols/batch${buildQuery({ symbols: symbol })}`,
-    );
-    if (!Array.isArray(batch) || batch.length === 0) return;
-    const fresh = batch[0];
-    if (!isMarketSymbol(fresh)) return;
-
-    cacheSymbolMetadata(queryClient, fresh);
-  } catch {
-    // Non-blocking background recovery
-  }
-}
-
-export async function refreshMissingSymbolMetadata(
-  queryClient: QueryClient,
-  rawSymbol: string,
-  targetState?: InstrumentState,
-  haltReason?: string | null,
-  haltedAt?: string | null,
-  createdAt?: string,
-): Promise<void> {
-  const symbol = canonicalSymbol(rawSymbol);
-  if (!symbol) return;
-  try {
-    const batch = await apiData<MarketSymbol[]>(
-      `/api/v1/market/symbols/batch${buildQuery({ symbols: symbol })}`,
-    );
-    if (!Array.isArray(batch) || batch.length === 0) return;
-    const fetched = batch[0];
-    if (!isMarketSymbol(fetched)) return;
-
-    let finalSymbol = fetched;
-    const fetchedTime = Date.parse(fetched.updated_at || "0");
-    let effectiveWatermark = Number.isFinite(fetchedTime) ? fetchedTime : undefined;
-
-    if (targetState && createdAt) {
-      const notifTime = Date.parse(createdAt);
-      if (Number.isFinite(notifTime) && (!Number.isFinite(fetchedTime) || fetchedTime <= notifTime)) {
-        finalSymbol = {
-          ...fetched,
-          state: targetState,
-          halt_reason: haltReason ?? fetched.halt_reason,
-          halted_at: haltedAt ?? fetched.halted_at,
-          updated_at: createdAt,
-        };
-        effectiveWatermark = notifTime;
-      }
-    }
-
-    if (effectiveWatermark !== undefined) {
-      const currentWatermark = lastTradingEventTimestamps.get(finalSymbol.symbol);
-      lastTradingEventTimestamps.set(
-        finalSymbol.symbol,
-        currentWatermark !== undefined ? Math.max(currentWatermark, effectiveWatermark) : effectiveWatermark,
-      );
-    }
-
-    const current = readSymbolMetadataCache() ?? (await ensureSymbolMetadataCache().catch(() => null));
-    if (current) {
-      const idx = current.symbols.findIndex((s) => s.symbol === finalSymbol.symbol);
-      const nextSymbols = idx >= 0
-        ? current.symbols.map((s, i) => (i === idx ? finalSymbol : s))
-        : [...current.symbols, finalSymbol];
-      const nextCache: SymbolMetadataCache = {
-        ...current,
-        symbols: nextSymbols,
-        saved_at: Date.now(),
-      };
-      writeSymbolMetadataCache(nextCache);
-    }
-
-    applySymbolToQueryCaches(queryClient, finalSymbol);
-  } catch {
-    // Non-blocking background recovery
-  }
-}
-
-export function applyTradingNotification(
-  queryClient: QueryClient,
-  notification: Notification,
-): void {
-  const tradingEvent = parseTradingNotification(notification);
-  if (!tradingEvent) return;
-
-  const { eventType, symbol: rawSymbol, reason, halted_until } = tradingEvent;
-  const eventTime = notification.created_at ? Date.parse(notification.created_at) : undefined;
-
-  if (eventType === "GLOBAL_MARKET_HALTED" || eventType === "GLOBAL_MARKET_RESUMED") {
-    const lastGlobalTime = lastTradingEventTimestamps.get("__GLOBAL__");
-    if (lastGlobalTime !== undefined) {
-      if (eventTime === undefined || !Number.isFinite(eventTime) || eventTime <= lastGlobalTime) {
-        return;
-      }
-    }
-
-    const currentMarketState = queryClient.getQueryData<MarketState>(["market-state"]);
-    if (currentMarketState?.changed_at) {
-      const changedAt = Date.parse(currentMarketState.changed_at);
-      if (Number.isFinite(changedAt)) {
-        if (eventTime === undefined || !Number.isFinite(eventTime) || eventTime < changedAt) {
-          return;
-        }
-      }
-    }
-
-    if (eventTime !== undefined && Number.isFinite(eventTime)) {
-      lastTradingEventTimestamps.set("__GLOBAL__", eventTime);
-    }
-
-    const nextState: MarketState = eventType === "GLOBAL_MARKET_HALTED"
-      ? {
-          state: "GLOBAL_HALTED",
-          reason: reason || currentMarketState?.reason || null,
-          halted_at: notification.created_at || currentMarketState?.halted_at || null,
-          halted_until: halted_until ?? currentMarketState?.halted_until ?? null,
-          changed_at: notification.created_at || currentMarketState?.changed_at || new Date().toISOString(),
-        }
-      : {
-          state: "RUNNING",
-          reason: null,
-          halted_at: null,
-          halted_until: null,
-          changed_at: notification.created_at || currentMarketState?.changed_at || new Date().toISOString(),
-        };
-
-    // The public market_state stream (or the disconnected poll) stays authoritative.
-    queryClient.setQueryData<MarketState>(["market-state"], nextState);
-    writeMarketStateCache(nextState);
-    return;
-  }
-
-  if (!rawSymbol) return;
-  const symbol = canonicalSymbol(rawSymbol);
-  if (!symbol) return;
-
-  const payload = (notification as { payload?: Record<string, unknown> }).payload;
-  const version = payload && (typeof payload.version === "string" || typeof payload.version === "number")
-    ? payload.version
-    : undefined;
-
-  let nextState: InstrumentState | undefined;
-  switch (eventType) {
-    case "SYMBOL_HALTED":
-      nextState = "HALTED";
-      break;
-    case "SYMBOL_RESUMED":
-    case "DELIST_CANCELED":
-      nextState = "TRADING";
-      break;
-    case "DELIST_SCHEDULED":
-      nextState = "DELIST_PENDING";
-      break;
-    case "DELISTED":
-      nextState = "DELISTED";
-      break;
-    case "SYMBOL_LISTED":
-      nextState = "TRADING";
-      break;
-    case "SYMBOL_METADATA_CHANGED":
-      void refreshSymbolMetadata(queryClient, symbol);
-      return;
-    default:
-      return;
-  }
-
-  const cache = readSymbolMetadataCache();
-  const existing = cache?.symbols.find((s) => s.symbol === symbol);
-
-  if (cache && existing) {
-    applySymbolTradingState(
-      queryClient,
-      symbol,
-      nextState,
-      reason,
-      notification.created_at,
-      halted_until,
-      notification.created_at,
-      eventTime,
-      version,
-    );
-    void refreshSymbolMetadata(queryClient, symbol);
-  } else {
-    void refreshMissingSymbolMetadata(
-      queryClient,
-      symbol,
-      nextState,
-      reason,
-      notification.created_at,
-      notification.created_at,
-    );
-  }
 }
 
 function useSocketStatus(kind: WsKind): WsStatus {
@@ -933,8 +166,12 @@ function useSocketStatus(kind: WsKind): WsStatus {
 const PRIVATE_LIVE_STALE_MS = 60_000;
 const PRIVATE_POLLED_STALE_MS = 10_000;
 
+function privateStaleTime(status: WsStatus): number {
+  return status === "open" ? PRIVATE_LIVE_STALE_MS : PRIVATE_POLLED_STALE_MS;
+}
+
 function usePrivateStaleTime(): number {
-  return useSocketStatus("private") === "open" ? PRIVATE_LIVE_STALE_MS : PRIVATE_POLLED_STALE_MS;
+  return privateStaleTime(useSocketStatus("private"));
 }
 
 export function useInstruments() {
@@ -977,13 +214,6 @@ export function useTickerOrder(sort: TickerSort) {
   });
 }
 
-function canonicalSymbol(symbol: string | undefined): string | undefined {
-  if (!symbol) return undefined;
-  const trimmed = symbol.trim();
-  if (!trimmed) return undefined;
-  return trimmed.endsWith(".M") ? trimmed : `${trimmed}.M`;
-}
-
 export function useInstrument(symbol: string | undefined) {
   const queryClient = useQueryClient();
   const lookupSymbol = canonicalSymbol(symbol);
@@ -1001,10 +231,7 @@ export function useInstrument(symbol: string | undefined) {
       if (!metadata) {
         throw new ApiError(404, "NOT_FOUND", "종목을 찾을 수 없어요");
       }
-      const ticker = queryClient.getQueryData<Ticker[]>(["ticker-cache"])?.find(
-        (item) => item.symbol === metadata.symbol,
-      );
-      return applyTradePriceOverlay(composeInstrument(metadata, ticker));
+      return applyTradePriceOverlay(composeInstrument(metadata, findCachedTicker(queryClient, metadata.symbol)));
     },
     enabled: Boolean(lookupSymbol),
     staleTime: Infinity,
@@ -1164,7 +391,7 @@ export function useTransfers(scope: "mine" | "approval" = "mine", limit = 50) {
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     refetchInterval: privateStatus === "open" ? false : 30_000,
-    staleTime: privateStatus === "open" ? PRIVATE_LIVE_STALE_MS : PRIVATE_POLLED_STALE_MS,
+    staleTime: privateStaleTime(privateStatus),
   });
 }
 
@@ -1388,8 +615,11 @@ export function useCreateListing() {
       withTagList(await postIdempotentData<MarketSymbol>("/api/v1/symbols", payload)),
     onSuccess: (symbol) => {
       cacheSymbolMetadata(queryClient, symbol);
-      const ticker = queryClient.getQueryData<Ticker[]>(["ticker-cache"])?.find((row) => row.symbol === symbol.symbol);
-      queryClient.setQueryData(["instrument", symbol.symbol], composeInstrument(symbol, ticker));
+      // Seeds the detail view the success handler navigates to.
+      queryClient.setQueryData(
+        ["instrument", symbol.symbol],
+        composeInstrument(symbol, findCachedTicker(queryClient, symbol.symbol)),
+      );
       void queryClient.invalidateQueries({ queryKey: ["instruments"] });
       void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
     },
@@ -1468,7 +698,7 @@ export function useNav() {
     queryKey: ["nav"],
     queryFn: () => apiData<Nav>("/api/v1/me/nav"),
     refetchInterval: privateStatus === "open" ? false : 30_000,
-    staleTime: privateStatus === "open" ? PRIVATE_LIVE_STALE_MS : PRIVATE_POLLED_STALE_MS,
+    staleTime: privateStaleTime(privateStatus),
   });
 }
 
@@ -1720,7 +950,7 @@ export function useInquiries(limit = 30) {
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     refetchInterval: privateStatus === "open" ? false : 60_000,
-    staleTime: privateStatus === "open" ? PRIVATE_LIVE_STALE_MS : PRIVATE_POLLED_STALE_MS,
+    staleTime: privateStaleTime(privateStatus),
   });
 }
 
@@ -1813,30 +1043,25 @@ export function useTickerStream(enabled = true) {
   const applyFrame = (frame: WsFrame) => {
     if (!Array.isArray(frame.data)) return;
     const rows = frame.data as Array<Ticker & { deleted?: boolean }>;
+    const changed = new Map(rows.map((ticker) => [ticker.symbol, ticker]));
     queryClient.setQueryData<Ticker[]>(["ticker-cache"], (old) => {
-      const bySymbol = new Map<string, Ticker>();
-      if (frame.type !== "snapshot") {
-        for (const ticker of old ?? []) bySymbol.set(ticker.symbol, ticker);
-      }
-      for (const ticker of rows) {
-        if (ticker.deleted) bySymbol.delete(ticker.symbol);
-        else bySymbol.set(ticker.symbol, ticker);
-      }
-      return [...bySymbol.values()];
+      if (frame.type === "snapshot" || !old) return rows.filter((ticker) => !ticker.deleted);
+      const known = new Set<string>();
+      const next = old.flatMap((ticker) => {
+        known.add(ticker.symbol);
+        const update = changed.get(ticker.symbol);
+        return !update ? [ticker] : update.deleted ? [] : [update];
+      });
+      for (const ticker of rows) if (!ticker.deleted && !known.has(ticker.symbol)) next.push(ticker);
+      return next;
     });
-    queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
-      if (!old) return old;
-      const bySymbol = new Map(old.map((instrument) => [instrument.symbol, instrument]));
-      for (const ticker of rows) {
-        if (ticker.deleted) {
-          bySymbol.delete(ticker.symbol);
-          continue;
-        }
-        const metadata = bySymbol.get(ticker.symbol);
-        if (metadata) bySymbol.set(ticker.symbol, { ...metadata, ...ticker });
-      }
-      return [...bySymbol.values()];
-    });
+    // Unchanged rows keep their identity, so memoized list rows skip rendering.
+    queryClient.setQueryData<Instrument[]>(["instruments"], (old) =>
+      old?.flatMap((instrument) => {
+        const update = changed.get(instrument.symbol);
+        return !update ? [instrument] : update.deleted ? [] : [{ ...instrument, ...update }];
+      }),
+    );
     for (const ticker of rows) {
       if (ticker.deleted) {
         clearTradePriceOverlay(ticker.symbol);
@@ -1853,7 +1078,7 @@ export function useTickerStream(enabled = true) {
     recoveryRequested.current = false;
     applyFrame(frame);
   }, () => {
-    clearAllTradePriceOverlays();
+    clearTradePriceOverlay();
     // Reconcile once per outage. A newer live frame always wins over this REST read.
     if (recoveryRequested.current) return;
     recoveryRequested.current = true;
@@ -1943,71 +1168,32 @@ export function useDisclosureStream(enabled = true) {
 
 export function useSymbolMetadataSync(enabled = true) {
   const queryClient = useQueryClient();
-  const sinceVersion = useRef<string | null>(null);
-
   useEffect(() => {
     if (!enabled) return;
     let stopped = false;
     let synchronizing = false;
 
-    const applyCachedMetadata = (cache: SymbolMetadataCache) => {
-      sinceVersion.current = cache.next_since_version;
-      applySymbolMetadataCache(queryClient, cache);
-    };
+    const applyCachedMetadata = (cache: SymbolMetadataCache) => applySymbolMetadataCache(queryClient, cache);
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === MARKET_STATE_CACHE_KEY && event.newValue) {
-        try {
-          const state = JSON.parse(event.newValue) as MarketState;
-          if (state && (state.state === "RUNNING" || state.state === "GLOBAL_HALTED")) {
-            queryClient.setQueryData(["market-state"], state);
-            if (state.changed_at) {
-              const t = Date.parse(state.changed_at);
-              if (Number.isFinite(t)) {
-                const prev = lastTradingEventTimestamps.get("__GLOBAL__");
-                if (prev === undefined || t > prev) {
-                  lastTradingEventTimestamps.set("__GLOBAL__", t);
-                }
-              }
-            }
-          }
-        } catch {
-          // Ignore malformed cross-tab updates
-        }
-        return;
-      }
-      if (event.key !== SYMBOL_METADATA_CACHE_KEY) return;
-      if (event.newValue === null) {
-        adoptSymbolMetadataCache(null);
-        return;
-      }
+      // Another tab synced first; adopt its result instead of asking again.
       try {
-        const cache = parseSymbolMetadataCache(JSON.parse(event.newValue));
-        if (cache) {
+        if (event.key === MARKET_STATE_CACHE_KEY && event.newValue) {
+          const state: unknown = JSON.parse(event.newValue);
+          if (!isMarketState(state)) return;
+          queryClient.setQueryData(["market-state"], state);
+          noteMarketStateTime(state);
+        } else if (event.key === SYMBOL_METADATA_CACHE_KEY) {
+          if (event.newValue === null) {
+            adoptSymbolMetadataCache(null);
+            return;
+          }
+          const cache = parseSymbolMetadataCache(JSON.parse(event.newValue));
+          if (!cache) return;
           const previous = adoptSymbolMetadataCache(cache);
-          for (const s of cache.symbols) {
-            const t = Date.parse(s.updated_at || s.halted_at || "0");
-            if (Number.isFinite(t)) {
-              const prev = lastTradingEventTimestamps.get(s.symbol);
-              if (prev === undefined || t > prev) {
-                lastTradingEventTimestamps.set(s.symbol, t);
-              }
-            }
-          }
-          if (previous) {
-            applySymbolMetadataDelta(queryClient, previous, cache);
-          } else {
-            const tickers = queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? [];
-            for (const symbol of cache.symbols) {
-              const ticker = tickers.find((item) => item.symbol === symbol.symbol);
-              for (const key of [symbol.symbol, symbol.symbol.replace(/\.M$/, "")]) {
-                queryClient.setQueryData<Instrument>(["instrument", key], (old) =>
-                  old ? applyTradePriceOverlay(composeInstrument(symbol, ticker ?? old)) : old,
-                );
-              }
-            }
-          }
-          applyCachedMetadata(cache);
+          noteSymbolMetadataTimes(cache);
+          applySymbolMetadataDelta(queryClient, previous, cache);
+          applySymbolMetadataCache(queryClient, cache);
         }
       } catch {
         // Ignore malformed cross-tab updates and keep the last valid cache.
@@ -2093,6 +1279,15 @@ export function replaceSymbolTrades(
   }));
 }
 
+function awaitSnapshot(queryClient: QueryClient, symbol: string, runtime: CandleTradeRuntime): void {
+  clearTradePriceOverlay(symbol);
+  runtime.snapshotReady = false;
+  runtime.lastSequence = undefined;
+  runtime.seenSequences.clear();
+  runtime.pendingSequences.clear();
+  requestCandleRecovery(queryClient, symbol, runtime, true);
+}
+
 export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
   const queryClient = useQueryClient();
 
@@ -2121,22 +1316,9 @@ export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
       return;
     }
     if (runtime.seenSequences.has(trade.sequence)) return;
-    if (runtime.lastSequence !== undefined && trade.sequence <= runtime.lastSequence) {
-      clearTradePriceOverlay(symbol);
-      runtime.snapshotReady = false;
-      runtime.lastSequence = undefined;
-      runtime.seenSequences.clear();
-      runtime.pendingSequences.clear();
-      requestCandleRecovery(queryClient, symbol, runtime, true);
-      return;
-    }
+    // A replayed or skipped sequence means trades were lost: wait for a snapshot.
     if (runtime.lastSequence !== undefined && trade.sequence !== runtime.lastSequence + 1) {
-      clearTradePriceOverlay(symbol);
-      runtime.snapshotReady = false;
-      runtime.lastSequence = undefined;
-      runtime.seenSequences.clear();
-      runtime.pendingSequences.clear();
-      requestCandleRecovery(queryClient, symbol, runtime, true);
+      awaitSnapshot(queryClient, symbol, runtime);
       return;
     }
     runtime.lastSequence = trade.sequence;
@@ -2161,13 +1343,7 @@ export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
     }
   }, () => {
     if (!symbol) return;
-    const runtime = candleRuntime(symbol);
-    clearTradePriceOverlay(symbol);
-    runtime.snapshotReady = false;
-    runtime.lastSequence = undefined;
-    runtime.seenSequences.clear();
-    runtime.pendingSequences.clear();
-    requestCandleRecovery(queryClient, symbol, runtime, true);
+    awaitSnapshot(queryClient, symbol, candleRuntime(symbol));
     void queryClient.invalidateQueries({ queryKey: ["symbol-trades", symbol] });
   });
 }

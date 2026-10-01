@@ -16,7 +16,15 @@ import {
   errorMessage,
   isApiError,
 } from "@/lib/api";
-import { fmtCredit, fmtDateTime, fmtPercentFromPPM, fmtPrice, isDecimalInput, isPositiveDecimal } from "@/lib/format";
+import {
+  fmtCredit,
+  fmtDateTime,
+  fmtPercentFromPPM,
+  fmtPrice,
+  fmtQuantity,
+  isDecimalInput,
+  isPositiveDecimal,
+} from "@/lib/format";
 import {
   useCreateIssuance,
   useCreateManagerRequest,
@@ -72,7 +80,7 @@ export function ManagerTransferInbox({
           type="button"
           onClick={() => setOpen(true)}
           disabled={open}
-          className="shrink-0 font-semibold text-app-blue disabled:text-app-gray-400"
+          className="min-h-9 shrink-0 rounded-lg px-1 font-semibold text-app-blue disabled:text-app-gray-400"
         >
           요청 확인
         </button>
@@ -133,6 +141,14 @@ function ManagerTransferInboxResults({ instrument, userId }: { instrument: Instr
   );
 }
 
+const MANAGER_REQUEST_STATUS: Record<string, string> = {
+  PENDING: "응답 대기",
+  ACCEPTED: "수락됨",
+  REJECTED: "거절됨",
+  CANCELED: "취소됨",
+  EXPIRED: "만료됨",
+};
+
 function issuanceRejection(preview: IssuancePreview, maxDilutionPpm: number | undefined): string {
   if (preview.cooldown_until) {
     return `상장 직후 발행 금지 기간이거나 직전 발행 후 쿨다운 중이에요. ${fmtDateTime(preview.cooldown_until)}부터 발행할 수 있어요.`;
@@ -168,7 +184,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
     issuance.mutate(deposit, {
       onSuccess: (result) => {
         toast.success(
-          `발행 완료 · 총 발행량 ${fmtCredit(result.total_supply_after, 2)}주`,
+          `발행 완료 · 총 발행량 ${fmtQuantity(result.total_supply_after)}주`,
         );
         setDeposit("");
         setDebouncedDeposit("");
@@ -226,7 +242,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
           ) : null}
         </div>
       ) : null}
-      {previewError ? <p className="text-[12px] text-app-red">{previewError}</p> : null}
+      {previewError ? <p role="alert" className="text-[12px] text-app-red">{previewError}</p> : null}
 
       <Button
         type="button"
@@ -396,7 +412,7 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
                   {request.target_user_id}
                 </span>
                 <span className="text-[11px] font-semibold text-app-gray-500">
-                  {request.status}
+                  {MANAGER_REQUEST_STATUS[request.status] ?? request.status}
                 </span>
               </div>
               {request.status === "PENDING" && request.target_user_id === userId ? (

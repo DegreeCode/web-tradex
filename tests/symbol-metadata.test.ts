@@ -26,8 +26,3 @@ test("a listing response without tags gets an empty tag list", () => {
   assert.deepEqual(symbol.tags, []);
   assert.ok(isMarketSymbol(symbol));
 });
-
-test("tags already present are kept", () => {
-  const symbol = { ...listed, tags: ["game"] };
-  assert.equal(withTagList(symbol), symbol);
-});

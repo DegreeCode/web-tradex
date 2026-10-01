@@ -40,7 +40,7 @@ export function LegalDocument({
 
         <nav
           aria-label="목차"
-          className="mt-6 rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
+          className="mt-6 rounded-2xl bg-card p-5 shadow-card"
         >
           <p className="text-[13px] font-semibold text-app-gray-900">목차</p>
           <ol className="mt-3 grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2">
@@ -63,7 +63,7 @@ export function LegalDocument({
               key={section.id}
               id={section.id}
               aria-labelledby={`${section.id}-title`}
-              className="scroll-mt-6 rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] sm:p-6"
+              className="scroll-mt-6 rounded-2xl bg-card p-5 shadow-card sm:p-6"
             >
               <h2
                 id={`${section.id}-title`}

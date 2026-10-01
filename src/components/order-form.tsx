@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,7 +16,9 @@ import { ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives"
 import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
+import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
+import { marginLimitReasonLabel } from "@/lib/margin";
 import { shouldShowTradeExecutionPopup, useSlippagePreference } from "@/lib/preferences";
 import {
   fmtCredit,
@@ -55,12 +57,9 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
   const [slippage, setSlippage] = useSlippagePreference();
   const [referencePrice, setReferencePrice] = useState("");
   const [result, setResult] = useState<Order | null>(null);
+  const fieldId = useId();
 
-  const defaultAccountId =
-    accountList.find((account) => account.is_primary)?.account_id ??
-    accountList[0]?.account_id ??
-    "";
-  const resolvedAccountId = accountId || defaultAccountId;
+  const resolvedAccountId = accountId || pickDefaultAccount(accountList);
 
   const portfolio = usePortfolio(resolvedAccountId || undefined, Boolean(resolvedAccountId));
   const placeOrder = usePlaceOrder();
@@ -151,7 +150,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
       return;
     }
     if (orderMode === "TRIGGER" && expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
-      toast.error("만료 시각은 앞으로여야 해요");
+      toast.error("만료 시각은 지금 이후로 정해주세요");
       return;
     }
     const payload: OrderRequest = {
@@ -205,7 +204,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
   return (
     <>
-      <div className="overflow-hidden rounded-2xl bg-card shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+      <div className="overflow-hidden rounded-2xl bg-card shadow-card">
         <div className="p-3">
           <Segmented<Side>
             value={side}
@@ -223,7 +222,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
         <div className="space-y-5 px-4 pb-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex gap-4">
+            <div role="group" aria-label="주문 방식" className="flex gap-1">
               {([
                 ["MARKET", "시장가"],
                 ["TRIGGER", "예약"],
@@ -233,14 +232,14 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                   type="button"
                   onClick={() => setOrderMode(mode)}
                   aria-pressed={orderMode === mode}
-                  className="text-[15px] font-bold text-app-gray-400 hover:text-app-gray-600 aria-pressed:text-app-gray-900"
+                  className="min-h-9 rounded-lg px-2 text-[15px] font-bold text-app-gray-400 hover:text-app-gray-600 aria-pressed:text-app-gray-900"
                 >
                   {label}
                 </button>
               ))}
             </div>
             {accountList.length > 1 ? (
-              <div className="flex gap-1.5 overflow-x-auto" aria-label="주문 계좌">
+              <div role="group" className="flex gap-1.5 overflow-x-auto" aria-label="주문 계좌">
                 {accountList.map((account) => (
                   <button
                     key={account.account_id}
@@ -250,9 +249,9 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                       setLinkedPercent(null);
                     }}
                     aria-pressed={resolvedAccountId === account.account_id}
-                    className="shrink-0 rounded-lg bg-app-gray-100 px-2.5 py-1 text-[12px] font-semibold text-app-gray-500 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark"
+                    className="min-h-8 shrink-0 rounded-lg bg-app-gray-100 px-2.5 text-[12px] font-semibold text-app-gray-500 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark"
                   >
-                    {account.is_primary ? "대표 계좌" : "추가 계좌"}
+                    {accountLabel(account, accountList)}
                   </button>
                 ))}
               </div>
@@ -270,9 +269,10 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                 ]}
               />
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-3 py-2.5">
-                <span className="text-[13px] font-semibold text-app-gray-500">목표 가격</span>
+                <label htmlFor={`${fieldId}-target`} className="text-[13px] font-semibold text-app-gray-500">목표 가격</label>
                 <div className="flex min-w-0 max-w-full items-baseline gap-1">
                   <input
+                    id={`${fieldId}-target`}
                     value={targetPrice}
                     onChange={(event) => {
                       const next = event.target.value;
@@ -286,8 +286,9 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-3 py-2.5">
-                <span className="text-[13px] font-semibold text-app-gray-500">만료 (선택)</span>
+                <label htmlFor={`${fieldId}-expiry`} className="text-[13px] font-semibold text-app-gray-500">만료 (선택)</label>
                 <input
+                  id={`${fieldId}-expiry`}
                   type="datetime-local"
                   value={expiresAt}
                   onChange={(event) => setExpiresAt(event.target.value)}
@@ -299,9 +300,9 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
           <div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[14px] font-semibold text-app-gray-500">
+              <label htmlFor={`${fieldId}-amount`} className="text-[14px] font-semibold text-app-gray-500">
                 {effectiveAmountMode === "CREDIT" ? "주문 금액" : "주문 수량"}
-              </span>
+              </label>
               {side === "BUY" ? (
                 <button
                   type="button"
@@ -309,15 +310,16 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                     setAmountMode(amountMode === "CREDIT" ? "QUANTITY" : "CREDIT");
                     setLinkedPercent(null);
                   }}
-                  className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[12px] font-semibold text-app-blue hover:bg-app-blue-light"
+                  className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold text-app-blue hover:bg-app-blue-light"
                 >
-                  <ArrowLeftRight className="size-3.5" />
+                  <ArrowLeftRight aria-hidden="true" className="size-3.5" />
                   {amountMode === "CREDIT" ? "수량으로 입력" : "금액으로 입력"}
                 </button>
               ) : null}
             </div>
             <div className="mt-1 flex items-baseline gap-1 border-b-2 border-app-gray-200 pb-1.5 focus-within:border-app-blue">
               <input
+                id={`${fieldId}-amount`}
                 value={inputValue}
                 onChange={(event) => {
                   const next = event.target.value;
@@ -339,7 +341,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                 {effectiveAmountMode === "CREDIT" ? "Credit" : "주"}
               </span>
             </div>
-            <div className="mt-2.5 grid grid-cols-4 gap-1.5">
+            <div role="group" aria-label="잔고 비율로 입력" className="mt-2.5 grid grid-cols-4 gap-1.5">
               {[10, 25, 50, 100].map((percent) => (
                 <button
                   key={percent}
@@ -347,7 +349,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                   onClick={() => applyPercent(percent)}
                   disabled={!balanceReady || Boolean(balanceError)}
                   aria-pressed={linkedPercent === percent}
-                  className="rounded-lg bg-app-gray-100 py-1.5 text-[12px] font-semibold text-app-gray-600 hover:bg-app-gray-200 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark disabled:opacity-40"
+                  className="min-h-9 rounded-lg bg-app-gray-100 text-[12px] font-semibold text-app-gray-600 hover:bg-app-gray-200 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark disabled:opacity-40"
                 >
                   {percent === 100 ? "최대" : `${percent}%`}
                 </button>
@@ -375,7 +377,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                   type="button"
                   disabled={!simulationPayload || simulation.isFetching}
                   onClick={() => void simulation.refetch()}
-                  className="font-semibold text-app-blue disabled:text-app-gray-400"
+                  className="min-h-8 rounded-lg px-1 font-semibold text-app-blue disabled:text-app-gray-400"
                 >
                   {simulation.isFetching ? "계산 중…" : "예상 체결 확인"}
                 </button>
@@ -387,7 +389,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                     : errorMessage(simulation.error)}
                 </p>
               ) : quote && !simulation.isFetching ? (
-                <div className="mt-2 space-y-2 border-t border-app-gray-200 pt-2" aria-label="예상 체결 결과">
+                <div role="group" className="mt-2 space-y-2 border-t border-app-gray-200 pt-2" aria-label="예상 체결 결과">
                   <ResultRow label="예상 체결 수량" value={`${fmtQuantity(quote.filled_quantity)}주`} />
                   <ResultRow label="예상 평균가" value={`${fmtPrice(quote.average_price)} Credit`} />
                   <ResultRow label="예상 수수료" value={`${fmtCredit(quote.fee)} Credit`} />
@@ -398,7 +400,9 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
                   <ResultRow label="거래 후 커브 가격" value={`${fmtPrice(quote.curve_price_after)} Credit`} />
                   {quote.partially_filled ? (
                     <p className="text-app-red">
-                      {quote.limit_reasons.includes("SLIPPAGE") ? "슬리피지 한도" : "풀 재고 한도"}로 일부만 체결될 수 있어요.
+                      {quote.limit_reasons.length > 0
+                        ? `${quote.limit_reasons.map(marginLimitReasonLabel).join("·")} 한도로 일부만 체결될 수 있어요.`
+                        : "일부만 체결될 수 있어요."}
                     </p>
                   ) : null}
                   <p className="text-[12px] text-app-gray-500">현재 시점의 예상 결과예요. 실제 주문 시 가격·잔고·유동성을 다시 확인해요.</p>
@@ -412,12 +416,13 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
               type="button"
               onClick={() => setAdvancedOpen((open) => !open)}
               aria-expanded={advancedOpen}
-              className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500"
+              className="flex min-h-9 w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500"
             >
               고급 설정
               <span className="flex items-center gap-1 font-medium text-app-gray-400">
                 {slippage.trim() ? `슬리피지 ${slippage.trim()}%` : defaultSlippage ? `슬리피지 ${defaultSlippage}` : null}
                 <ChevronDown
+                  aria-hidden="true"
                   className={advancedOpen ? "size-4 rotate-180 transition-transform" : "size-4 transition-transform"}
                 />
               </span>
@@ -444,7 +449,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
           <div className="space-y-2">
             {feedback ? (
-              <p role="status" className="text-center text-[13px] font-medium text-app-gray-500">{feedback}</p>
+              <p role="status" aria-live="polite" className="text-center text-[13px] font-medium text-app-gray-500">{feedback}</p>
             ) : null}
             <button
               type="button"
@@ -488,7 +493,7 @@ function OrderResultDialog({ order }: { order: Order }) {
           {pending
             ? "조건이 충족되면 자동으로 체결돼요. 주문 내역에서 취소할 수 있어요."
             : partial
-              ? "슬리피지 또는 재고 한도로 일부만 체결됐어요."
+              ? "슬리피지·재고 한도 때문에 일부만 체결됐어요."
               : "자세한 내용은 주문 내역에서 확인할 수 있어요."}
         </DialogDescription>
       </DialogHeader>

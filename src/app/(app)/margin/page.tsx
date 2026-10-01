@@ -4,6 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { ErrorBlock, LoadingBlock, PageHeader, Surface } from "@/components/primitives";
+import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { Segmented } from "@/components/segmented";
 import { addDecimal, fmtCredit } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
@@ -21,15 +22,11 @@ function MarginContent() {
   const accountsQuery = useAccounts();
   const accounts = accountsQuery.data ?? [];
 
-  const defaultAccountId =
-    accounts.find((a) => a.is_primary)?.account_id ?? accounts[0]?.account_id ?? "";
-
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(
-    paramAccountId || defaultAccountId,
-  );
-
-  // If paramAccountId arrives after accounts are loaded and state wasn't initialized
-  const effectiveAccountId = selectedAccountId || defaultAccountId;
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(paramAccountId ?? "");
+  // A linked account_id that is not one of ours falls back to the default.
+  const effectiveAccountId = accounts.some((account) => account.account_id === selectedAccountId)
+    ? selectedAccountId
+    : pickDefaultAccount(accounts);
 
   // Mobile shows one column at a time; arriving from a symbol page means the
   // user wants to open a position on it.
@@ -85,9 +82,10 @@ function MarginContent() {
             onClick={() => void positionsQuery.refetch()}
             disabled={!effectiveAccountId || positionsQuery.isRefetching}
             aria-label="새로고침"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 py-2 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:opacity-50"
           >
             <RefreshCw
+              aria-hidden="true"
               className={`size-3.5 ${positionsQuery.isRefetching ? "animate-spin" : ""}`}
             />
             <span className="max-sm:hidden">새로고침</span>
@@ -98,16 +96,16 @@ function MarginContent() {
       <Surface className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           {accounts.length > 1 ? (
-            <div className="flex gap-1.5 overflow-x-auto" aria-label="관리 계좌">
-              {accounts.map((account, index) => (
+            <div role="group" className="flex gap-1.5 overflow-x-auto" aria-label="관리 계좌">
+              {accounts.map((account) => (
                 <button
                   key={account.account_id}
                   type="button"
                   onClick={() => setSelectedAccountId(account.account_id)}
                   aria-pressed={effectiveAccountId === account.account_id}
-                  className="shrink-0 rounded-lg bg-app-gray-100 px-2.5 py-1.5 text-[13px] font-semibold text-app-gray-500 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark"
+                  className="min-h-9 shrink-0 rounded-lg bg-app-gray-100 px-2.5 text-[13px] font-semibold text-app-gray-500 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark"
                 >
-                  {accountLabel(account.is_primary, index, accounts)}
+                  {accountLabel(account, accounts)}
                 </button>
               ))}
             </div>
@@ -173,18 +171,6 @@ function MarginContent() {
       </div>
     </div>
   );
-}
-
-function accountLabel(
-  isPrimary: boolean,
-  index: number,
-  accounts: { is_primary: boolean }[],
-) {
-  if (isPrimary) return "대표 계좌";
-  const extras = accounts.filter((account) => !account.is_primary).length;
-  if (extras === 1) return "추가 계좌";
-  const order = accounts.slice(0, index + 1).filter((account) => !account.is_primary).length;
-  return `추가 계좌 ${order}`;
 }
 
 function Stat({ label, value, unit }: { label: string; value: string; unit?: string }) {

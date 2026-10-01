@@ -4,7 +4,7 @@ import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { useSlippagePreference } from "@/lib/preferences";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   compareDecimal,
+  fmtCredit,
   fmtQuantity,
   isDecimalInput,
   scaleDecimal,
@@ -41,6 +42,7 @@ export function MarginReductionDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [quantity, setQuantity] = useState("");
+  const inputId = useId();
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [slippagePercent, setSlippagePercent] = useSlippagePreference();
@@ -72,7 +74,7 @@ export function MarginReductionDialog({
           description: `${marginPartialFillText(result.execution)}. 나머지는 자동으로 다시 주문되지 않아요.`,
         });
       } else {
-        toast.success("포지션 일부 정산이 완료되었어요");
+        toast.success("포지션 일부를 정산했어요");
       }
       setQuantity("");
       onOpenChange(false);
@@ -91,9 +93,9 @@ export function MarginReductionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>포지션 부분 정산 (일부 상환)</DialogTitle>
+          <DialogTitle>포지션 부분 정산</DialogTitle>
           <DialogDescription>
-            보유 중인 포지션 수량 일부를 정산하여 담보와 대여 원금을 비례 회수합니다. 오래된 미납 이자가 먼저 변제됩니다.
+            수량 일부를 정산해 담보와 빌린 원금을 비율대로 돌려받아요. 밀린 이자부터 먼저 갚아요.
           </DialogDescription>
         </DialogHeader>
 
@@ -115,27 +117,29 @@ export function MarginReductionDialog({
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
               <span>현재 보유 수량</span>
               <span className="numeric min-w-0 break-all font-semibold text-app-gray-900">
-                {fmtQuantity(position.quantity)} 주
+                {fmtQuantity(position.quantity)}주
               </span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
-              <span>현재 대여 원금</span>
+              <span>빌린 원금</span>
               <span className="numeric min-w-0 break-all font-semibold text-app-gray-900">
-                {position.borrowed_credit} Credit
+                {fmtCredit(position.borrowed_credit, 4)} Credit
               </span>
             </div>
           </div>
 
           <div>
-            <label className="block text-[13px] font-medium text-app-gray-700">
-              정산할 수량 (Share, 최대 8자리)
+            <label htmlFor={inputId} className="block text-[13px] font-medium text-app-gray-700">
+              정산할 수량 (소수점 8자리까지)
             </label>
             <div className="relative mt-1.5">
               <input
+                id={inputId}
                 type="text"
                 inputMode="decimal"
                 value={quantity}
-                placeholder="0.00000000"
+                placeholder="0"
+                aria-invalid={Boolean(quantity && errorText)}
                 onChange={(e) => {
                   const val = e.target.value.replace(/,/g, "");
                   if (val === "" || isDecimalInput(val, 8)) {
@@ -176,9 +180,10 @@ export function MarginReductionDialog({
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
               aria-expanded={showAdvanced}
-              className="flex items-center gap-1 text-[12px] font-semibold text-app-gray-500 hover:text-app-gray-800"
+              className="flex min-h-9 items-center gap-1 text-[12px] font-semibold text-app-gray-500 hover:text-app-gray-800"
             >
               <ChevronDown
+                aria-hidden="true"
                 className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
               />
               고급 설정 (슬리피지)

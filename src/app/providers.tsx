@@ -6,13 +6,7 @@ import { ThemeProvider } from "next-themes";
 import { ApiError } from "@/lib/api";
 import { AuthProvider } from "@/components/auth-provider";
 import { Toaster } from "@/components/ui/sonner";
-
-// The unminified file is served as stored in the tagged release; jsDelivr's
-// .min.css is generated on the fly, so its bytes (and hash) are not stable.
-const FONT_STYLESHEET = {
-  href: "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css",
-  integrity: "sha384-2nNKoOPayicGa+aRguOQuiZP+RqQ4G3jalfDeOgftkKD7zBM2gJXTwcFqCZltdv0",
-};
+import { FONT_STYLESHEET } from "@/lib/fonts";
 
 export function createQueryClient() {
   const client = new QueryClient({

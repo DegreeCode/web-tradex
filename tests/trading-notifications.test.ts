@@ -5,13 +5,13 @@ import { QueryClient } from "@tanstack/react-query";
 import {
   parseTradingNotification,
 } from "../src/lib/notifications";
+import { reconcileNotificationData } from "../src/lib/hooks";
 import {
   applyTradingNotification,
   cacheSymbolMetadata,
   lastTradingEventTimestamps,
   readMarketStateCache,
-  reconcileNotificationData,
-} from "../src/lib/hooks";
+} from "../src/lib/market-cache";
 import { clearSymbolMetadataCache } from "../src/lib/symbol-metadata";
 import type { MarketSymbol, MarketState, Instrument, Notification } from "../src/lib/types";
 
@@ -107,181 +107,41 @@ test("metadata notifications refresh each symbol once across both reconciliation
   }
 });
 
-// -----------------------------------------------------------------------------
-// 1. Structured Notification Parsing Tests (Never Infer From Prose)
-// -----------------------------------------------------------------------------
-
-test("parseTradingNotification parses SYMBOL_HALTED from body, title, or payload", () => {
-  // From body with reason
-  const n1: Notification = {
-    notification_id: "ntf_1",
-    kind: "USER",
-    title: "SYMBOL_HALTED",
-    body: "ALPHA.M SYMBOL_HALTED: 점검",
-    version: 1,
-    pinned: false,
-    read: false,
-    created_at: "2026-09-16T10:00:00Z",
-    updated_at: "2026-09-16T10:00:00Z",
-    expires_at: null,
-  };
-  const parsed1 = parseTradingNotification(n1);
-  assert.equal(parsed1?.eventType, "SYMBOL_HALTED");
-  assert.equal(parsed1?.symbol, "ALPHA.M");
-  assert.equal(parsed1?.reason, "점검");
-
-  // From Korean title
-  const n2: Notification = {
-    ...n1,
-    title: "종목 거래가 중지됐어요",
-    body: "BETA.M SYMBOL_HALTED",
-  };
-  const parsed2 = parseTradingNotification(n2);
-  assert.equal(parsed2?.eventType, "SYMBOL_HALTED");
-  assert.equal(parsed2?.symbol, "BETA.M");
-
-  // From explicit structured payload
-  const n3: Notification & { payload?: Record<string, unknown> } = {
-    ...n1,
-    payload: {
-      symbol: "GAMMA.M",
-      state: "HALTED",
-      reason: "긴급 점검",
-      halted_until: "2026-09-17T00:00:00Z",
-    },
-  };
-  const parsed3 = parseTradingNotification(n3);
-  assert.equal(parsed3?.eventType, "SYMBOL_HALTED");
-  assert.equal(parsed3?.symbol, "GAMMA.M");
-  assert.equal(parsed3?.reason, "긴급 점검");
-  assert.equal(parsed3?.halted_until, "2026-09-17T00:00:00Z");
+test("parseTradingNotification reads structured tokens from payload, body or title", () => {
+  const base = { title: "Notice", body: "" };
+  const cases: Array<[Record<string, unknown>, { eventType: string; symbol?: string; reason?: string; halted_until?: string }]> = [
+    [{ title: "SYMBOL_HALTED", body: "ALPHA.M SYMBOL_HALTED: 점검" }, { eventType: "SYMBOL_HALTED", symbol: "ALPHA.M", reason: "점검" }],
+    [{ title: "종목 거래가 중지됐어요", body: "BETA.M SYMBOL_HALTED" }, { eventType: "SYMBOL_HALTED", symbol: "BETA.M" }],
+    [
+      { ...base, payload: { symbol: "GAMMA.M", state: "HALTED", reason: "긴급 점검", halted_until: "2026-09-17T00:00:00Z" } },
+      { eventType: "SYMBOL_HALTED", symbol: "GAMMA.M", reason: "긴급 점검", halted_until: "2026-09-17T00:00:00Z" },
+    ],
+    [{ title: "SYMBOL_RESUMED", body: "ALPHA.M SYMBOL_RESUMED" }, { eventType: "SYMBOL_RESUMED", symbol: "ALPHA.M" }],
+    [{ title: "Global market halted", body: "GLOBAL_MARKET_HALTED: 정기 점검" }, { eventType: "GLOBAL_MARKET_HALTED", reason: "정기 점검" }],
+    [{ title: "Global market resumed", body: "GLOBAL_MARKET_RESUMED" }, { eventType: "GLOBAL_MARKET_RESUMED" }],
+    [{ title: "Delist scheduled", body: "ALPHA.M DELIST_SCHEDULED: 심사 탈락" }, { eventType: "DELIST_SCHEDULED", symbol: "ALPHA.M", reason: "심사 탈락" }],
+    [{ title: "Delist canceled", body: "ALPHA.M DELIST_CANCELED" }, { eventType: "DELIST_CANCELED", symbol: "ALPHA.M" }],
+    [{ title: "Symbol delisted", body: "ALPHA.M DELISTED" }, { eventType: "DELISTED", symbol: "ALPHA.M" }],
+  ];
+  for (const [notification, expected] of cases) {
+    const parsed = parseTradingNotification(notification);
+    for (const [key, value] of Object.entries(expected)) {
+      assert.equal(parsed?.[key as keyof typeof parsed], value, `${JSON.stringify(notification)} → ${key}`);
+    }
+  }
 });
 
-test("parseTradingNotification parses SYMBOL_RESUMED correctly", () => {
-  const n: Notification = {
-    notification_id: "ntf_2",
-    kind: "USER",
-    title: "SYMBOL_RESUMED",
-    body: "ALPHA.M SYMBOL_RESUMED",
-    version: 1,
-    pinned: false,
-    read: false,
-    created_at: "2026-09-16T10:05:00Z",
-    updated_at: "2026-09-16T10:05:00Z",
-    expires_at: null,
-  };
-  const parsed = parseTradingNotification(n);
-  assert.equal(parsed?.eventType, "SYMBOL_RESUMED");
-  assert.equal(parsed?.symbol, "ALPHA.M");
-});
-
-test("parseTradingNotification parses GLOBAL_MARKET_HALTED and RESUMED", () => {
-  const halt: Notification = {
-    notification_id: "ntf_3",
-    kind: "SYSTEM",
-    title: "Global market halted",
-    body: "GLOBAL_MARKET_HALTED: 정기 점검",
-    version: 1,
-    pinned: true,
-    read: false,
-    created_at: "2026-09-16T10:00:00Z",
-    updated_at: "2026-09-16T10:00:00Z",
-    expires_at: null,
-  };
-  const parsedHalt = parseTradingNotification(halt);
-  assert.equal(parsedHalt?.eventType, "GLOBAL_MARKET_HALTED");
-  assert.equal(parsedHalt?.reason, "정기 점검");
-
-  const resume: Notification = {
-    notification_id: "ntf_4",
-    kind: "SYSTEM",
-    title: "Global market resumed",
-    body: "GLOBAL_MARKET_RESUMED",
-    version: 1,
-    pinned: true,
-    read: false,
-    created_at: "2026-09-16T10:30:00Z",
-    updated_at: "2026-09-16T10:30:00Z",
-    expires_at: null,
-  };
-  const parsedResume = parseTradingNotification(resume);
-  assert.equal(parsedResume?.eventType, "GLOBAL_MARKET_RESUMED");
-});
-
-test("parseTradingNotification parses DELIST_SCHEDULED, DELIST_CANCELED, and DELISTED", () => {
-  const d1 = parseTradingNotification({
-    title: "Delist scheduled",
-    body: "ALPHA.M DELIST_SCHEDULED: 심사 탈락",
-  });
-  assert.equal(d1?.eventType, "DELIST_SCHEDULED");
-  assert.equal(d1?.symbol, "ALPHA.M");
-  assert.equal(d1?.reason, "심사 탈락");
-
-  const d2 = parseTradingNotification({
-    title: "Delist canceled",
-    body: "ALPHA.M DELIST_CANCELED",
-  });
-  assert.equal(d2?.eventType, "DELIST_CANCELED");
-  assert.equal(d2?.symbol, "ALPHA.M");
-
-  const d3 = parseTradingNotification({
-    title: "Symbol delisted",
-    body: "ALPHA.M DELISTED",
-  });
-  assert.equal(d3?.eventType, "DELISTED");
-  assert.equal(d3?.symbol, "ALPHA.M");
-});
-
-test("parseTradingNotification REJECTS arbitrary prose without explicit structured token", () => {
-  // Korean prose announcement
-  const p1 = parseTradingNotification({
-    title: "정기 점검 안내",
-    body: "내일 새벽 거래 서비스 점검이 예정되어 있습니다. 이용에 유의하시기 바랍니다.",
-  });
-  assert.equal(p1, null);
-
-  // English prose announcement
-  const p2 = parseTradingNotification({
-    title: "Maintenance announcement",
-    body: "Please be advised that trading activities may experience interruptions.",
-  });
-  assert.equal(p2, null);
-
-  // Random user chat or notice
-  const p3 = parseTradingNotification({
-    title: "공지사항",
-    body: "새로운 기능이 추가되었습니다.",
-  });
-  assert.equal(p3, null);
-});
-
-test("parseTradingNotification REJECTS unrelated events (trades, transfers, logins)", () => {
-  // Trade execution
-  assert.equal(
-    parseTradingNotification({
-      title: "Trade executed",
-      body: "ALPHA.M: 1 trade(s) executed",
-    }),
-    null,
-  );
-
-  // Transfer
-  assert.equal(
-    parseTradingNotification({
-      title: "Transfer updated",
-      body: "transfer.updated",
-    }),
-    null,
-  );
-
-  // Login / security
-  assert.equal(
-    parseTradingNotification({
-      title: "Login success",
-      body: "AUTH_LOGIN",
-    }),
-    null,
-  );
+test("parseTradingNotification never infers trading state from prose or unrelated events", () => {
+  for (const notification of [
+    { title: "정기 점검 안내", body: "내일 새벽 거래 서비스 점검이 예정되어 있습니다." },
+    { title: "Maintenance announcement", body: "Trading activities may experience interruptions." },
+    { title: "공지사항", body: "새로운 기능이 추가되었습니다." },
+    { title: "Trade executed", body: "ALPHA.M: 1 trade(s) executed" },
+    { title: "Transfer updated", body: "transfer.updated" },
+    { title: "Login success", body: "AUTH_LOGIN" },
+  ]) {
+    assert.equal(parseTradingNotification(notification), null, notification.body);
+  }
 });
 
 // -----------------------------------------------------------------------------

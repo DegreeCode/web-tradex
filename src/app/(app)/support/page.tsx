@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EmptyState, ErrorBlock, SkeletonRows } from "@/components/primitives";
+import { EmptyState, ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows } from "@/components/primitives";
 import { errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtRelative } from "@/lib/format";
 import {
@@ -59,22 +59,20 @@ export default function SupportPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">
-            고객센터
-          </h1>
-          <p className="mt-1 text-[13px] text-app-gray-500">궁금한 점을 남기면 답변을 드려요</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setCreateOpen(true)}
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover"
-        >
-          <Plus className="size-4" />
-          문의하기
-        </button>
-      </div>
+      <PageHeader
+        title="고객센터"
+        subtitle="궁금한 점을 남기면 답변을 드려요"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+          >
+            <Plus aria-hidden="true" className="size-4" />
+            문의하기
+          </button>
+        }
+      />
 
       {inquiries.isError ? (
         <ErrorBlock
@@ -88,7 +86,7 @@ export default function SupportPage() {
         <EmptyState
           title="문의 내역이 없어요"
           description="계좌·거래·송금 관련 문의를 남겨보세요"
-          icon={<LifeBuoy className="size-6" />}
+          icon={<LifeBuoy aria-hidden="true" className="size-6" />}
         />
       ) : (
         <div className="grid gap-2 xl:grid-cols-2">
@@ -97,7 +95,8 @@ export default function SupportPage() {
               key={inquiry.ticket}
               type="button"
               onClick={() => setTicket(inquiry.ticket)}
-              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] transition-colors hover:bg-app-gray-50"
+              aria-haspopup="dialog"
+              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-card transition-colors hover:bg-app-gray-50"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -123,16 +122,12 @@ export default function SupportPage() {
               </p>
             </button>
           ))}
-          {inquiries.hasNextPage ? (
-            <button
-              type="button"
-              onClick={() => void inquiries.fetchNextPage()}
-              disabled={inquiries.isFetchingNextPage}
-              className="h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] disabled:opacity-50"
-            >
-              {inquiries.isFetchingNextPage ? "불러오는 중…" : "더보기"}
-            </button>
-          ) : null}
+          <LoadMoreButton
+            hasMore={inquiries.hasNextPage}
+            loading={inquiries.isFetchingNextPage}
+            onLoad={() => void inquiries.fetchNextPage()}
+            className="xl:col-span-2"
+          />
         </div>
       )}
 
@@ -201,8 +196,8 @@ function CreateInquiryForm({ onDone }: { onDone: (ticket: string) => void }) {
 
       <div className="mt-3 space-y-3.5">
         <div>
-          <p className="mb-1.5 text-[13px] font-semibold text-app-gray-500">분류</p>
-          <div className="flex flex-wrap gap-1.5">
+          <p id="inquiry-category-label" className="mb-1.5 text-[13px] font-semibold text-app-gray-500">분류</p>
+          <div role="group" aria-labelledby="inquiry-category-label" className="flex flex-wrap gap-1.5">
             {CATEGORIES.map((item) => (
               <button
                 key={item.value}
@@ -352,6 +347,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
         <div className="mt-3 space-y-2">
           <Textarea
             value={reply}
+            aria-label="추가 메시지"
             onChange={(event) => setReply(event.target.value)}
             rows={3}
             placeholder="추가로 궁금한 점을 남겨주세요"
@@ -364,7 +360,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
               disabled={sendReply.isPending}
               className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
             >
-              <Send className="size-4" />
+              <Send aria-hidden="true" className="size-4" />
               {sendReply.isPending ? "전송 중…" : "메시지 보내기"}
             </button>
             {inquiry.status !== "RESOLVED" ? (

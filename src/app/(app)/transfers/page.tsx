@@ -5,7 +5,14 @@ import { Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/auth-provider";
-import { EmptyState, ErrorBlock, SkeletonRows, TransferStatusChip } from "@/components/primitives";
+import {
+  EmptyState,
+  ErrorBlock,
+  LoadMoreButton,
+  PageHeader,
+  SkeletonRows,
+  TransferStatusChip,
+} from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { TransferDialog } from "@/components/transfer-dialog";
 import { errorMessage } from "@/lib/api";
@@ -27,6 +34,7 @@ export default function TransfersPage() {
   const [sendOpen, setSendOpen] = useState(false);
   const transfersQuery = useTransfers("mine", 50);
   const action = useTransferAction();
+  const actingId = action.isPending ? action.variables?.transferId : undefined;
 
   const items = useMemo(
     () => transfersQuery.data?.pages.flatMap((page) => page.data) ?? [],
@@ -84,22 +92,20 @@ export default function TransfersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">송금</h1>
-          <p className="mt-1 text-[13px] text-app-gray-500">
-            Credit과 주식을 주고받고 요청을 처리하세요
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setSendOpen(true)}
-          className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover"
-        >
-          <Send className="size-4" />
-          송금
-        </button>
-      </div>
+      <PageHeader
+        title="송금"
+        subtitle="Credit과 주식을 주고받고 요청을 처리하세요"
+        action={
+          <button
+            type="button"
+            onClick={() => setSendOpen(true)}
+            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+          >
+            <Send aria-hidden="true" className="size-4" />
+            송금하기
+          </button>
+        }
+      />
 
       <Segmented<Tab>
         value={tab}
@@ -116,16 +122,28 @@ export default function TransfersPage() {
       {transfersQuery.isLoading || (detailsLoading && visible.length === 0) ? (
         <SkeletonRows rows={4} />
       ) : visible.length === 0 && !detailsError && !transfersQuery.isError ? (
-        <EmptyState
-          title={
-            tab === "INBOX"
-              ? "처리할 요청이 없어요"
-              : tab === "SENT"
-                ? "보낸 요청이 없어요"
-                : "송금 내역이 없어요"
-          }
-          description="송금 버튼으로 Credit이나 주식을 보내보세요"
-        />
+        <>
+          <EmptyState
+            title={
+              tab === "INBOX"
+                ? "처리할 요청이 없어요"
+                : tab === "SENT"
+                  ? "보낸 요청이 없어요"
+                  : "송금 내역이 없어요"
+            }
+            description={
+              transfersQuery.hasNextPage
+                ? "이전 송금 내역을 더 불러와 확인해보세요"
+                : "송금하기 버튼으로 Credit이나 주식을 보내보세요"
+            }
+          />
+          <LoadMoreButton
+            hasMore={transfersQuery.hasNextPage}
+            loading={transfersQuery.isFetchingNextPage}
+            onLoad={() => void transfersQuery.fetchNextPage()}
+            label="이전 내역 더 불러오기"
+          />
+        </>
       ) : (
         <div className="grid gap-2 xl:grid-cols-2">
           {visible.map((entry) => {
@@ -135,7 +153,7 @@ export default function TransfersPage() {
             return (
               <div
                 key={transfer.transfer_id}
-                className="rounded-2xl bg-card p-4 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
+                className="rounded-2xl bg-card p-4 shadow-card"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 max-w-full">
@@ -173,16 +191,16 @@ export default function TransfersPage() {
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "rejection")}
-                            disabled={action.isPending}
-                            className="rounded-lg bg-app-gray-100 px-3 py-1.5 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+                            disabled={actingId === transfer.transfer_id}
+                            className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                           >
                             거절
                           </button>
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "acceptance")}
-                            disabled={action.isPending}
-                            className="rounded-lg bg-app-blue px-3 py-1.5 text-[12px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
+                            disabled={actingId === transfer.transfer_id}
+                            className="min-h-9 rounded-lg bg-app-blue px-3 text-[12px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
                           >
                             수락
                           </button>
@@ -191,8 +209,8 @@ export default function TransfersPage() {
                         <button
                           type="button"
                           onClick={() => runAction(transfer.transfer_id, "cancellation")}
-                          disabled={action.isPending}
-                          className="rounded-lg bg-app-gray-100 px-3 py-1.5 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+                          disabled={actingId === transfer.transfer_id}
+                          className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                         >
                           취소
                         </button>
@@ -203,15 +221,12 @@ export default function TransfersPage() {
               </div>
             );
           })}
-          {transfersQuery.hasNextPage ? (
-            <button
-              type="button"
-              onClick={() => void transfersQuery.fetchNextPage()}
-              className="h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
-            >
-              더보기
-            </button>
-          ) : null}
+          <LoadMoreButton
+            hasMore={transfersQuery.hasNextPage}
+            loading={transfersQuery.isFetchingNextPage}
+            onLoad={() => void transfersQuery.fetchNextPage()}
+            className="xl:col-span-2"
+          />
         </div>
       )}
 

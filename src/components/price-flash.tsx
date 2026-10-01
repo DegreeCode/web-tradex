@@ -4,15 +4,12 @@ import { useState, type ReactNode } from "react";
 import { cn } from "cn";
 
 import { compareDecimal } from "@/lib/format";
+import { isQuotedPrice } from "@/lib/instruments";
 
 type Direction = "up" | "down";
 
-// Instruments render "0" until their first ticker arrives, so that initial
-// fill is not a price move and must not flash.
-function isQuotedPrice(price: string): boolean {
-  return /^\d+(?:\.\d+)?$/.test(price) && compareDecimal(price, "0") !== 0;
-}
 
+// The first ticker replaces a placeholder "0"; that fill is not a price move.
 function flashDirection(previous: string, next: string): Direction | null {
   if (!isQuotedPrice(previous) || !isQuotedPrice(next)) return null;
   const order = compareDecimal(next, previous);

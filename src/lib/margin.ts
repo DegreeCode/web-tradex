@@ -387,6 +387,13 @@ export function validateReductionQuantity(
 }
 
 const LIVE_MARGIN_STATUSES = new Set<MarginStatus>(["OPEN", "LIQUIDATING"]);
+// LIQUIDATING and CUSTODY are still held; the system settles them.
+const ACTIVE_MARGIN_STATUSES = new Set<MarginStatus>(["OPEN", "LIQUIDATING", "CUSTODY"]);
+
+/** Whether a position is still held (not yet closed, liquidated or settled). */
+export function isActiveMarginPosition(status: MarginStatus): boolean {
+  return ACTIVE_MARGIN_STATUSES.has(status);
+}
 
 export function useMarginPositions(
   options: { accountId?: string; limit?: number; enabled?: boolean; poll?: boolean } = {},

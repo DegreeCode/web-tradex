@@ -7,7 +7,7 @@ import { ArrowRight, Landmark, PlusCircle, Send, ShieldCheck } from "lucide-reac
 import { useAuth } from "@/components/auth-provider";
 import { HoldingRow, buildHolding, type HoldingView } from "@/components/holding-row";
 import { InstrumentList } from "@/components/instrument-list";
-import { NavChart } from "@/components/nav-chart";
+import { NAV_RANGES, NavChart } from "@/components/nav-chart";
 import {
   ChangeIndicator,
   EmptyState,
@@ -17,10 +17,11 @@ import {
   Surface,
 } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
+import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
-import { changePercent, fmtCredit, fmtDecimal, fmtSigned, toNumber } from "@/lib/format";
+import { changePercent, fmtCredit, fmtDateTime, fmtDecimal, fmtSigned, shortId, toNumber } from "@/lib/format";
 import { useAllPortfolios, useInstruments, useMarketState, useNav, useNavHistory } from "@/lib/hooks";
-import type { NavRange } from "@/lib/types";
+import type { Account, NavRange } from "@/lib/types";
 
 const QUICK_ACTIONS = [
   { href: "/transfers", label: "송금", icon: Send },
@@ -29,19 +30,16 @@ const QUICK_ACTIONS = [
   { href: "/listings/new", label: "상장", icon: PlusCircle },
 ];
 
-const RANGES: { value: NavRange; label: string }[] = [
-  { value: "1d", label: "1일" },
-  { value: "1w", label: "1주" },
-  { value: "1mo", label: "1개월" },
-  { value: "3mo", label: "3개월" },
-  { value: "1y", label: "1년" },
-];
+function accountName(accountId: string, accounts: Account[]): string {
+  const account = accounts.find((row) => row.account_id === accountId);
+  return account ? accountLabel(account, accounts) : "계좌";
+}
 
 export default function HomePage() {
   const { user } = useAuth();
   const marketState = useMarketState();
   const instrumentsQuery = useInstruments();
-  const { portfolios, isLoading, error: portfolioError, refetch: refetchPortfolios } = useAllPortfolios();
+  const { accounts, portfolios, isLoading, error: portfolioError, refetch: refetchPortfolios } = useAllPortfolios();
   const navQuery = useNav();
   const [range, setRange] = useState<NavRange>("1mo");
   const navHistory = useNavHistory(range);
@@ -104,7 +102,7 @@ export default function HomePage() {
   return (
     <div className="space-y-6 xl:grid xl:grid-cols-12 xl:gap-5 xl:space-y-0">
       <div className="@container min-w-0 xl:col-span-12">
-        <p className="break-words text-[13px] font-semibold text-app-gray-500">{user?.username}님의 자산</p>
+        <h1 className="break-words text-[13px] font-semibold text-app-gray-500">{user?.username}님의 자산</h1>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
           <p className="numeric min-w-0 break-all text-[clamp(1rem,6cqi,2rem)] leading-tight font-extrabold tracking-[-0.03em] text-app-gray-900">
             {nav ? fmtDecimal(totalValue, 2) : "—"}
@@ -117,13 +115,11 @@ export default function HomePage() {
       </div>
 
       {halted ? (
-        <div className="rounded-2xl bg-app-red-light px-4 py-3 xl:col-span-12">
+        <div role="status" className="rounded-2xl bg-app-red-light px-4 py-3 xl:col-span-12">
           <p className="text-[13px] font-bold text-app-red">전체 시장이 일시 정지됐어요</p>
           <p className="mt-0.5 text-[12px] text-app-red/80">
             {marketState.data?.reason || "관리자에 의해 거래가 중단됐어요"}
-            {marketState.data?.halted_until
-              ? ` · ${new Date(marketState.data.halted_until).toLocaleString("ko-KR")}까지`
-              : ""}
+            {marketState.data?.halted_until ? ` · ${fmtDateTime(marketState.data.halted_until)}까지` : ""}
           </p>
         </div>
       ) : null}
@@ -144,7 +140,7 @@ export default function HomePage() {
         <Segmented<NavRange>
           value={range}
           onChange={setRange}
-          options={RANGES}
+          options={NAV_RANGES}
           className="mt-3"
         />
       </Surface>
@@ -156,10 +152,10 @@ export default function HomePage() {
               key={action.href}
               href={action.href}
               prefetch={false}
-              className="flex flex-col items-center gap-1.5 rounded-xl py-3 transition-colors hover:bg-app-gray-50"
+              className="flex flex-col items-center gap-1.5 rounded-xl py-3 transition-colors hover:bg-app-gray-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue"
             >
               <span className="flex size-10 items-center justify-center rounded-full bg-app-blue-light text-app-blue-dark">
-                <action.icon className="size-[18px]" />
+                <action.icon aria-hidden="true" className="size-[18px]" />
               </span>
               <span className="text-[12px] font-semibold text-app-gray-700">{action.label}</span>
             </Link>
@@ -191,10 +187,7 @@ export default function HomePage() {
             <span className="numeric min-w-0 break-all text-right text-[14px] font-semibold text-app-gray-900">
               {isLoading || portfolioError || instrumentsQuery.isLoading ? "—" : fmtCredit(unrealized, 2)}
               {!isLoading && !portfolioError && !instrumentsQuery.isLoading && unrealizedPct !== null ? (
-                <span className="ml-1 text-[12px] text-app-gray-400">
-                  ({unrealizedPct > 0 ? "+" : ""}
-                  {unrealizedPct.toFixed(1)}%)
-                </span>
+                <span className="ml-1 text-[12px] text-app-gray-400">({fmtSigned(unrealizedPct, 1)}%)</span>
               ) : null}
             </span>
           </div>
@@ -214,9 +207,10 @@ export default function HomePage() {
           <p className="text-[13px] font-semibold text-app-gray-500">계좌별 자산</p>
           <div className="mt-2">
             {nav.accounts.map((account) => (
-              <div key={account.account_id} className="flex flex-col items-start gap-1 py-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="min-w-0 break-all text-[14px] text-app-gray-700">
-                  {account.account_id}
+              <div key={account.account_id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
+                <span className="min-w-0 text-[14px] text-app-gray-700">
+                  {accountName(account.account_id, accounts)}
+                  <span className="numeric ml-1.5 text-[12px] text-app-gray-400">{shortId(account.account_id)}</span>
                 </span>
                 <span className="numeric min-w-0 break-all text-right text-[14px] font-semibold text-app-gray-900">
                   {fmtCredit(account.total_value, 2)}
@@ -260,7 +254,7 @@ export default function HomePage() {
             }
           />
         ) : (
-          <div className="divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+          <div className="divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-card">
             {holdings.slice(0, 3).map((holding) => (
               <HoldingRow key={`${holding.accountId}:${holding.position.symbol}`} holding={holding} />
             ))}

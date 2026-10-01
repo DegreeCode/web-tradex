@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import {
@@ -30,6 +30,7 @@ export function MarginCollateralDialog({
   availableCredit?: string;
 }) {
   const [amount, setAmount] = useState("");
+  const inputId = useId();
   const addCollateral = useAddMarginCollateral(position?.position_id ?? "");
 
   if (!position) return null;
@@ -42,7 +43,7 @@ export function MarginCollateralDialog({
     if (!isValid || !position) return;
     try {
       await addCollateral.mutateAsync({ amount: amount.trim() });
-      toast.success("담보 Credit이 성공적으로 추가되었어요");
+      toast.success("담보를 추가했어요");
       setAmount("");
       onOpenChange(false);
     } catch (err) {
@@ -56,7 +57,7 @@ export function MarginCollateralDialog({
         <DialogHeader>
           <DialogTitle>담보 Credit 추가</DialogTitle>
           <DialogDescription>
-            포지션({position.symbol})에 담보금을 추가하여 위험 비율을 낮춥니다. (대여 원금은 변하지 않습니다)
+            {position.symbol} 포지션에 담보를 더해 위험 비율을 낮춰요. 빌린 원금은 그대로예요.
           </DialogDescription>
         </DialogHeader>
 
@@ -79,15 +80,17 @@ export function MarginCollateralDialog({
           </div>
 
           <div>
-            <label className="block text-[13px] font-medium text-app-gray-700">
+            <label htmlFor={inputId} className="block text-[13px] font-medium text-app-gray-700">
               추가할 담보 금액 (Credit)
             </label>
             <div className="relative mt-1.5">
               <input
+                id={inputId}
                 type="text"
                 inputMode="decimal"
                 value={amount}
-                placeholder="0.0"
+                placeholder="0"
+                aria-invalid={Boolean(amount && errorText)}
                 onChange={(e) => {
                   const val = e.target.value.replace(/,/g, "");
                   if (val === "" || isDecimalInput(val, 16)) {
@@ -105,7 +108,7 @@ export function MarginCollateralDialog({
             ) : null}
           </div>
 
-          <div className="flex gap-2">
+          <div role="group" aria-label="빠른 금액 입력" className="flex gap-2">
             {["1", "5", "10", "50"].map((step) => (
               <button
                 key={step}
@@ -114,7 +117,7 @@ export function MarginCollateralDialog({
                 aria-pressed={Boolean(amount) && compareDecimal(amount, step) === 0}
                 className="min-h-11 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-app-blue border border-app-gray-200 aria-pressed:border-app-blue aria-pressed:bg-app-blue-light aria-pressed:text-app-blue py-1.5 text-[12px] font-semibold text-app-gray-600 hover:bg-app-gray-50"
               >
-                +{step}
+                {step}
               </button>
             ))}
             {availableCredit ? (

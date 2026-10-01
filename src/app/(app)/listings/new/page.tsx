@@ -5,7 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { IconUrlField } from "@/components/symbol-icons";
-import { ErrorBlock, Surface } from "@/components/primitives";
+import { ErrorBlock, PageHeader, Surface } from "@/components/primitives";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -114,14 +114,7 @@ export default function NewListingPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">
-          종목 상장
-        </h1>
-        <p className="mt-1 text-[13px] text-app-gray-500">
-          Credit을 예치해 새로운 종목을 만들고 발행사가 되어보세요
-        </p>
-      </div>
+      <PageHeader title="종목 상장" subtitle="Credit을 예치해 새로운 종목을 만들고 발행사가 되어보세요" />
 
       <Surface className="space-y-4">
         <div className="space-y-1.5">
@@ -132,6 +125,8 @@ export default function NewListingPage() {
             onChange={(event) => setSymbol(event.target.value.toUpperCase())}
             placeholder="ABC"
             maxLength={8}
+            autoCapitalize="characters"
+            autoComplete="off"
             className="h-11 rounded-xl"
           />
           <p className="text-[12px] text-app-gray-400">영문 1~8자, 대문자로 저장돼요</p>

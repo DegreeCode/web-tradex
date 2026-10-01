@@ -66,13 +66,12 @@ function DialogContent({
               <Button
                 variant="ghost"
                 className="absolute top-2 right-2"
-                size="icon-sm"
+                size="icon"
               />
             }
           >
-            <XIcon
-            />
-            <span className="sr-only">Close</span>
+            <XIcon aria-hidden="true" />
+            <span className="sr-only">닫기</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -110,7 +109,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          닫기
         </DialogPrimitive.Close>
       )}
     </div>

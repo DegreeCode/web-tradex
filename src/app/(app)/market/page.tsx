@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { InstrumentList } from "@/components/instrument-list";
-import { EmptyState, ErrorBlock, SkeletonRows } from "@/components/primitives";
+import { EmptyState, ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { errorMessage } from "@/lib/api";
 import { useInstruments, useTickerOrder } from "@/lib/hooks";
@@ -73,21 +73,33 @@ export default function MarketPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">마켓</h1>
-        <p className="mt-1 text-[13px] text-app-gray-500">
-          {instrumentsQuery.isLoading ? "종목 정보를 불러오는 중이에요" : `거래중 ${tradingCount}개 · 전체 ${instruments.length}개 종목`}
-        </p>
-      </div>
+      <PageHeader
+        title="마켓"
+        subtitle={instrumentsQuery.isLoading ? "종목 정보를 불러오는 중이에요" : `거래중 ${tradingCount}개 · 전체 ${instruments.length}개 종목`}
+      />
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-app-gray-400" />
+      <div role="search" className="relative">
+        <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-app-gray-400" />
         <input
+          type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="종목명, 심볼, 태그로 검색"
-          className="h-12 w-full rounded-xl bg-card pr-4 pl-10 text-base md:text-[14px] text-app-gray-900 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] outline-none placeholder:text-app-gray-400 focus:ring-2 focus:ring-app-blue/30"
+          aria-label="종목 검색"
+          enterKeyHint="search"
+          autoComplete="off"
+          className="h-12 w-full rounded-xl bg-card pr-11 pl-10 text-base text-app-gray-900 shadow-card outline-none placeholder:text-app-gray-400 focus:ring-2 focus:ring-app-blue/30 md:text-[14px] [&::-webkit-search-cancel-button]:hidden"
         />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            aria-label="검색어 지우기"
+            className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-app-gray-400 hover:bg-app-gray-100 hover:text-app-gray-600"
+          >
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
       </div>
 
       <Segmented<TickerSort>
@@ -117,14 +129,11 @@ export default function MarketPage() {
       ) : (
         <>
           <InstrumentList instruments={visible} twoColumn />
-          {canShowMore ? (
-            <button
-              type="button"
-              onClick={handleShowMore}
-              className="h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] disabled:opacity-50"
-            >
-              더보기
-            </button>
+          <LoadMoreButton hasMore={canShowMore} onLoad={handleShowMore} />
+          {!canShowMore && filtered.length > MAX_VISIBLE ? (
+            <p className="text-center text-[12px] text-app-gray-500">
+              상위 {MAX_VISIBLE}개 종목까지 보여드려요. 검색어로 더 좁혀보세요.
+            </p>
           ) : null}
         </>
       )}

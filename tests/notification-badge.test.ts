@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUnreadBadge } from "../src/lib/notifications";
-import { pinChangeNeedsRefetch, updateNotificationCache } from "../src/lib/hooks";
+import { pinChangeNeedsRefetch, updateNotificationCache } from "../src/lib/notification-cache";
 import type { Notification, Page } from "../src/lib/types";
 
 const notification = (id: number): Notification => ({

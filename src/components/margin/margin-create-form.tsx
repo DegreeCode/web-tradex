@@ -13,6 +13,7 @@ import { ErrorBlock, InstrumentStateChip, Surface } from "@/components/primitive
 import { Segmented } from "@/components/segmented";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
+  addDecimal,
   compareDecimal,
   fmtCredit,
   fmtDateTime,
@@ -20,8 +21,8 @@ import {
   isDecimalInput,
   multiplyDecimal,
   scaleDecimal,
-  toNumber,
 } from "@/lib/format";
+import { defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/lib/hooks";
 import {
   getLeverageOptions,
@@ -57,9 +58,7 @@ export function MarginCreateForm({
   const marketState = marketStateQuery.data;
 
   // Account resolution
-  const defaultAccountId =
-    accounts.find((a) => a.is_primary)?.account_id ?? accounts[0]?.account_id ?? "";
-  const currentAccountId = selectedAccountId || defaultAccountId;
+  const currentAccountId = selectedAccountId || pickDefaultAccount(accounts);
   const currentAccount = accounts.find((a) => a.account_id === currentAccountId);
 
   // Form states
@@ -143,9 +142,8 @@ export function MarginCreateForm({
   const estimatedBorrow = useMemo(() => {
     if (!collateral || !resolvedLeverage) return null;
     if (side === "LONG") {
-      const lev = toNumber(resolvedLeverage);
-      const borrowFactor = Math.max(0, lev - 1);
-      return scaleDecimal(collateral, borrowFactor, 4);
+      // LONG borrows the part of the position above the collateral itself.
+      return multiplyDecimal(collateral, addDecimal(resolvedLeverage, "-1"), 4);
     }
     // SHORT: Borrowing shares equivalent to collateral * leverage
     return multiplyDecimal(collateral, resolvedLeverage, 4);
@@ -237,7 +235,6 @@ export function MarginCreateForm({
           </div>
           <select
             id="margin-symbol"
-            aria-label="종목 선택"
             disabled={instrumentsQuery.isPending || instruments.length === 0}
             value={resolvedSymbol}
             onChange={(e) => setSymbol(e.target.value)}
@@ -290,6 +287,8 @@ export function MarginCreateForm({
               inputMode="decimal"
               value={collateral}
               placeholder="0"
+              aria-invalid={Boolean(collateral && collateralError)}
+              aria-describedby="margin-collateral-hint"
               onChange={(e) => {
                 const val = e.target.value.replace(/,/g, "");
                 if (val === "" || isDecimalInput(val, 16)) {
@@ -300,7 +299,7 @@ export function MarginCreateForm({
             />
             <span className="shrink-0 text-[14px] font-semibold text-app-gray-400">Credit</span>
           </div>
-          <div className="mt-2.5 grid grid-cols-4 gap-1.5">
+          <div role="group" aria-label="사용 가능 금액 비율" className="mt-2.5 grid grid-cols-4 gap-1.5">
             {[10, 25, 50, 100].map((percent) => {
               const value = availableCredit
                 ? percent === 100 ? availableCredit : scaleDecimal(availableCredit, percent / 100, 16)
@@ -312,14 +311,14 @@ export function MarginCreateForm({
                   disabled={!value}
                   onClick={() => value && setCollateral(value)}
                   aria-pressed={Boolean(value && collateral) && compareDecimal(collateral, value ?? "0") === 0}
-                  className="rounded-lg bg-app-gray-100 py-1.5 text-[12px] font-semibold text-app-gray-600 hover:bg-app-gray-200 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark disabled:opacity-40"
+                  className="min-h-9 rounded-lg bg-app-gray-100 text-[12px] font-semibold text-app-gray-600 hover:bg-app-gray-200 aria-pressed:bg-app-blue-light aria-pressed:text-app-blue-dark disabled:opacity-40"
                 >
                   {percent === 100 ? "최대" : `${percent}%`}
                 </button>
               );
             })}
           </div>
-          <p className={`numeric mt-2 text-[12px] ${collateral && collateralError ? "font-medium text-app-red" : "text-app-gray-500"}`}>
+          <p id="margin-collateral-hint" className={`numeric mt-2 text-[12px] ${collateral && collateralError ? "font-medium text-app-red" : "text-app-gray-500"}`}>
             {collateral && collateralError
               ? collateralError
               : availableCredit

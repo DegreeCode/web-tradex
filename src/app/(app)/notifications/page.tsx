@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { EmptyState, ErrorBlock, SkeletonRows } from "@/components/primitives";
+import { EmptyState, ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtRelative } from "@/lib/format";
@@ -72,23 +72,21 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">알림</h1>
-          <p className="mt-1 text-[13px] text-app-gray-500">
-            공지와 체결·송금·문의 소식을 확인하세요
-          </p>
-        </div>
+      <PageHeader
+        title="알림"
+        subtitle="공지와 체결·송금·문의 소식을 확인하세요"
+        action={
         <button
           type="button"
           onClick={filter === "UNREAD" ? handleMarkLoaded : handleMarkAll}
           disabled={notifications.isPending || markAll.isPending || markBatch.isPending || (filter === "UNREAD" && unreadRows.length === 0)}
           className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-app-gray-100 px-3.5 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
         >
-          <CheckCheck className="size-4" />
+          <CheckCheck aria-hidden="true" className="size-4" />
           {filter === "UNREAD" ? "목록 읽음" : "모두 읽음"}
         </button>
-      </div>
+        }
+      />
 
       <Segmented<"ALL" | "UNREAD">
         value={filter}
@@ -112,23 +110,19 @@ export default function NotificationsPage() {
         <EmptyState
           title={filter === "UNREAD" ? "안 읽은 알림이 없어요" : "알림이 없어요"}
           description="체결·송금·공지가 생기면 이곳에 도착해요"
-          icon={<Bell className="size-6" />}
+          icon={<Bell aria-hidden="true" className="size-6" />}
         />
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
           {rows.map((item) => (
             <NotificationCard key={item.notification_id} item={item} onOpen={handleOpen} />
           ))}
-          {notifications.hasNextPage ? (
-            <button
-              type="button"
-              onClick={() => void notifications.fetchNextPage()}
-              disabled={notifications.isFetchingNextPage}
-              className="h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
-            >
-              더보기
-            </button>
-          ) : null}
+          <LoadMoreButton
+            hasMore={notifications.hasNextPage}
+            loading={notifications.isFetchingNextPage}
+            onLoad={() => void notifications.fetchNextPage()}
+            className="xl:col-span-2"
+          />
         </div>
       )}
 
@@ -167,7 +161,7 @@ export default function NotificationsPage() {
               </p>
               {selected.read ? null : (
                 <p className="flex items-center gap-1.5 text-[12px] text-app-gray-400">
-                  <MailOpen className="size-3.5" />
+                  <MailOpen aria-hidden="true" className="size-3.5" />
                   읽음으로 표시했어요
                 </p>
               )}
@@ -195,7 +189,8 @@ function NotificationCard({
       type="button"
       onClick={() => onOpen(item)}
       aria-label={`${presentation.title}, ${item.read ? "읽음" : "안 읽음"}`}
-      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-[0_1px_2px_0_rgba(25,31,40,0.03)] transition-colors hover:bg-app-gray-50 ${
+      aria-haspopup="dialog"
+      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-card transition-colors hover:bg-app-gray-50 ${
         item.read
           ? "bg-card"
           : "border border-app-blue/15 bg-app-blue-faint"
@@ -211,7 +206,7 @@ function NotificationCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {!item.read ? <span className="size-2 shrink-0 rounded-full bg-app-red" /> : null}
+              {!item.read ? <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-app-red" /> : null}
               <span className="rounded-md bg-app-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-app-gray-600">
                 {presentation.label}
               </span>

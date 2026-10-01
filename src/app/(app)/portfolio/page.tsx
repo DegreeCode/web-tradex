@@ -4,16 +4,19 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { buildHolding, HoldingRow } from "@/components/holding-row";
-import { NavChart } from "@/components/nav-chart";
+import { NAV_RANGES, NavChart } from "@/components/nav-chart";
 import {
   ChangeIndicator,
   EmptyState,
   ErrorBlock,
+  LoadMoreButton,
+  PageHeader,
   SectionHeader,
   SkeletonRows,
   Surface,
 } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
+import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import {
   changePercent,
@@ -21,6 +24,7 @@ import {
   fmtDecimal,
   fmtRelative,
   fmtSigned,
+  shortId,
   toNumber,
 } from "@/lib/format";
 import {
@@ -33,18 +37,14 @@ import {
 } from "@/lib/hooks";
 import type { NavRange } from "@/lib/types";
 
-const RANGES: { value: NavRange; label: string }[] = [
-  { value: "1d", label: "1일" },
-  { value: "1w", label: "1주" },
-  { value: "1mo", label: "1개월" },
-  { value: "3mo", label: "3개월" },
-  { value: "1y", label: "1년" },
-];
-
 export default function PortfolioPage() {
   const { accounts, portfolios, isLoading, error: portfolioError, refetch: refetchPortfolios } = useAllPortfolios();
   const instrumentsQuery = useInstruments();
   const realizedQuery = useRealizedPnL(20);
+  const accountName = (accountId: string) => {
+    const account = accounts.find((row) => row.account_id === accountId);
+    return account ? accountLabel(account, accounts) : "계좌";
+  };
   const navQuery = useNav();
   const [realizedLimit, setRealizedLimit] = useState(5);
   const [accountFilter, setAccountFilter] = useState<string>("ALL");
@@ -114,28 +114,30 @@ export default function PortfolioPage() {
       ? toNumber(navSeries[navSeries.length - 1].value) - toNumber(navSeries[0].value)
       : null;
 
-  const realizedRows = (realizedQuery.data?.pages.flatMap((page) => page.data) ?? []).slice(
-    0,
-    realizedLimit,
+  const loadedRealized = useMemo(
+    () => realizedQuery.data?.pages.flatMap((page) => page.data) ?? [],
+    [realizedQuery.data],
   );
-  const realizedTotal = (realizedQuery.data?.pages.flatMap((page) => page.data) ?? []).reduce(
-    (sum, row) => sum + toNumber(row.realized_pnl),
-    0,
-  );
+  const realizedRows = loadedRealized.slice(0, realizedLimit);
+  // Only the rows shown are summed, so the label says how many they are.
+  const realizedTotal = realizedRows.reduce((sum, row) => sum + toNumber(row.realized_pnl), 0);
+  const canShowMoreRealized = realizedLimit < loadedRealized.length || realizedQuery.hasNextPage;
 
   return (
     <div className="space-y-6 xl:grid xl:grid-cols-12 xl:gap-5 xl:space-y-0">
-      <div className="xl:col-span-12 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">투자</h1>
-          <p className="mt-1 text-[13px] text-app-gray-500">자산과 보유 종목을 한눈에 확인하세요</p>
-        </div>
-        <Link
-          href="/margin"
-          className="inline-flex items-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light px-3.5 py-2 text-[13px] font-bold text-app-blue-dark hover:bg-blue-100 transition-colors"
-        >
-          마진 포지션 관리
-        </Link>
+      <div className="xl:col-span-12">
+        <PageHeader
+          title="투자"
+          subtitle="자산과 보유 종목을 한눈에 확인하세요"
+          action={
+            <Link
+              href="/margin"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light px-3.5 text-[13px] font-bold text-app-blue-dark transition-opacity hover:opacity-80"
+            >
+              마진 포지션 관리
+            </Link>
+          }
+        />
       </div>
 
       <Surface className="@container min-w-0 xl:col-span-4">
@@ -206,7 +208,7 @@ export default function PortfolioPage() {
           {historyQuery.isError ? <ErrorBlock message={errorMessage(historyQuery.error)} onRetry={() => void historyQuery.refetch()} /> : null}
           {historyQuery.isLoading ? <div aria-label="자산 추이 로딩" role="status"><SkeletonRows rows={2} /></div> : historyQuery.data || !historyQuery.isError ? <NavChart points={navSeries} height={180} /> : null}
         </div>
-        <Segmented<NavRange> value={range} onChange={setRange} options={RANGES} className="mt-3" />
+        <Segmented<NavRange> value={range} onChange={setRange} options={NAV_RANGES} className="mt-3" />
       </Surface>
 
       {nav && nav.accounts.length > 1 ? (
@@ -217,9 +219,10 @@ export default function PortfolioPage() {
               key={account.account_id}
               className="flex flex-col items-start gap-1 border-b border-app-gray-100 py-2.5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
             >
-              <div>
-                <p className="min-w-0 break-all text-[14px] font-semibold text-app-gray-900">
-                  {account.account_id}
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-app-gray-900">
+                  {accountName(account.account_id)}
+                  <span className="numeric ml-1.5 text-[12px] font-normal text-app-gray-400">{shortId(account.account_id)}</span>
                 </p>
                 <p className="numeric min-w-0 break-all text-[12px] text-app-gray-500">
                   Credit {fmtCredit(account.total_credit, 2)} · 주식{" "}
@@ -246,7 +249,7 @@ export default function PortfolioPage() {
             { value: "ALL", label: "전체 계좌" },
             ...accounts.map((account) => ({
               value: account.account_id,
-              label: account.is_primary ? "대표" : "추가",
+              label: accountLabel(account, accounts),
             })),
           ]}
         />
@@ -273,7 +276,7 @@ export default function PortfolioPage() {
             }
           />
         ) : (
-          <div className="divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+          <div className="divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-card">
             {holdings.map((holding) => (
               <HoldingRow key={`${holding.accountId}:${holding.position.symbol}`} holding={holding} />
             ))}
@@ -284,7 +287,7 @@ export default function PortfolioPage() {
       <section className="xl:col-span-6">
         <SectionHeader
           title="실현 손익"
-          description={realizedQuery.data ? `누적 ${fmtSigned(realizedTotal, 4)} Credit` : undefined}
+          description={realizedRows.length > 0 ? `최근 ${realizedRows.length}건 합계 ${fmtSigned(realizedTotal, 4)} Credit` : undefined}
         />
         {realizedQuery.isError ? <ErrorBlock message={errorMessage(realizedQuery.error)} onRetry={() => void realizedQuery.refetch()} /> : null}
         {realizedQuery.isLoading ? (
@@ -293,7 +296,7 @@ export default function PortfolioPage() {
           <EmptyState title="실현 손익 내역이 없어요" description="매도하면 손익이 기록돼요" />
         ) : (
           <>
-            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
               {realizedRows.map((row) => (
                 <div
                   key={`${row.trade_id}-${row.at}`}
@@ -315,18 +318,17 @@ export default function PortfolioPage() {
                 </div>
               ))}
             </div>
-            {realizedQuery.hasNextPage || realizedLimit < realizedRows.length ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setRealizedLimit((limit) => limit + 10);
-                  if (realizedQuery.hasNextPage) void realizedQuery.fetchNextPage();
-                }}
-                className="mt-3 h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
-              >
-                더보기
-              </button>
-            ) : null}
+            <LoadMoreButton
+              hasMore={canShowMoreRealized}
+              loading={realizedQuery.isFetchingNextPage}
+              onLoad={() => {
+                const next = realizedLimit + 10;
+                setRealizedLimit(next);
+                // Fetch only once the already loaded rows run out.
+                if (next > loadedRealized.length && realizedQuery.hasNextPage) void realizedQuery.fetchNextPage();
+              }}
+              className="mt-3"
+            />
           </>
         )}
       </section>

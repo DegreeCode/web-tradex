@@ -66,6 +66,36 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(`${href}/`);
 }
 
+type NavItem = (typeof PRIMARY_NAV)[number];
+
+function SidebarLink({ item, active, badge }: { item: NavItem; active: boolean; badge?: string | null }) {
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue",
+        active ? "bg-app-blue-light text-app-blue-dark" : "text-app-gray-600 hover:bg-app-gray-100",
+      )}
+    >
+      <item.icon aria-hidden="true" className="size-[18px]" />
+      {item.label}
+      {badge ? <UnreadBadge label={badge} className="ml-auto" /> : null}
+    </Link>
+  );
+}
+
+function UnreadBadge({ label, className }: { label: string; className?: string }) {
+  return (
+    <span
+      aria-label={`안 읽은 알림 ${label}개`}
+      className={cn("rounded-full bg-app-red px-1.5 py-0.5 text-[11px] leading-none font-bold text-white", className)}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -85,6 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useSymbolMetadataSync();
   usePrivateStream(authenticated);
 
+  const initial = user?.username.slice(0, 1).toUpperCase() ?? "⋯";
   const currentTitle =
     [...PRIMARY_NAV, ...MORE_NAV].find((item) => isActive(pathname, item.href))?.label ?? "";
   const moreActive = MORE_NAV.some((item) => isActive(pathname, item.href));
@@ -110,66 +141,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
         <nav aria-label="주 메뉴" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
-          {PRIMARY_NAV.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-app-blue focus-visible:-outline-offset-2",
-                  active
-                    ? "bg-app-blue-light text-app-blue-dark"
-                    : "text-app-gray-600 hover:bg-app-gray-100",
-                )}
-              >
-                <item.icon className="size-[18px]" />
-                {item.label}
-              </Link>
-            );
-          })}
-          <div className="px-3 pt-5 pb-1 text-[12px] font-semibold text-app-gray-400">더보기</div>
-          {MORE_NAV.map((item) => {
-            const active = isActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-app-blue focus-visible:-outline-offset-2",
-                  active
-                    ? "bg-app-blue-light text-app-blue-dark"
-                    : "text-app-gray-600 hover:bg-app-gray-100",
-                )}
-              >
-                <item.icon className="size-[18px]" />
-                {item.label}
-              </Link>
-            );
-          })}
+          {PRIMARY_NAV.map((item) => (
+            <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />
+          ))}
+          <p className="px-3 pt-5 pb-1 text-[12px] font-semibold text-app-gray-400">더보기</p>
+          {MORE_NAV.map((item) => (
+            <SidebarLink
+              key={item.href}
+              item={item}
+              active={isActive(pathname, item.href)}
+              badge={item.href === "/notifications" ? unreadBadgeLabel : null}
+            />
+          ))}
         </nav>
         <div className="shrink-0 border-t border-app-gray-200 p-4">
-          <Link
-            href="/notifications"
-            aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
-            className={cn(
-              "mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold focus-visible:outline-2 focus-visible:outline-app-blue",
-              isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue-dark" : "text-app-gray-600 hover:bg-app-gray-100",
-            )}
-          >
-            <Bell className="size-[18px]" />
-            알림
-            {unreadBadgeLabel ? (
-              <span className="ml-auto rounded-full bg-app-red px-1.5 py-0.5 text-[11px] font-bold text-white">
-                {unreadBadgeLabel}
-              </span>
-            ) : null}
-          </Link>
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-[14px] font-bold text-app-gray-700">
-              {user?.username.slice(0, 1).toUpperCase()}
+            <div aria-hidden="true" className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-[14px] font-bold text-app-gray-700">
+              {initial}
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[14px] font-semibold text-app-gray-900">
@@ -182,9 +170,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={handleLogout}
               disabled={!authenticated || logout.isPending}
               aria-label="로그아웃"
-              className="rounded-lg p-2 text-app-gray-400 hover:bg-app-gray-100 hover:text-app-gray-700 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
+              title="로그아웃"
+              className="rounded-lg p-2.5 text-app-gray-400 hover:bg-app-gray-100 hover:text-app-gray-700 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
             >
-              <LogOut className="size-4" />
+              <LogOut aria-hidden="true" className="size-4" />
             </button>
           </div>
         </div>
@@ -193,9 +182,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-dvh min-w-0 flex-col lg:pl-64">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-app-gray-200 bg-background/90 px-4 backdrop-blur-md lg:hidden">
           {currentTitle ? (
-            <h1 className="min-w-0 truncate text-[17px] font-bold tracking-[-0.02em] text-app-gray-900">
+            // The page renders its own h1; this is only the bar's label.
+            <p className="min-w-0 truncate text-[17px] font-bold tracking-[-0.02em] text-app-gray-900">
               {currentTitle}
-            </h1>
+            </p>
           ) : (
             <Link
               href="/"
@@ -210,15 +200,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="알림"
               aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
               className={cn(
-                "relative flex size-9 items-center justify-center rounded-full shadow-[0_1px_2px_0_rgba(25,31,40,0.06)] focus-visible:outline-2 focus-visible:outline-app-blue",
+                "relative flex size-9 items-center justify-center rounded-full shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
                 isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
               )}
             >
-              <Bell className="size-4" />
+              <Bell aria-hidden="true" className="size-4" />
               {unreadBadgeLabel ? (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-app-red px-1 text-[9px] font-bold text-white">
-                  {unreadBadgeLabel}
-                </span>
+                <UnreadBadge
+                  label={unreadBadgeLabel}
+                  className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px]"
+                />
               ) : null}
             </Link>
             <button
@@ -227,12 +218,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-expanded={moreOpen}
               aria-controls="more-navigation"
               className={cn(
-                "flex size-9 items-center justify-center rounded-full text-[13px] font-bold shadow-[0_1px_2px_0_rgba(25,31,40,0.06)] focus-visible:outline-2 focus-visible:outline-app-blue",
+                "flex size-9 items-center justify-center rounded-full text-[13px] font-bold shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
                 moreOpen ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
               )}
               aria-label="더보기"
             >
-              {user?.username.slice(0, 1).toUpperCase() ?? "⋯"}
+              {initial}
             </button>
           </div>
         </header>
@@ -261,7 +252,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     active ? "text-app-gray-900" : "text-app-gray-400",
                   )}
                 >
-                  <item.icon className={cn("size-5", active && "text-app-blue")} />
+                  <item.icon aria-hidden="true" className={cn("size-5", active && "text-app-blue")} />
                   {item.label}
                 </Link>
               );
@@ -282,7 +273,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 "flex size-5 items-center justify-center rounded-full text-[10px] font-bold",
                 moreActive || moreOpen ? "bg-app-blue-light text-app-blue" : "bg-app-gray-100 text-app-gray-600",
               )}>
-                {user?.username.slice(0, 1).toUpperCase() ?? "⋯"}
+                {initial}
               </span>
               더보기
             </button>
@@ -297,8 +288,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
             <div className="mb-4 flex items-center gap-3 rounded-2xl bg-app-gray-100 p-4">
-              <div className="flex size-10 items-center justify-center rounded-full bg-card text-[15px] font-bold text-app-gray-700">
-                {user?.username.slice(0, 1).toUpperCase()}
+              <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-full bg-card text-[15px] font-bold text-app-gray-700">
+                {initial}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-bold text-app-gray-900">{user?.username ?? "로그인 확인 중…"}</p>

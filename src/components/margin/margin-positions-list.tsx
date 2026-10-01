@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronRight, Layers, Loader2 } from "lucide-react";
+import { ChevronRight, Layers } from "lucide-react";
 import {
   EmptyState,
+  LoadMoreButton,
   SectionHeader,
   SkeletonRows,
   Surface,
@@ -17,7 +18,7 @@ import {
 import { MarginPositionDetailDialog } from "./margin-position-detail-dialog";
 import { MarginReturn } from "./margin-return";
 import { MarginRiskBadge, MarginSideBadge, MarginStatusChip } from "./margin-status-chip";
-import { marginRiskLevel, type MarginPosition } from "@/lib/margin";
+import { isActiveMarginPosition, marginRiskLevel, type MarginPosition } from "@/lib/margin";
 import { useExchangeInfo } from "@/lib/exchange-info";
 
 type FilterStatus = "ALL" | "OPEN" | "CLOSED";
@@ -48,8 +49,8 @@ export function MarginPositionsList({
 
   const filteredPositions = useMemo(() => {
     if (filter === "ALL") return positions;
-    if (filter === "OPEN") return positions.filter((p) => p.status === "OPEN");
-    return positions.filter((p) => p.status !== "OPEN");
+    const active = filter === "OPEN";
+    return positions.filter((position) => isActiveMarginPosition(position.status) === active);
   }, [positions, filter]);
 
   function handleDetailOpenChange(open: boolean) {
@@ -91,13 +92,17 @@ export function MarginPositionsList({
                 ? "보유 중인 마진 포지션이 없어요"
                 : "마진 포지션 내역이 없어요"
             }
-            description="새 포지션을 열어 레버리지 거래를 시작해보세요."
+            description={
+              hasNextPage && filter !== "ALL"
+                ? "이전 포지션을 더 불러와 확인해보세요."
+                : "새 포지션을 열어 레버리지 거래를 시작해보세요."
+            }
           />
           {onCreate ? (
             <button
               type="button"
               onClick={onCreate}
-              className="mx-auto mt-1 block rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white lg:hidden"
+              className="mx-auto mt-1 block min-h-11 rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white lg:hidden"
             >
               새 포지션 열기
             </button>
@@ -140,7 +145,7 @@ export function MarginPositionsList({
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <MarginStatusChip status={pos.status} />
-                      <ChevronRight className="size-4 text-app-gray-400" />
+                      <ChevronRight aria-hidden="true" className="size-4 text-app-gray-400" />
                     </div>
                   </div>
 
@@ -176,23 +181,18 @@ export function MarginPositionsList({
             );
           })}
 
-          {hasNextPage ? (
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={onFetchNextPage}
-                disabled={isFetchingNextPage}
-                className="inline-flex items-center gap-2 rounded-xl border border-app-gray-200 bg-card px-5 py-2.5 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:bg-app-gray-100"
-              >
-                {isFetchingNextPage ? (
-                  <Loader2 className="size-4 animate-spin text-app-gray-400" />
-                ) : null}
-                이전 포지션 더 보기
-              </button>
-            </div>
-          ) : null}
         </div>
       )}
+
+      {/* Outside the list so a filter with no loaded match can still page back. */}
+      {onFetchNextPage ? (
+        <LoadMoreButton
+          hasMore={hasNextPage}
+          loading={isFetchingNextPage}
+          onLoad={onFetchNextPage}
+          label="이전 포지션 더 보기"
+        />
+      ) : null}
 
       {positions.length > 0 ? (
         <p className="text-[12px] leading-relaxed text-app-gray-500">

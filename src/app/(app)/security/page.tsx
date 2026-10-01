@@ -7,6 +7,7 @@ import { KeyRound, LogOut, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RecoveryKeyGrid } from "@/components/recovery-keys";
-import { ErrorBlock, SkeletonRows, Surface } from "@/components/primitives";
+import { ErrorBlock, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
 import { ApiError, errorMessage, postData } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtRelative, shortId } from "@/lib/format";
 import {
@@ -43,7 +44,10 @@ export default function SecurityPage() {
 
   const [addBusy, setAddBusy] = useState(false);
   const [recoveryKeys, setRecoveryKeys] = useState<string[] | null>(null);
+  const [recoverySaved, setRecoverySaved] = useState(false);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [pendingPasskeyDelete, setPendingPasskeyDelete] = useState<string | null>(null);
 
   async function handleAddPasskey() {
     setAddBusy(true);
@@ -70,7 +74,22 @@ export default function SecurityPage() {
 
   function handleRotate() {
     rotate.mutate(undefined, {
-      onSuccess: (result) => setRecoveryKeys(result.recovery_keys),
+      onSuccess: (result) => {
+        setConfirmRotate(false);
+        setRecoverySaved(false);
+        setRecoveryKeys(result.recovery_keys);
+      },
+      onError: (error) => toast.error(errorMessage(error)),
+    });
+  }
+
+  function handleDeletePasskey() {
+    if (!pendingPasskeyDelete) return;
+    deletePasskey.mutate(pendingPasskeyDelete, {
+      onSuccess: () => {
+        setPendingPasskeyDelete(null);
+        toast.success("패스키를 삭제했어요");
+      },
       onError: (error) => toast.error(errorMessage(error)),
     });
   }
@@ -92,17 +111,12 @@ export default function SecurityPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">보안</h1>
-        <p className="mt-1 text-[13px] text-app-gray-500">
-          패스키와 로그인 세션, 복구키를 관리하세요
-        </p>
-      </div>
+      <PageHeader title="보안" subtitle="패스키와 로그인 세션, 복구키를 관리하세요" />
 
       <Surface>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="size-4 text-app-blue" />
+            <ShieldCheck aria-hidden="true" className="size-4 text-app-blue" />
             <h2 className="text-[16px] font-bold text-app-gray-900">패스키</h2>
           </div>
           <button
@@ -111,8 +125,8 @@ export default function SecurityPage() {
             disabled={addBusy}
             className="flex h-9 items-center gap-1 rounded-xl bg-app-gray-100 px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
           >
-            <Plus className="size-3.5" />
-            {addBusy ? "등록 중…" : "추가"}
+            <Plus aria-hidden="true" className="size-3.5" />
+            {addBusy ? "등록 중…" : "패스키 추가"}
           </button>
         </div>
         <div className="mt-3 space-y-2">
@@ -130,7 +144,7 @@ export default function SecurityPage() {
                 className="flex items-center justify-between gap-2 rounded-xl bg-app-gray-50 px-3 py-2.5"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <KeyRound className="size-4 shrink-0 text-app-gray-500" />
+                  <KeyRound aria-hidden="true" className="size-4 shrink-0 text-app-gray-500" />
                   <div className="min-w-0">
                     <p className="text-[13px] font-semibold text-app-gray-900">
                       {fmtDate(passkey.created_at)} 등록
@@ -144,17 +158,13 @@ export default function SecurityPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() =>
-                    deletePasskey.mutate(passkey.passkey_id, {
-                      onSuccess: () => toast.success("패스키를 삭제했어요"),
-                      onError: (error) => toast.error(errorMessage(error)),
-                    })
-                  }
-                  disabled={deletePasskey.isPending}
-                  className="shrink-0 rounded-lg p-2 text-app-gray-400 hover:bg-card hover:text-app-red disabled:opacity-50"
-                  aria-label="패스키 삭제"
+                  onClick={() => setPendingPasskeyDelete(passkey.passkey_id)}
+                  disabled={(passkeys.data?.length ?? 0) <= 1}
+                  title={(passkeys.data?.length ?? 0) <= 1 ? "마지막 패스키는 삭제할 수 없어요" : undefined}
+                  className="shrink-0 rounded-lg p-2.5 text-app-gray-400 hover:bg-card hover:text-app-red disabled:opacity-40"
+                  aria-label={`${fmtDate(passkey.created_at)}에 등록한 패스키 삭제`}
                 >
-                  <Trash2 className="size-4" />
+                  <Trash2 aria-hidden="true" className="size-4" />
                 </button>
               </div>
             ))
@@ -168,7 +178,7 @@ export default function SecurityPage() {
           <button
             type="button"
             onClick={() => setConfirmRevokeAll(true)}
-            className="text-[13px] font-semibold text-app-gray-500"
+            className="min-h-9 rounded-lg px-2 text-[13px] font-semibold text-app-gray-500 hover:bg-app-gray-100"
           >
             전체 로그아웃
           </button>
@@ -213,10 +223,10 @@ export default function SecurityPage() {
                       onError: (error) => toast.error(errorMessage(error)),
                     })
                   }
-                  disabled={revokeSessions.isPending}
-                  className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-100 disabled:opacity-50"
+                  disabled={revokeSessions.isPending && revokeSessions.variables?.[0] === session.session_id}
+                  className="min-h-9 shrink-0 rounded-lg bg-card px-2.5 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-100 disabled:opacity-50"
                 >
-                  로그아웃
+                  {session.is_current ? "이 기기 로그아웃" : "로그아웃"}
                 </button>
               </div>
             ))
@@ -232,7 +242,7 @@ export default function SecurityPage() {
         </p>
         <button
           type="button"
-          onClick={handleRotate}
+          onClick={() => setConfirmRotate(true)}
           disabled={rotate.isPending}
           className="mt-3 h-11 w-full rounded-xl bg-app-gray-100 text-[14px] font-bold text-app-gray-800 hover:bg-app-gray-200 disabled:opacity-50"
         >
@@ -251,13 +261,14 @@ export default function SecurityPage() {
           disabled={logout.isPending}
           className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-app-red-light text-[14px] font-bold text-app-red hover:opacity-90 disabled:opacity-50"
         >
-          <LogOut className="size-4" />
+          <LogOut aria-hidden="true" className="size-4" />
           {logout.isPending ? "로그아웃 중…" : "로그아웃"}
         </button>
       </Surface>
 
-      <Dialog open={Boolean(recoveryKeys)} onOpenChange={(open) => !open && setRecoveryKeys(null)}>
-        <DialogContent className="rounded-2xl">
+      {/* Shown once: it only closes through the explicit "saved" button. */}
+      <Dialog open={Boolean(recoveryKeys)} disablePointerDismissal onOpenChange={() => undefined}>
+        <DialogContent className="rounded-2xl" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>새 복구키가 발급됐어요</DialogTitle>
             <DialogDescription>
@@ -265,43 +276,62 @@ export default function SecurityPage() {
             </DialogDescription>
           </DialogHeader>
           {recoveryKeys ? <RecoveryKeyGrid keys={recoveryKeys} /> : null}
+          <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-app-gray-700">
+            <input
+              type="checkbox"
+              checked={recoverySaved}
+              onChange={(event) => setRecoverySaved(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-app-blue"
+            />
+            복구키를 안전한 곳에 저장했어요
+          </label>
+          <button
+            type="button"
+            onClick={() => setRecoveryKeys(null)}
+            disabled={!recoverySaved}
+            className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+          >
+            확인
+          </button>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmRevokeAll} onOpenChange={setConfirmRevokeAll}>
-        <DialogContent className="rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>모든 기기에서 로그아웃할까요?</DialogTitle>
-            <DialogDescription>
-              현재 기기를 포함한 모든 세션이 해지돼요. 다시 패스키로 로그인해야 해요.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setConfirmRevokeAll(false)}
-              className="h-11 flex-1 rounded-xl bg-app-gray-100 text-[14px] font-semibold text-app-gray-700"
-            >
-              취소
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                revokeAll.mutate(undefined, {
-                  onSuccess: () => {
-                    handleSessionExpired();
-                  },
-                  onError: (error) => toast.error(errorMessage(error)),
-                })
-              }
-              disabled={revokeAll.isPending}
-              className="h-11 flex-1 rounded-xl bg-app-red text-[14px] font-bold text-white disabled:opacity-50"
-            >
-              {revokeAll.isPending ? "처리 중…" : "전체 로그아웃"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmRotate}
+        onOpenChange={setConfirmRotate}
+        title="복구키를 재발급할까요?"
+        description="지금 가진 복구키 8개는 바로 쓸 수 없게 돼요. 새 복구키는 한 번만 보여드려요."
+        confirmLabel="재발급"
+        pendingLabel="재발급 중…"
+        pending={rotate.isPending}
+        onConfirm={handleRotate}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingPasskeyDelete)}
+        onOpenChange={(open) => !open && setPendingPasskeyDelete(null)}
+        title="패스키를 삭제할까요?"
+        description="이 패스키로는 더 이상 로그인할 수 없어요. 그 기기에서는 다른 패스키나 복구키로 로그인해야 해요."
+        confirmLabel="삭제"
+        pendingLabel="삭제 중…"
+        pending={deletePasskey.isPending}
+        onConfirm={handleDeletePasskey}
+      />
+
+      <ConfirmDialog
+        open={confirmRevokeAll}
+        onOpenChange={setConfirmRevokeAll}
+        title="모든 기기에서 로그아웃할까요?"
+        description="현재 기기를 포함한 모든 세션이 해지돼요. 다시 패스키로 로그인해야 해요."
+        confirmLabel="전체 로그아웃"
+        pending={revokeAll.isPending}
+        onConfirm={() =>
+          revokeAll.mutate(undefined, {
+            onSuccess: handleSessionExpired,
+            onError: (error) => toast.error(errorMessage(error)),
+          })
+        }
+      />
     </div>
   );
 }
