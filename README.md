@@ -7,7 +7,7 @@ Vercel 정적 배포를 전제로 만들어졌습니다. 관리자(admin) API는
 
 - Next.js 16 (App Router, Turbopack) · React 19 · TypeScript
 - Tailwind CSS v4 · shadcn/ui (Base UI) · lucide-react
-- TanStack Query v5 (WebSocket 우선, REST 복구) · Recharts · sonner
+- TanStack Query v5 (WebSocket 우선, REST 복구) · lightweight-charts (가격·자산 차트) · sonner
 - `@simplewebauthn/browser` (패스키 등록/로그인)
 
 ## 배포 형태: 정적 익스포트 + API 직접 연결
@@ -73,7 +73,8 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 5. API 서버의 허용 오리진을 새 도메인으로 맞춥니다.
 
 `vercel.json`은 모든 경로에 보안 헤더(클릭재킹 차단 `frame-ancestors 'none'`·`X-Frame-Options`,
-`nosniff`, Referrer/Permissions 정책)를 붙입니다.
+`form-action 'self'`, `Cross-Origin-Opener-Policy: same-origin`, `nosniff`, Referrer/Permissions 정책)를
+붙입니다. 정적 익스포트는 인라인 부트스트랩 스크립트를 쓰므로 `script-src`는 지정하지 않습니다.
 
 ## 화면과 사용 API
 
@@ -136,8 +137,18 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
 - **갱신**: WebSocket 실시간 반영 + 연결 종료/gap 시 REST 재조회. 캔들처럼 전용 stream이 없는
   데이터만 제한적으로 폴링합니다. 비공개 WS가 연결된 동안 계좌 데이터는 이벤트로 무효화되므로
   포커스·재마운트 재조회는 60초가 지난 뒤에만 합니다.
-- **모듈**: `src/lib/hooks.ts`는 React Query 훅과 스트림, `src/lib/symbol-metadata.ts`는 탭 간에
-  공유하는 종목 메타데이터 localStorage 캐시, `src/lib/candle-data.ts`는 캔들 버킷·빈 구간 계산을 맡습니다.
+- **모듈** (`src/lib`):
+  - `hooks.ts`: React Query 훅과 WS 스트림 훅
+  - `market-cache.ts`: 종목 메타데이터·시세·거래 상태 이벤트를 종목 목록/상세 캐시에 반영(이벤트 순서 역전 방지 워터마크 포함)
+  - `notification-cache.ts`: 알림 프레임·읽음 처리를 불러온 알림 목록 캐시에 반영
+  - `candle-data.ts` / `candle-cache.ts`: 캔들 버킷·빈 구간 계산 / 실시간 체결을 캔들 캐시에 합치는 런타임.
+    체결마다 같은 타임스탬프를 다시 계산하지 않도록 버킷·시각 파싱 결과를 상한 있는 메모로 재사용합니다
+  - `symbol-metadata.ts`: 탭 간에 공유하는 종목 메타데이터 localStorage 캐시
+  - `accounts.ts`·`instruments.ts`·`clipboard.ts`: 계좌 표시 이름(“추가 계좌 2”), 상한가·최근 체결 표시 조건, 복사 처리
+- **화면 공통**: 페이지 제목은 `PageHeader`, 커서 목록의 다음 페이지는 `LoadMoreButton`(필터 결과가 비어도 표시),
+  되돌릴 수 없는 동작(계좌·패스키 삭제, 복구키 재발급, 전체 로그아웃)은 `ConfirmDialog`로 확인합니다.
+  화면 렌더링 오류는 `(app)/error.tsx`가 셸을 유지한 채 다시 시도 화면을 보여주고, 없는 주소는 `not-found.tsx`가 처리합니다.
+  탭 제목은 경로별 `layout.tsx`의 metadata(`%s · TradeX`)로 정합니다.
 - **세션 만료**: `401 SESSION_INVALID` 수신 시 `["me"]` 캐시를 `null`로 내려 로그인 화면으로 보냅니다.
   이때 재요청(invalidate)은 하지 않습니다 — 무효화하면 401→이벤트→재요청이 무한 반복됩니다.
   비공개 조회 캐시는 사용자별 키가 없으므로, 로그인 상태가 끝나면 `["me"]`를 뺀 캐시를 지우고
@@ -151,8 +162,14 @@ npm run dev      # 개발 서버 (next dev)
 npm run build    # 정적 빌드 → out/
 npm run start    # out/ 정적 미리보기 (serve)
 npm run lint     # ESLint
-npm test         # 단위 테스트 (node:test + tsx, tests/*.test.{ts,mjs})
+npm test         # 단위 테스트 (node:test + tsx, tests/*.test.ts)
 ```
+
+## 의존성 메모
+
+- ESLint는 9를 유지합니다. `eslint-plugin-react`(eslint-config-next 포함)의 peer 범위가 ESLint 9까지입니다.
+- TypeScript는 6.0을 유지합니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
+- Next.js는 보안 릴리스 대응을 위해 정확한 버전으로 고정합니다.
 
 ## 라이선스
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { ArrowDown, ArrowLeft, ArrowUp, Loader2 } from "lucide-react";
 
 import { cn } from "cn";
 import { fmtDecimal } from "@/lib/format";
@@ -18,7 +19,7 @@ export function Surface({
   return (
     <Tag
       className={cn(
-        "min-w-0 rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]",
+        "min-w-0 rounded-2xl bg-card p-5 shadow-card",
         className,
       )}
     >
@@ -47,28 +48,46 @@ export function SectionHeader({
   );
 }
 
+/** Page title row shared by every screen: optional back link, title, subtitle and actions. */
 export function PageHeader({
   title,
   subtitle,
   back,
   action,
+  icon,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   back?: React.ReactNode;
   action?: React.ReactNode;
+  icon?: React.ReactNode;
 }) {
   return (
-    <header className="mb-4 flex flex-wrap items-center gap-3">
+    <header className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-2">
       {back}
-      <div className="min-w-0 flex-1 basis-40">
-        <h1 className="break-words text-[20px] font-bold tracking-[-0.02em] text-app-gray-900">
+      <div className="min-w-0 flex-1 basis-48">
+        <h1 className="flex items-center gap-2 break-words text-[22px] leading-tight font-extrabold tracking-[-0.03em] text-app-gray-900 sm:text-[24px]">
+          {icon}
           {title}
         </h1>
-        {subtitle ? <p className="break-words text-[13px] text-app-gray-500">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 break-words text-[13px] text-app-gray-500">{subtitle}</p> : null}
       </div>
-      {action}
+      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
     </header>
+  );
+}
+
+/** Round icon link back to a parent screen, placed in PageHeader's `back` slot. */
+export function BackLink({ href, label = "뒤로" }: { href: string; label?: string }) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      aria-label={label}
+      className="flex size-10 shrink-0 items-center justify-center rounded-full text-app-gray-700 hover:bg-app-gray-100"
+    >
+      <ArrowLeft className="size-5" />
+    </Link>
   );
 }
 
@@ -251,19 +270,19 @@ export function EmptyState({
   );
 }
 
-export function LoadingBlock({ className }: { className?: string }) {
+export function LoadingBlock({ className, label = "불러오는 중" }: { className?: string; label?: string }) {
   return (
-    <div className={cn("flex items-center justify-center py-12", className)}>
-      <Loader2 className="size-5 animate-spin text-app-gray-400" />
+    <div role="status" aria-label={label} className={cn("flex items-center justify-center py-12", className)}>
+      <Loader2 aria-hidden="true" className="size-5 animate-spin text-app-gray-400" />
     </div>
   );
 }
 
-export function SkeletonRows({ rows = 4 }: { rows?: number }) {
+export function SkeletonRows({ rows = 4, label = "불러오는 중" }: { rows?: number; label?: string }) {
   return (
-    <div className="space-y-2">
+    <div role="status" aria-label={label} className="space-y-2">
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="h-14 animate-pulse rounded-xl bg-app-gray-100" />
+        <div key={index} aria-hidden="true" className="h-14 animate-pulse rounded-xl bg-app-gray-100" />
       ))}
     </div>
   );
@@ -271,17 +290,51 @@ export function SkeletonRows({ rows = 4 }: { rows?: number }) {
 
 export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl bg-card px-6 py-10 text-center">
+    <div role="alert" className="flex flex-col items-center gap-3 rounded-2xl bg-card px-6 py-10 text-center">
       <p className="text-[14px] text-app-gray-700">{message}</p>
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="text-[13px] font-semibold text-app-blue underline underline-offset-4"
+          className="min-h-9 rounded-lg px-3 text-[13px] font-semibold text-app-blue underline underline-offset-4"
         >
           다시 시도
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Next-page button for cursor lists. Render it even when the loaded rows are
+ * filtered out, so a filter that matches nothing yet can still reach older pages.
+ */
+export function LoadMoreButton({
+  hasMore,
+  loading,
+  onLoad,
+  label = "더보기",
+  className,
+}: {
+  hasMore: boolean | undefined;
+  loading?: boolean;
+  onLoad: () => void;
+  label?: string;
+  className?: string;
+}) {
+  if (!hasMore) return null;
+  return (
+    <button
+      type="button"
+      onClick={onLoad}
+      disabled={loading}
+      className={cn(
+        "flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-card hover:bg-app-gray-50 disabled:opacity-60",
+        className,
+      )}
+    >
+      {loading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
+      {loading ? "불러오는 중…" : label}
+    </button>
   );
 }

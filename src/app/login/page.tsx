@@ -71,7 +71,8 @@ function LoginScreen() {
     }
   }
 
-  async function handleRecovery() {
+  async function handleRecovery(event: React.FormEvent) {
+    event.preventDefault();
     if (!username.trim() || !recoveryKey.trim()) {
       toast.error("아이디와 복구키를 입력해주세요");
       return;
@@ -99,7 +100,7 @@ function LoginScreen() {
           <p className="text-[26px] font-extrabold tracking-[-0.04em] text-app-gray-900">
             <BrandLogo />
           </p>
-          <h1 className="mt-6 text-[22px] leading-tight font-bold tracking-[-0.02em] text-app-gray-900">
+          <h1 className="mt-6 text-[22px] leading-tight font-bold tracking-[-0.02em] break-keep text-app-gray-900">
             패스키로 안전하게
             <br />
             시작하세요
@@ -109,7 +110,7 @@ function LoginScreen() {
           </p>
         </div>
 
-        <div className="rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+        <div className="rounded-2xl bg-card p-5 shadow-card">
           <Button
             type="button"
             onClick={handleLogin}
@@ -128,10 +129,12 @@ function LoginScreen() {
         </div>
 
         <p className="mt-5 text-center text-[13px] text-app-gray-500">
-          <Link href="/invite" prefetch={false} className="mb-3 block font-semibold text-app-blue">초대 토큰으로 가입하기</Link>
           아직 계정이 없나요?{" "}
           <Link href="/signup" prefetch={false} className="font-semibold text-app-blue">
             가입하기
+          </Link>
+          <Link href="/invite" prefetch={false} className="mt-3 block font-semibold text-app-gray-500 hover:text-app-gray-700">
+            초대 토큰이 있나요?
           </Link>
         </p>
       </div>
@@ -146,7 +149,7 @@ function LoginScreen() {
               가입할 때 저장해둔 복구키 8개 중 하나를 입력해주세요.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <form onSubmit={handleRecovery} className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="recovery-username">아이디</Label>
               <Input
@@ -165,12 +168,14 @@ function LoginScreen() {
                 value={recoveryKey}
                 onChange={(event) => setRecoveryKey(event.target.value)}
                 placeholder="rck_..."
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 className="numeric h-11 rounded-xl"
               />
             </div>
             <Button
-              type="button"
-              onClick={handleRecovery}
+              type="submit"
               disabled={recovering}
               className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
             >
@@ -178,9 +183,9 @@ function LoginScreen() {
             </Button>
             <p className="text-[12px] leading-relaxed text-app-gray-500">
               복구 모드에서는 새 패스키를 등록한 뒤 다시 로그인할 수 있어요. 사용한 복구키는
-              즉시 폐기됩니다.
+              즉시 폐기돼요.
             </p>
-          </div>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

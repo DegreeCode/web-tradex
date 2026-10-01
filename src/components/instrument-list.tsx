@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { apiAssetUrl } from "@/lib/api";
 import { ChevronRight } from "lucide-react";
 import { cn } from "cn";
 
 import { InstrumentStateChip } from "@/components/primitives";
 import { PriceFlash } from "@/components/price-flash";
-import { compareDecimal, fmtCompact, fmtPercentFromPPM, fmtPrice } from "@/lib/format";
+import { fmtCompact, fmtPercentFromPPM, fmtPrice } from "@/lib/format";
+import { isAtCurveCeiling } from "@/lib/instruments";
 import { symbolHref } from "@/lib/routes";
 import type { Instrument } from "@/lib/types";
 
@@ -22,6 +23,7 @@ export function InstrumentAvatar({ symbol, iconUrl, size = "md" }: {
   const source = apiAssetUrl(iconUrl);
   return (
     <div
+      aria-hidden="true"
       className={
         size === "lg"
           ? "flex size-12 shrink-0 items-center justify-center rounded-2xl bg-app-gray-100 text-[16px] font-bold text-app-gray-700"
@@ -43,7 +45,17 @@ export function InstrumentAvatar({ symbol, iconUrl, size = "md" }: {
   );
 }
 
-export function InstrumentRow({
+export function CeilingBadge({ className }: { className?: string }) {
+  return (
+    <span className={cn("rounded-md bg-app-red-light px-1 py-0.5 text-[10px] font-bold text-app-red", className)}>
+      상한가
+    </span>
+  );
+}
+
+// Ticker frames keep unchanged instruments by identity, so memoized rows only
+// re-render for the symbols whose price actually moved.
+export const InstrumentRow = memo(function InstrumentRow({
   instrument,
   twoColumn = false,
 }: {
@@ -51,19 +63,12 @@ export function InstrumentRow({
   twoColumn?: boolean;
 }) {
   const change = instrument.change_ppm;
-  const isAtTheoreticalCeiling =
-    typeof instrument.curve_ceiling_price === "string" &&
-    instrument.curve_ceiling_price.length > 0 &&
-    instrument.curve_spot_price !== "0" &&
-    /^\d+(?:\.\d+)?$/.test(instrument.curve_spot_price) &&
-    /^\d+(?:\.\d+)?$/.test(instrument.curve_ceiling_price) &&
-    compareDecimal(instrument.curve_spot_price, instrument.curve_ceiling_price) === 0;
   return (
     <Link
       href={symbolHref(instrument.symbol)}
       prefetch={false}
       className={cn(
-        "grid min-w-0 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors hover:bg-app-gray-50 sm:grid-cols-[40px_minmax(0,1fr)_minmax(0,auto)_16px]",
+        "grid min-w-0 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors hover:bg-app-gray-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue sm:grid-cols-[40px_minmax(0,1fr)_minmax(0,auto)_16px]",
         twoColumn && "xl:border-b xl:border-app-gray-100 xl:px-4 xl:odd:border-r",
       )}
     >
@@ -94,11 +99,7 @@ export function InstrumentRow({
               {fmtPrice(instrument.curve_spot_price)}
             </PriceFlash>
           </p>
-          {isAtTheoreticalCeiling ? (
-            <span className="rounded-md bg-app-red-light px-1 py-0.5 text-[10px] font-bold text-app-red">
-              상한가
-            </span>
-          ) : null}
+          {isAtCurveCeiling(instrument) ? <CeilingBadge /> : null}
         </div>
         {typeof change === "number" ? (
           <p
@@ -114,10 +115,10 @@ export function InstrumentRow({
           <p className="text-[12px] text-app-gray-400">홀더 {instrument.holder_count}명</p>
         )}
       </div>
-      <ChevronRight className="col-start-3 row-start-1 size-4 text-app-gray-300 sm:col-start-4" />
+      <ChevronRight aria-hidden="true" className="col-start-3 row-start-1 size-4 text-app-gray-300 sm:col-start-4" />
     </Link>
   );
-}
+});
 
 export function InstrumentList({
   instruments,
@@ -129,7 +130,7 @@ export function InstrumentList({
   return (
     <div
       className={cn(
-        "grid grid-cols-1 divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]",
+        "grid grid-cols-1 divide-y divide-app-gray-100 overflow-hidden rounded-2xl bg-card shadow-card",
         twoColumn && "xl:grid-cols-2 xl:divide-y-0",
       )}
     >

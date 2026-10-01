@@ -1,6 +1,22 @@
 import { addDecimal, compareDecimal } from "./format";
 import type { Candle, CandleInterval, Page, PublicTrade } from "./types";
 
+// Live trades re-merge the same cached timestamps over and over; parsing each
+// ISO string once keeps that merge cheap. Bounded like the bucket memo below.
+const MAX_MEMOIZED_TIMES = 10_000;
+const timeMemo = new Map<string, number>();
+
+/** Date.parse with a bounded memo for the timestamps a candle page repeats. */
+function parseTime(timestamp: string): number {
+  let time = timeMemo.get(timestamp);
+  if (time === undefined) {
+    time = Date.parse(timestamp);
+    if (timeMemo.size >= MAX_MEMOIZED_TIMES) timeMemo.clear();
+    timeMemo.set(timestamp, time);
+  }
+  return time;
+}
+
 export interface CandlePage extends Page<Candle> {
   historyLoaded?: boolean;
   /** Exclusive REST trade timestamp boundary, used to avoid delayed WS duplicates. */
@@ -11,11 +27,11 @@ export interface CandlePage extends Page<Candle> {
 export function mergeCandles(older: Candle[], newer: Candle[]): Candle[] {
   const byTime = new Map<number, Candle>();
   for (const candle of [...older, ...newer]) {
-    const time = Date.parse(candle.timestamp);
+    const time = parseTime(candle.timestamp);
     const previous = byTime.get(time);
     if (!candle.synthetic || !previous || previous.synthetic) byTime.set(time, candle);
   }
-  return [...byTime.values()].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return [...byTime].sort(([a], [b]) => b - a).map(([, candle]) => candle);
 }
 
 export function appendCandleHistory(current: CandlePage, older: Page<Candle>): CandlePage {
@@ -123,8 +139,37 @@ function localMillisToTimestamp(localMillis: number): string {
   return new Date(localPartsToInstant(localPartsAtUtcMillis(localMillis))).toISOString();
 }
 
+// Every live trade re-buckets the whole cached page, and each bucket costs an
+// Intl.formatToParts call. The same timestamps recur trade after trade, so the
+// results are memoized in a bounded cache that is simply dropped when full.
+const MAX_MEMOIZED_BUCKETS = 10_000;
+const bucketMemo = new Map<string, string | null>();
+
+function memoizedBucket(
+  kind: "bucket" | "previous",
+  timestamp: string,
+  interval: CandleInterval,
+  compute: () => string | null,
+): string | null {
+  const key = `${kind}|${interval}|${timestamp}`;
+  const cached = bucketMemo.get(key);
+  if (cached !== undefined) return cached;
+  const value = compute();
+  if (bucketMemo.size >= MAX_MEMOIZED_BUCKETS) bucketMemo.clear();
+  bucketMemo.set(key, value);
+  return value;
+}
+
 function candleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
-  const instant = Date.parse(timestamp);
+  return memoizedBucket("bucket", timestamp, interval, () => computeCandleBucketTimestamp(timestamp, interval));
+}
+
+function previousCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
+  return memoizedBucket("previous", timestamp, interval, () => computePreviousCandleBucketTimestamp(timestamp, interval));
+}
+
+function computeCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
+  const instant = parseTime(timestamp);
   if (!Number.isFinite(instant)) return null;
   const local = zonedParts(new Date(instant));
   const localMillis = Date.UTC(
@@ -156,8 +201,8 @@ function candleBucketTimestamp(timestamp: string, interval: CandleInterval): str
   return localMillisToTimestamp(bucketLocalMillis);
 }
 
-function previousCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
-  const instant = Date.parse(timestamp);
+function computePreviousCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
+  const instant = parseTime(timestamp);
   if (!Number.isFinite(instant)) return null;
   const local = zonedParts(new Date(instant));
   const localMillis = Date.UTC(
@@ -193,9 +238,10 @@ export function fillCandleGaps(
     const bucket = candleBucketTimestamp(candle.timestamp, interval);
     if (bucket) byTimestamp.set(bucket, { ...candle, interval, timestamp: bucket });
   }
-  const sorted = [...byTimestamp.values()].sort(
-    (left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp),
-  );
+  const sorted = [...byTimestamp.values()]
+    .map((candle) => ({ candle, time: parseTime(candle.timestamp) }))
+    .sort((left, right) => left.time - right.time)
+    .map(({ candle }) => candle);
   const safeLimit = Math.max(0, Math.min(MAX_SYNTHETIC_CANDLE_BUCKETS, Math.floor(limit)));
   if (sorted.length === 0 || safeLimit === 0) return { data: [], capped: limit > safeLimit };
 
@@ -204,18 +250,18 @@ export function fillCandleGaps(
   // consume the entire synthetic budget before the chart's visible window is
   // reached. A synthetic bucket's close comes from the nearest earlier real
   // bucket, which is the previous chronological close by definition.
-  const realTimes = sorted.map((candle) => Date.parse(candle.timestamp));
+  const realTimes = sorted.map((candle) => parseTime(candle.timestamp));
   const latestReal = sorted[sorted.length - 1];
   const requestedBucket = throughTimestamp
     ? candleBucketTimestamp(throughTimestamp, interval)
     : null;
-  const latestRealTime = Date.parse(latestReal.timestamp);
-  const requestedTime = requestedBucket ? Date.parse(requestedBucket) : Number.NEGATIVE_INFINITY;
+  const latestRealTime = parseTime(latestReal.timestamp);
+  const requestedTime = requestedBucket ? parseTime(requestedBucket) : Number.NEGATIVE_INFINITY;
   let cursor = requestedTime > latestRealTime ? requestedBucket : latestReal.timestamp;
   const descending: Candle[] = [];
 
   const previousReal = (timestamp: string): Candle | undefined => {
-    const time = Date.parse(timestamp);
+    const time = parseTime(timestamp);
     let low = 0;
     let high = realTimes.length - 1;
     let index = -1;
@@ -273,7 +319,7 @@ export function appendCandleHistoryWithGaps(
   if (older.data.length === 0) return merged;
   const boundary = current.data[current.data.length - 1];
   const history = boundary
-    ? merged.data.filter((candle) => Date.parse(candle.timestamp) <= Date.parse(boundary.timestamp))
+    ? merged.data.filter((candle) => parseTime(candle.timestamp) <= parseTime(boundary.timestamp))
     : merged.data;
   const fillers: Candle[] = [];
   for (let index = 0; index + 1 < history.length; index += 1) {
@@ -299,9 +345,9 @@ export function applyTradeToCandlePage(
   const timestamp = candleBucketTimestamp(trade.timestamp, interval);
   if (!timestamp || !trade.price || !trade.quantity || !trade.credit) return { status: "recovery" };
   const data = [...page.data];
-  const tradeTime = Date.parse(timestamp);
+  const tradeTime = parseTime(timestamp);
   const latestTime = data.reduce((latest, candle) => {
-    const value = Date.parse(candle.timestamp);
+    const value = parseTime(candle.timestamp);
     return Number.isFinite(value) && value > latest ? value : latest;
   }, Number.NEGATIVE_INFINITY);
   const existingIndex = data.findIndex(

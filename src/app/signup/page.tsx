@@ -39,7 +39,8 @@ export default function SignupPage() {
     if (status === "authenticated" && !result) router.replace("/");
   }, [status, router, result]);
 
-  async function handleSignup() {
+  async function handleSignup(event?: React.FormEvent) {
+    event?.preventDefault();
     if (busy || status === "loading") return;
     const trimmed = username.trim();
     if (!/^[A-Za-z0-9_]{3,32}$/.test(trimmed)) {
@@ -94,7 +95,7 @@ export default function SignupPage() {
               계정을 되찾을 수 있어요.
             </p>
           </div>
-          <div className="rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+          <div className="rounded-2xl bg-card p-5 shadow-card">
             <RecoveryKeyGrid keys={result.recovery_keys} />
             <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-[13px] text-app-gray-700">
               <input
@@ -134,7 +135,7 @@ export default function SignupPage() {
           </p>
         </div>
 
-        <div className="rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+        <form onSubmit={handleSignup} className="rounded-2xl bg-card p-5 shadow-card">
           <div className="space-y-1.5">
             <Label htmlFor="signup-username">아이디</Label>
             <Input
@@ -143,22 +144,21 @@ export default function SignupPage() {
               onChange={(event) => setUsername(event.target.value)}
               placeholder="영문·숫자·밑줄 3~32자"
               autoComplete="username"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleSignup();
-              }}
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={32}
               className="h-12 rounded-xl"
             />
           </div>
           <LegalConsent checked={agreed} onChange={setAgreed} />
           <Button
-            type="button"
-            onClick={handleSignup}
+            type="submit"
             disabled={busy || status === "loading" || !agreed}
             className="mt-4 h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover"
           >
             {busy ? "패스키 생성 중…" : status === "loading" ? "로그인 상태 확인 중…" : "패스키로 가입하기"}
           </Button>
-        </div>
+        </form>
 
         <p className="mt-5 text-center text-[13px] text-app-gray-500">
           이미 계정이 있나요?{" "}

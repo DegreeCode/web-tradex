@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { fmtQuantity } from "@/lib/format";
+import { fmtCredit, fmtQuantity } from "@/lib/format";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
@@ -64,7 +64,7 @@ export function MarginClosureDialog({
           description: `${result.execution ? `${marginPartialFillText(result.execution)} · ` : ""}잔여 ${fmtQuantity(result.quantity)}주는 그대로 유지돼요.`,
         });
       } else {
-        toast.success("포지션 전액 종료 정산이 완료되었어요");
+        toast.success("포지션을 모두 정산했어요");
       }
       onOpenChange(false);
     } catch (err) {
@@ -76,9 +76,9 @@ export function MarginClosureDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>포지션 전액 종료 (전체 정산)</DialogTitle>
+          <DialogTitle>포지션 전액 종료</DialogTitle>
           <DialogDescription>
-            남은 포지션 전체를 즉시 시장가로 청산 정산합니다. 슬리피지나 풀 재고 때문에 일부만 정산되면 남은 수량의 포지션은 유지됩니다.
+            남은 수량 전체를 지금 시장가로 정산해요. 슬리피지나 풀 재고 때문에 일부만 정산되면 남은 수량은 포지션으로 유지돼요.
           </DialogDescription>
         </DialogHeader>
 
@@ -88,25 +88,25 @@ export function MarginClosureDialog({
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
               <span>종목 및 방향</span>
               <span className="min-w-0 break-all font-semibold text-app-gray-900">
-                {position.symbol} ({isLong ? "LONG 매수" : "SHORT 매도"}, {position.leverage}x)
+                {position.symbol} · {isLong ? "롱" : "숏"} {position.leverage}x
               </span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
               <span>남은 포지션 수량</span>
               <span className="numeric min-w-0 break-all font-semibold text-app-gray-900">
-                {position.quantity} 주
+                {fmtQuantity(position.quantity)}주
               </span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
-              <span>대여 원금</span>
+              <span>빌린 원금</span>
               <span className="numeric min-w-0 break-all font-semibold text-app-gray-900">
-                {position.borrowed_credit} Credit
+                {fmtCredit(position.borrowed_credit, 4)} Credit
               </span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
               <span>현재 부채 / 자기자본</span>
               <span className="numeric min-w-0 break-all font-semibold text-app-gray-900">
-                부채 {position.debt_value} / 자본 {position.equity} Credit
+                부채 {fmtCredit(position.debt_value, 4)} / 자본 {fmtCredit(position.equity, 4)} Credit
               </span>
             </div>
           </div>
@@ -117,12 +117,12 @@ export function MarginClosureDialog({
               <p className="font-bold">정산 실행 방식</p>
               <p className="mt-0.5 leading-relaxed">
                 {isLong
-                  ? "LONG 포지션은 보유 중인 Share 전량을 본딩 곡선에 매도하여 차입 Credit과 미납 이자를 전액 상환하고, 정산 잔여금을 계좌로 돌려받습니다."
-                  : "SHORT 포지션은 매도대금으로 Share 전량을 본딩 곡선에서 매수 상환하고, 정산 잔여금을 계좌로 돌려받습니다."}
+                  ? "롱 포지션은 보유 주식 전량을 본딩 커브에 팔아 빌린 Credit과 밀린 이자를 갚고, 남은 금액을 계좌로 돌려받아요."
+                  : "숏 포지션은 매도 대금으로 빌린 주식 전량을 본딩 커브에서 사서 갚고, 남은 금액을 계좌로 돌려받아요."}
               </p>
               {belowMaintenance ? (
                 <p className="mt-1 leading-relaxed">
-                  위험 비율이 유지 기준 이하라 거래 수수료의 5배가 적용됩니다. 직접 종료이므로 강제청산 스트라이크는 늘지 않습니다.
+                  위험 비율이 유지 기준 이하라 거래 수수료의 5배가 적용돼요. 직접 종료라서 강제청산 횟수에는 포함되지 않아요.
                 </p>
               ) : null}
             </div>
@@ -133,9 +133,10 @@ export function MarginClosureDialog({
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
               aria-expanded={showAdvanced}
-              className="flex items-center gap-1 text-[12px] font-semibold text-app-gray-500 hover:text-app-gray-800"
+              className="flex min-h-9 items-center gap-1 text-[12px] font-semibold text-app-gray-500 hover:text-app-gray-800"
             >
               <ChevronDown
+                aria-hidden="true"
                 className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
               />
               고급 설정 (슬리피지)
@@ -168,7 +169,7 @@ export function MarginClosureDialog({
             <button
               type="submit"
               disabled={closeMutation.isPending}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:bg-red-600 disabled:bg-app-gray-200 disabled:text-app-gray-400"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white transition-opacity hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400"
             >
               {closeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
               포지션 전액 종료하기

@@ -72,6 +72,9 @@
 }
 
 @theme {
+  /* Resting card and raised control elevations used across the app. */
+  --shadow-card: 0 1px 2px 0 rgba(25, 31, 40, 0.03);
+  --shadow-raised: 0 1px 2px 0 rgba(25, 31, 40, 0.06);
   --animate-price-flash-up: price-flash-up 0.9s ease-out;
   --animate-price-flash-down: price-flash-down 0.9s ease-out;
 
@@ -213,6 +216,15 @@
   }
   button {
     @apply cursor-pointer;
+  }
+  button:disabled {
+    @apply cursor-not-allowed;
+  }
+  /* One visible keyboard focus ring for every interactive element that does
+     not draw its own (utilities such as outline-none still take precedence). */
+  :where(a, button, summary, select, [role="button"], [tabindex]:not([tabindex="-1"]), input[type="checkbox"], input[type="range"]):focus-visible {
+    outline: 2px solid var(--app-blue);
+    outline-offset: 2px;
   }
   input,
   textarea,

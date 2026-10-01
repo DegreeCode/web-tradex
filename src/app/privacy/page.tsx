@@ -4,7 +4,7 @@ import { LegalDocument, LegalTable, type LegalSection } from "@/components/legal
 import { LEGAL_CONTACT_EMAIL, PRIVACY_EFFECTIVE_DATE } from "@/lib/legal";
 
 export const metadata: Metadata = {
-  title: "개인정보 처리방침 · TradeX",
+  title: "개인정보 처리방침",
 };
 
 const mail = <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>;

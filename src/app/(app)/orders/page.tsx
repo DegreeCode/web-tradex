@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import {
   EmptyState,
   ErrorBlock,
+  LoadMoreButton,
   OrderStatusChip,
+  PageHeader,
   SideBadge,
   SkeletonRows,
 } from "@/components/primitives";
@@ -14,11 +16,11 @@ import { Segmented } from "@/components/segmented";
 import { errorMessage } from "@/lib/api";
 import {
   fmtCredit,
+  addDecimal,
   fmtDeadline,
   fmtPrice,
   fmtQuantity,
   fmtRelative,
-  fmtSigned,
   toNumber,
 } from "@/lib/format";
 import { useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
@@ -26,6 +28,13 @@ import type { Order, OrderStatus } from "@/lib/types";
 
 type Tab = "ORDERS" | "TRADES";
 type Filter = "ALL" | "PENDING" | "DONE" | "CLOSED";
+
+const FILTER_LABEL: Record<Filter, string> = {
+  ALL: "전체",
+  PENDING: "예약중",
+  DONE: "체결",
+  CLOSED: "종료",
+};
 
 const FILTERS: Record<Filter, (status: OrderStatus) => boolean> = {
   ALL: () => true,
@@ -55,6 +64,8 @@ export default function OrdersPage() {
     [tradesQuery.data],
   );
 
+  const cancelingId = cancelOrder.isPending ? cancelOrder.variables : null;
+
   function handleCancel(order: Order) {
     cancelOrder.mutate(order.order_id, {
       onSuccess: () => toast.success("예약주문을 취소했어요"),
@@ -64,10 +75,7 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">주문</h1>
-        <p className="mt-1 text-[13px] text-app-gray-500">주문과 체결 내역을 확인하세요</p>
-      </div>
+      <PageHeader title="주문" subtitle="주문과 체결 내역을 확인하세요" />
 
       <Segmented<Tab>
         value={tab}
@@ -80,20 +88,16 @@ export default function OrdersPage() {
 
       {tab === "ORDERS" ? (
         <>
-          <div className="flex gap-1.5 overflow-x-auto">
+          <div role="group" aria-label="주문 상태" className="flex gap-1.5 overflow-x-auto">
             {(Object.keys(FILTERS) as Filter[]).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setFilter(key)}
                 aria-pressed={filter === key}
-                className={
-                  filter === key
-                    ? "shrink-0 rounded-lg bg-app-gray-900 px-3 py-1.5 text-[12px] font-semibold text-app-gray-50"
-                    : "shrink-0 rounded-lg bg-card px-3 py-1.5 text-[12px] font-semibold text-app-gray-600"
-                }
+                className="min-h-9 shrink-0 rounded-lg bg-card px-3 text-[12px] font-semibold text-app-gray-600 aria-pressed:bg-app-gray-900 aria-pressed:text-app-gray-50"
               >
-                {key === "ALL" ? "전체" : key === "PENDING" ? "예약중" : key === "DONE" ? "체결" : "종료"}
+                {FILTER_LABEL[key]}
               </button>
             ))}
           </div>
@@ -106,16 +110,28 @@ export default function OrdersPage() {
               onRetry={() => void ordersQuery.refetch()}
             />
           ) : filteredOrders.length === 0 ? (
-            <EmptyState
-              title="주문 내역이 없어요"
-              description="마켓에서 첫 주문을 넣어보세요"
-            />
+            <>
+              <EmptyState
+                title={filter === "ALL" ? "주문 내역이 없어요" : `불러온 내역 중 '${FILTER_LABEL[filter]}' 주문이 없어요`}
+                description={
+                  filter === "ALL"
+                    ? "마켓에서 첫 주문을 넣어보세요"
+                    : ordersQuery.hasNextPage ? "이전 주문을 더 불러와 확인해보세요" : undefined
+                }
+              />
+              <LoadMoreButton
+                hasMore={ordersQuery.hasNextPage}
+                loading={ordersQuery.isFetchingNextPage}
+                onLoad={() => void ordersQuery.fetchNextPage()}
+                label="이전 주문 더 불러오기"
+              />
+            </>
           ) : (
             <div className="grid gap-2 xl:grid-cols-2">
               {filteredOrders.map((order) => (
                 <div
                   key={order.order_id}
-                  className="rounded-2xl bg-card p-4 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
+                  className="rounded-2xl bg-card p-4 shadow-card"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -191,25 +207,21 @@ export default function OrdersPage() {
                       <button
                         type="button"
                         onClick={() => handleCancel(order)}
-                        disabled={cancelOrder.isPending}
-                        className="rounded-lg bg-app-gray-100 px-3 py-1.5 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+                        disabled={cancelingId === order.order_id}
+                        className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                       >
-                        주문 취소
+                        {cancelingId === order.order_id ? "취소 중…" : "주문 취소"}
                       </button>
                     ) : null}
                   </div>
                 </div>
               ))}
-              {ordersQuery.hasNextPage ? (
-                <button
-                  type="button"
-                  onClick={() => void ordersQuery.fetchNextPage()}
-                  disabled={ordersQuery.isFetchingNextPage}
-                  className="h-11 w-full rounded-xl bg-card text-[13px] font-semibold text-app-gray-600 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]"
-                >
-                  {ordersQuery.isFetchingNextPage ? "불러오는 중…" : "더보기"}
-                </button>
-              ) : null}
+              <LoadMoreButton
+                hasMore={ordersQuery.hasNextPage}
+                loading={ordersQuery.isFetchingNextPage}
+                onLoad={() => void ordersQuery.fetchNextPage()}
+                className="xl:col-span-2"
+              />
             </div>
           )}
         </>
@@ -222,7 +234,7 @@ export default function OrdersPage() {
           ) : trades.length === 0 ? (
             <EmptyState title="체결 내역이 없어요" description="주문이 체결되면 여기에 표시돼요" />
           ) : (
-            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
               {trades.map((trade) => (
                 <div key={trade.trade_id} className="grid min-w-0 gap-2 py-3 sm:grid-cols-2">
                   <div className="flex min-w-0 items-start gap-2">
@@ -243,21 +255,18 @@ export default function OrdersPage() {
                   </div>
                 </div>
               ))}
-              {tradesQuery.hasNextPage ? (
-                <button
-                  type="button"
-                  onClick={() => void tradesQuery.fetchNextPage()}
-                  className="h-11 w-full text-[13px] font-semibold text-app-gray-500"
-                >
-                  더보기
-                </button>
-              ) : null}
+              <LoadMoreButton
+                hasMore={tradesQuery.hasNextPage}
+                loading={tradesQuery.isFetchingNextPage}
+                onLoad={() => void tradesQuery.fetchNextPage()}
+                className="shadow-none"
+              />
             </div>
           )}
           {trades.length > 0 ? (
             <p className="px-1 text-[12px] text-app-gray-400">
-              합계 손익 참고: {fmtSigned(trades.reduce((sum, trade) => sum + toNumber(trade.fee), 0), 6)}{" "}
-              Credit 수수료
+              불러온 체결 {trades.length}건의 수수료 합계{" "}
+              {fmtCredit(trades.reduce((sum, trade) => addDecimal(sum, trade.fee), "0"), 8)} Credit
             </p>
           ) : null}
         </>

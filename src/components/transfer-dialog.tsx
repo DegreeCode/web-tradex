@@ -16,6 +16,7 @@ import { Segmented } from "@/components/segmented";
 import { useExchangeInfo, transferAllowed } from "@/lib/exchange-info";
 import { ExchangeInfoNotice } from "@/components/exchange-policy";
 import { ErrorBlock } from "@/components/primitives";
+import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
 import { findPosition, useAccounts, useCreateTransfer, usePortfolio } from "@/lib/hooks";
@@ -48,11 +49,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
   const [quantity, setQuantity] = useState("");
   const createTransfer = useCreateTransfer();
 
-  const defaultAccountId =
-    accounts.find((account) => account.is_primary)?.account_id ??
-    accounts[0]?.account_id ??
-    "";
-  const accountId = selectedAccountId || defaultAccountId;
+  const accountId = selectedAccountId || pickDefaultAccount(accounts);
 
   const portfolio = usePortfolio(accountId || undefined, Boolean(accountId));
   const availableCredit = portfolio.data?.available_credit ?? "0";
@@ -138,8 +135,8 @@ function TransferForm({ onDone }: { onDone: () => void }) {
         {!allowed && <p role="status" className="text-[12px] text-app-red">현재 정책에서는 이 자산을 다른 사용자에게 보낼 수 없어요. 본인 계좌 간 이동은 가능해요.</p>}
         {accounts.length > 1 ? (
           <div>
-            <p className="mb-1.5 text-[13px] font-semibold text-app-gray-500">보내는 계좌</p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <p id="transfer-from-label" className="mb-1.5 text-[13px] font-semibold text-app-gray-500">보내는 계좌</p>
+            <div role="group" aria-labelledby="transfer-from-label" className="flex gap-2 overflow-x-auto pb-1">
               {accounts.map((account) => (
                 <button
                   key={account.account_id}
@@ -152,7 +149,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
                       : "shrink-0 rounded-xl bg-app-gray-100 px-3 py-2 text-[13px] font-semibold text-app-gray-600"
                   }
                 >
-                  {account.is_primary ? "대표 계좌" : "추가 계좌"}
+                  {accountLabel(account, accounts)}
                 </button>
               ))}
             </div>
@@ -175,6 +172,8 @@ function TransferForm({ onDone }: { onDone: () => void }) {
             value={recipient}
             onChange={(event) => setRecipient(event.target.value)}
             placeholder="acc_..."
+            autoComplete="off"
+            spellCheck={false}
             className="numeric h-11 rounded-xl"
           />
           {otherAccounts.length > 0 ? (
@@ -187,7 +186,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
                   aria-pressed={recipient === account.account_id}
                   className={recipient === account.account_id ? "min-h-9 rounded-lg bg-app-blue-light px-2.5 py-1 text-[11px] font-semibold text-app-blue-dark ring-1 ring-app-blue" : "min-h-9 rounded-lg bg-app-gray-100 px-2.5 py-1 text-[11px] font-semibold text-app-gray-600 hover:bg-app-gray-200"}
                 >
-                  내 {account.is_primary ? "대표" : "추가"} 계좌
+                  내 {accountLabel(account, accounts)}
                 </button>
               ))}
             </div>
@@ -221,6 +220,8 @@ function TransferForm({ onDone }: { onDone: () => void }) {
                 value={symbol}
                 onChange={(event) => setSymbol(event.target.value.toUpperCase())}
                 placeholder="ABC"
+                autoCapitalize="characters"
+                autoComplete="off"
                 className="h-11 rounded-xl"
               />
             </div>
@@ -238,9 +239,11 @@ function TransferForm({ onDone }: { onDone: () => void }) {
                 className="numeric h-11 rounded-xl"
               />
             </div>
-            {position ? (
+            {canonicalSymbol && portfolio.data ? (
               <p className="col-span-2 text-[12px] text-app-gray-400">
-                보낼 수 있는 수량 {fmtQuantity(position.available_quantity)}주
+                {position
+                  ? `보낼 수 있는 수량 ${fmtQuantity(position.available_quantity)}주`
+                  : `${canonicalSymbol}을 이 계좌에 보유하고 있지 않아요`}
               </p>
             ) : null}
           </div>

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Copy, Plus, RefreshCw, XCircle } from "lucide-react";
-import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +16,7 @@ import {
   shortId,
 } from "@/lib/format";
 import { ErrorBlock, LoadingBlock } from "@/components/primitives";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useAccounts } from "@/lib/hooks";
 import { MarginCollateralDialog } from "./margin-collateral-dialog";
 import { MarginReductionDialog } from "./margin-reduction-dialog";
@@ -68,10 +68,7 @@ export function MarginPositionDetailDialog({
   const reductionBlocked = riskLevel === "MAINTENANCE";
 
   function copyText(text: string, label: string) {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      void navigator.clipboard.writeText(text);
-      toast.success(`${label} 복사되었어요`);
-    }
+    void copyToClipboard(text, `${label} 복사했어요`);
   }
 
   return (
@@ -228,10 +225,11 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => copyText(position.position_id, "포지션 ID가")}
-                  className="inline-flex items-center gap-1 font-mono text-app-gray-700 hover:text-app-blue"
+                  aria-label="포지션 ID 복사"
+                  className="inline-flex min-h-8 items-center gap-1 font-mono text-app-gray-700 hover:text-app-blue"
                 >
                   {shortId(position.position_id)}
-                  <Copy className="size-3" />
+                  <Copy aria-hidden="true" className="size-3" />
                 </button>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -239,10 +237,11 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => copyText(position.account_id, "계좌 ID가")}
-                  className="inline-flex items-center gap-1 font-mono text-app-gray-700 hover:text-app-blue"
+                  aria-label="계좌 ID 복사"
+                  className="inline-flex min-h-8 items-center gap-1 font-mono text-app-gray-700 hover:text-app-blue"
                 >
                   {shortId(position.account_id)}
-                  <Copy className="size-3" />
+                  <Copy aria-hidden="true" className="size-3" />
                 </button>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -263,9 +262,9 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => setCollateralOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark hover:bg-blue-100"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark transition-opacity hover:opacity-80"
                 >
-                  <Plus className="size-4" />
+                  <Plus aria-hidden="true" className="size-4" />
                   담보 추가
                 </button>
                 <button
@@ -275,15 +274,15 @@ export function MarginPositionDetailDialog({
                   title={reductionBlocked ? "유지 기준 이하에서는 전액 종료만 가능해요" : undefined}
                   className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-gray-300 bg-card py-2.5 text-[13px] font-bold text-app-gray-800 hover:bg-app-gray-50 disabled:cursor-not-allowed disabled:bg-app-gray-100 disabled:text-app-gray-400"
                 >
-                  <RefreshCw className="size-4" />
+                  <RefreshCw aria-hidden="true" className="size-4" />
                   부분 정산
                 </button>
                 <button
                   type="button"
                   onClick={() => setClosureOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white hover:bg-red-600"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white transition-opacity hover:opacity-90"
                 >
-                  <XCircle className="size-4" />
+                  <XCircle aria-hidden="true" className="size-4" />
                   전액 종료
                 </button>
                 {reductionBlocked ? (

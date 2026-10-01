@@ -4,7 +4,7 @@ import { BellRing, Moon, Settings2 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useSyncExternalStore } from "react";
 
-import { Surface } from "@/components/primitives";
+import { PageHeader, Surface } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { Switch } from "@/components/ui/switch";
 import { useTradeExecutionPopupPreference } from "@/lib/preferences";
@@ -17,22 +17,16 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <div className="flex items-center gap-2">
-          <Settings2 className="size-5 text-app-blue" />
-          <h1 className="text-[24px] font-extrabold tracking-[-0.03em] text-app-gray-900">
-            설정
-          </h1>
-        </div>
-        <p className="mt-1 text-[13px] text-app-gray-500">
-          화면 테마와 표시할 알림을 조절할 수 있어요
-        </p>
-      </div>
+      <PageHeader
+        title="설정"
+        subtitle="화면 테마와 표시할 알림을 조절할 수 있어요"
+        icon={<Settings2 aria-hidden="true" className="size-5 text-app-blue" />}
+      />
 
       <Surface className="space-y-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-app-blue-light text-app-blue">
-            <Moon className="size-[18px]" />
+            <Moon aria-hidden="true" className="size-[18px]" />
           </div>
           <div className="min-w-0">
             <h2 className="text-[15px] font-bold text-app-gray-900">화면 테마</h2>
@@ -56,14 +50,14 @@ export default function SettingsPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-app-blue-light text-app-blue">
-              <BellRing className="size-[18px]" />
+              <BellRing aria-hidden="true" className="size-[18px]" />
             </div>
             <div className="min-w-0">
               <h2 className="text-[15px] font-bold text-app-gray-900">
                 체결 완료 팝업
               </h2>
               <p className="mt-1 text-[13px] leading-5 text-app-gray-500">
-                주문이 체결됐어요 팝업을 표시해요
+                시장가 주문이 체결되면 결과를 팝업으로 보여줘요. 예약 주문 등록 결과는 항상 보여드려요.
               </p>
             </div>
           </div>

@@ -6,6 +6,7 @@ import { ExchangeInfoNotice } from "@/components/exchange-policy";
 import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { API_BASE_URL, apiPage, buildQuery, errorMessage } from "@/lib/api";
+import { fmtDateTime } from "@/lib/format";
 import { ErrorBlock } from "@/components/primitives";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +32,7 @@ export function IconUrlField({
         className="h-11"
       />
       {policy && <div className="space-y-1 text-[12px] leading-5 text-app-gray-500">
-        <p>{policy.icon_formats.join(" · ")} · 최대 {policy.icon_max_width}×{policy.icon_max_height}px · {policy.icon_max_bytes.toLocaleString()}바이트</p>
+        <p>{policy.icon_formats.join(" · ")} · 최대 {policy.icon_max_width}×{policy.icon_max_height}px · {Math.round(policy.icon_max_bytes / 1024)}KB</p>
         <p>아이콘 심사 요청은 사용자당 분당 {policy.icon_requests_per_minute_per_user}회까지 가능해요.</p>
         <p className="break-all">{policy.icon_allowed_hosts.length ? `허용 HTTPS 호스트: ${policy.icon_allowed_hosts.join(", ")}` : "현재 허용된 호스트가 없어 새 아이콘을 등록할 수 없어요."}</p>
         <p>{policy.icon_requires_approval ? "심사 승인 후 표시돼요." : "별도 승인 없이 적용돼요."} URL을 입력하지 않으면 기존 아이콘을 유지해요.</p>
@@ -115,7 +116,7 @@ export function IconRequestHistory({ symbol }: { symbol: string }) {
           type="button"
           onClick={() => void query.refetch()}
           disabled={query.isFetching}
-          className="text-[12px] text-app-blue"
+          className="min-h-8 rounded-lg px-1 text-[12px] font-semibold text-app-blue disabled:opacity-50"
         >
           새로고침
         </button>
@@ -140,9 +141,7 @@ export function IconRequestHistory({ symbol }: { symbol: string }) {
           >
             <div className="flex justify-between gap-2">
               <span className="font-semibold">{states[request.state]}</span>
-              <time>
-                {new Date(request.created_at).toLocaleString("ko-KR")}
-              </time>
+              <time dateTime={request.created_at}>{fmtDateTime(request.created_at)}</time>
             </div>
             <p className="break-all text-app-gray-500">{request.source_url}</p>
             {request.reason && <p>심사 사유: {request.reason}</p>}

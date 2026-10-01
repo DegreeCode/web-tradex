@@ -73,7 +73,7 @@ export default function RecoverPage() {
               본인 확인이 완료됐어요. 새 패스키를 등록하면 계정이 활성화되고 로그인됩니다.
             </p>
           </div>
-          <div className="rounded-2xl bg-card p-5 shadow-[0_1px_2px_0_rgba(25,31,40,0.03)]">
+          <div className="rounded-2xl bg-card p-5 shadow-card">
             <Alert className="mb-4 border-0 bg-app-orange-light text-app-orange">
               <AlertTitle>복구 모드는 제한돼 있어요</AlertTitle>
               <AlertDescription className="text-app-orange/90">

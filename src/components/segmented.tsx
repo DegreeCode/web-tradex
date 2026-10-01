@@ -35,7 +35,7 @@ export function Segmented<T extends string>({
             className={cn(
               "min-h-9 min-w-0 rounded-sm px-1 py-2 text-[12px] leading-tight font-semibold whitespace-normal break-words transition-colors focus-visible:outline-2 focus-visible:outline-app-blue sm:px-2 sm:text-[14px]",
               active
-                ? "bg-card shadow-[0_1px_2px_0_rgba(25,31,40,0.06)] dark:bg-app-gray-300"
+                ? "bg-card shadow-raised dark:bg-app-gray-300"
                 : "text-app-gray-500 hover:text-app-gray-700",
               active && option.tone === "buy" && "text-app-red",
               active && option.tone === "sell" && "text-app-blue",

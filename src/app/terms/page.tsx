@@ -5,7 +5,7 @@ import { LegalDocument, type LegalSection } from "@/components/legal-document";
 import { LEGAL_CONTACT_EMAIL, TERMS_EFFECTIVE_DATE } from "@/lib/legal";
 
 export const metadata: Metadata = {
-  title: "이용약관 · TradeX",
+  title: "이용약관",
 };
 
 const SECTIONS: LegalSection[] = [
