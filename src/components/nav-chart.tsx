@@ -33,6 +33,15 @@ interface Point {
   value: number;
 }
 
+/** A hovered point plus the cursor position and chart width, for the tooltip. */
+interface Hovered extends Point {
+  x: number;
+  y: number;
+  width: number;
+}
+
+const TOOLTIP_GAP = 12;
+
 /** Oldest-first points, one per second, as the chart requires. */
 function toPoints(points: NavPoint[]): Point[] {
   const bySecond = new Map<number, number>();
@@ -54,7 +63,7 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area", Time> | null>(null);
-  const [hovered, setHovered] = useState<Point | null>(null);
+  const [hovered, setHovered] = useState<Hovered | null>(null);
   const data = useMemo(() => toPoints(points), [points]);
   const hasData = data.length >= 2;
   const color = hasData && data[data.length - 1].value < data[0].value ? DOWN_COLOR : UP_COLOR;
@@ -84,7 +93,17 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
     });
     const onMove = (param: MouseEventParams<Time>) => {
       const point = param.point && param.seriesData.get(series);
-      setHovered(point && "value" in point ? { time: param.time as UTCTimestamp, value: point.value } : null);
+      setHovered(
+        param.point && point && "value" in point
+          ? {
+              time: param.time as UTCTimestamp,
+              value: point.value,
+              x: param.point.x,
+              y: param.point.y,
+              width: container.clientWidth,
+            }
+          : null,
+      );
     };
     chart.subscribeCrosshairMove(onMove);
     chartRef.current = chart;
@@ -128,7 +147,16 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
       style={{ height, touchAction: "pan-y" }}
     >
       {hovered ? (
-        <div className="pointer-events-none absolute top-0 left-0 z-10 rounded-lg bg-app-gray-900/90 px-2.5 py-1.5 text-app-gray-50 shadow-lg">
+        <div
+          className="pointer-events-none absolute z-10 rounded-lg bg-app-gray-900/90 px-2.5 py-1.5 whitespace-nowrap text-app-gray-50 shadow-lg"
+          // Follows the cursor, flipping to its left on the right half so it stays inside the chart.
+          style={{
+            top: Math.max(0, Math.min(hovered.y - 24, height - 52)),
+            ...(hovered.x < hovered.width / 2
+              ? { left: hovered.x + TOOLTIP_GAP }
+              : { right: hovered.width - hovered.x + TOOLTIP_GAP }),
+          }}
+        >
           <p className="text-[11px] text-app-gray-50/70">{fmtDateTime(new Date(hovered.time * 1_000).toISOString())}</p>
           <p className="numeric text-[13px] font-semibold">{fmtCredit(hovered.value, 2)} Credit</p>
         </div>
