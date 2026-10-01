@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LegalConsent } from "@/components/legal-consent";
 import { errorMessage, postData } from "@/lib/api";
-import { closeSocket } from "@/lib/ws";
+import { clearSessionCache } from "@/lib/hooks";
 
 export default function InvitationPage() {
   const router = useRouter();
@@ -27,12 +27,7 @@ export default function InvitationPage() {
         invitation_token: token.trim(),
       });
       setToken("");
-      closeSocket("private");
-      await queryClient.cancelQueries();
-      queryClient.removeQueries({
-        predicate: (query) => query.queryKey[0] !== "me",
-      });
-      queryClient.getMutationCache().clear();
+      await clearSessionCache(queryClient);
       void queryClient.resetQueries({ queryKey: ["me"], exact: true });
       router.replace("/recover");
     } catch (error) {
