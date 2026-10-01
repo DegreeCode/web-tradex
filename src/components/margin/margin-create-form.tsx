@@ -3,6 +3,9 @@
 import { useAuth } from "@/components/auth-provider";
 import { managerMarginSideBlocked, useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy, MarginInterestPolicy } from "@/components/exchange-policy";
+import { InfoTip } from "@/components/info-tip";
+import { SlippageFields } from "@/components/slippage-fields";
+import { useSlippagePreference } from "@/lib/preferences";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react";
@@ -67,7 +70,7 @@ export function MarginCreateForm({
   const [leverage, setLeverage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
-  const [slippagePercent, setSlippagePercent] = useState("");
+  const [slippagePercent, setSlippagePercent] = useSlippagePreference();
   const [referencePrice, setReferencePrice] = useState("");
 
   const selectedInstrument = useInstrument(resolvedSymbol).data;
@@ -273,7 +276,13 @@ export function MarginCreateForm({
         ) : null}
 
         <div>
-          <label htmlFor="margin-collateral" className="text-[13px] font-semibold text-app-gray-500">담보</label>
+          <div className="flex items-center gap-0.5">
+            <label htmlFor="margin-collateral" className="text-[13px] font-semibold text-app-gray-500">담보</label>
+            <InfoTip label="담보">
+              차입 한도·풀 유동성·슬리피지·잔고를 넘으면 요청한 담보 중 체결 가능한 만큼만 사용해요. 쓰지 않은 담보는
+              차감되지 않아요. 예상 결과 확인에서 지금 가능한 최대 담보를 볼 수 있어요.
+            </InfoTip>
+          </div>
           <div className="mt-1 flex items-baseline gap-1 border-b-2 border-app-gray-200 pb-1.5 focus-within:border-app-blue">
             <input
               id="margin-collateral"
@@ -393,38 +402,12 @@ export function MarginCreateForm({
           </button>
           {showAdvanced ? (
             <div className="space-y-2.5 rounded-xl bg-app-gray-50 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <label htmlFor="margin-slippage" className="text-[13px] font-semibold text-app-gray-500">허용 슬리피지</label>
-                <div className="flex items-baseline gap-1">
-                  <input
-                    id="margin-slippage"
-                    type="text"
-                    inputMode="decimal"
-                    value={slippagePercent}
-                    placeholder={exchangeInfo ? `기본 ${exchangeInfo.trade.default_slippage_ppm / 10_000}` : "서버 기본값"}
-                    onChange={(e) => setSlippagePercent(e.target.value)}
-                    className="numeric w-20 bg-transparent text-right text-base md:text-[15px] font-bold text-app-gray-900 outline-none placeholder:text-app-gray-300"
-                  />
-                  <span className="text-[12px] font-semibold text-app-gray-400">%</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <label htmlFor="margin-reference" className="text-[13px] font-semibold text-app-gray-500">기준가 (선택)</label>
-                <input
-                  id="margin-reference"
-                  type="text"
-                  inputMode="decimal"
-                  value={referencePrice}
-                  placeholder="현재가"
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/,/g, "");
-                    if (val === "" || isDecimalInput(val, 8)) {
-                      setReferencePrice(val);
-                    }
-                  }}
-                  className="numeric w-28 bg-transparent text-right text-base md:text-[14px] font-semibold text-app-gray-900 outline-none placeholder:text-app-gray-300"
-                />
-              </div>
+              <SlippageFields
+                slippage={slippagePercent}
+                onSlippageChange={setSlippagePercent}
+                referencePrice={referencePrice}
+                onReferencePriceChange={setReferencePrice}
+              />
             </div>
           ) : null}
 
@@ -457,7 +440,6 @@ export function MarginCreateForm({
             {side === "LONG" ? "롱 포지션 열기" : "숏 포지션 열기"}
           </button>
           <p className="text-center text-[11px] text-app-gray-400">
-            한도·유동성을 넘으면 요청한 담보 중 가능한 만큼만 사용해 체결해요.
             마진 거래는 담보를 잃을 수 있고, 위험 비율이 유지 기준 이하로 떨어지면 강제청산될 수 있어요.
           </p>
         </div>

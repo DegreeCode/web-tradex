@@ -2,6 +2,8 @@
 
 import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
+import { SlippageFields } from "@/components/slippage-fields";
+import { useSlippagePreference } from "@/lib/preferences";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
@@ -41,7 +43,7 @@ export function MarginReductionDialog({
   const [quantity, setQuantity] = useState("");
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [slippagePercent, setSlippagePercent] = useState("");
+  const [slippagePercent, setSlippagePercent] = useSlippagePreference();
   const [referencePrice, setReferencePrice] = useState("");
   const reduceMutation = useReduceMarginPosition(position?.position_id ?? "");
 
@@ -179,41 +181,16 @@ export function MarginReductionDialog({
               <ChevronDown
                 className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
               />
-              고급 주문 설정 (슬리피지 등)
+              고급 설정 (슬리피지)
             </button>
             {showAdvanced ? (
-              <div className="mt-2 space-y-3 rounded-xl bg-app-gray-50 p-3">
-                <div>
-                  <label className="block text-[12px] text-app-gray-600">
-                    허용 슬리피지 (%)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={slippagePercent}
-                    placeholder={exchangeInfo ? `기본값 (${exchangeInfo.trade.default_slippage_ppm / 10_000}%)` : "서버 기본값"}
-                    onChange={(e) => setSlippagePercent(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-app-gray-200 bg-card px-2.5 py-1.5 text-base md:text-[13px] text-app-gray-900 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-app-gray-600">
-                    슬리피지 기준 가격 (생략 시 현재 곡선가)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={referencePrice}
-                    placeholder="0.00000000"
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/,/g, "");
-                      if (val === "" || isDecimalInput(val, 8)) {
-                        setReferencePrice(val);
-                      }
-                    }}
-                    className="mt-1 w-full rounded-lg border border-app-gray-200 bg-card px-2.5 py-1.5 text-base md:text-[13px] text-app-gray-900 focus:outline-none"
-                  />
-                </div>
+              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+                <SlippageFields
+                  slippage={slippagePercent}
+                  onSlippageChange={setSlippagePercent}
+                  referencePrice={referencePrice}
+                  onReferencePriceChange={setReferencePrice}
+                />
               </div>
             ) : null}
           </div>

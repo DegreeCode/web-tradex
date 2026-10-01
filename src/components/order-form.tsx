@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeftRight, ChevronDown, Info } from "lucide-react";
+import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -15,8 +15,9 @@ import { Segmented } from "@/components/segmented";
 import { ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives";
 import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
+import { SlippageFields } from "@/components/slippage-fields";
 import { errorMessage, isApiError } from "@/lib/api";
-import { shouldShowTradeExecutionPopup } from "@/lib/preferences";
+import { shouldShowTradeExecutionPopup, useSlippagePreference } from "@/lib/preferences";
 import {
   fmtCredit,
   fmtPrice,
@@ -51,7 +52,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
   const [targetPrice, setTargetPrice] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [slippage, setSlippage] = useState("");
+  const [slippage, setSlippage] = useSlippagePreference();
   const [referencePrice, setReferencePrice] = useState("");
   const [result, setResult] = useState<Order | null>(null);
 
@@ -424,38 +425,12 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
             {advancedOpen ? (
               <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1 text-[13px] font-semibold text-app-gray-500">
-                    허용 슬리피지
-                    <Info className="size-3.5 text-app-gray-300" />
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <input
-                      value={slippage}
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        if (next === "" || isDecimalInput(next, 4)) setSlippage(next);
-                      }}
-                      inputMode="decimal"
-                      placeholder={exchangeInfo ? `기본 ${exchangeInfo.trade.default_slippage_ppm / 10_000}` : "서버 기본값"}
-                      className="numeric w-20 bg-transparent text-right text-base md:text-[15px] font-bold text-app-gray-900 outline-none placeholder:text-app-gray-300"
-                    />
-                    <span className="text-[12px] font-semibold text-app-gray-400">%</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[13px] font-semibold text-app-gray-500">기준가 (선택)</span>
-                  <input
-                    value={referencePrice}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      if (next === "" || isDecimalInput(next, 8)) setReferencePrice(next);
-                    }}
-                    inputMode="decimal"
-                    placeholder="현재가"
-                    className="numeric w-28 bg-transparent text-right text-base md:text-[14px] font-semibold text-app-gray-900 outline-none placeholder:text-app-gray-300"
-                  />
-                </div>
+                <SlippageFields
+                  slippage={slippage}
+                  onSlippageChange={setSlippage}
+                  referencePrice={referencePrice}
+                  onReferencePriceChange={setReferencePrice}
+                />
                 <div className="border-t border-app-gray-200 pt-2">
                   <TradePolicy />
                 </div>
