@@ -23,6 +23,7 @@ import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/li
 import {
   getLeverageOptions,
   marginErrorMessage,
+  marginPartialFillText,
   marginSlippageFields,
   useCreateMarginPosition,
   validateCollateralAmount,
@@ -154,8 +155,16 @@ export function MarginCreateForm({
     if (!canSubmit || !payload) return;
 
     try {
-      await createMutation.mutateAsync(payload);
-      toast.success(`${resolvedSymbol} ${side === "LONG" ? "롱" : "숏"} 포지션을 열었어요`);
+      const position = await createMutation.mutateAsync(payload);
+      const label = `${resolvedSymbol} ${side === "LONG" ? "롱" : "숏"} 포지션`;
+      // The server clips entry to the executable collateral; the rest stays in the account.
+      if (position.execution?.partially_filled) {
+        toast.warning(`${label}을 일부만 열었어요`, {
+          description: `${marginPartialFillText(position.execution)}. 사용하지 않은 담보는 차감되지 않아요.`,
+        });
+      } else {
+        toast.success(`${label}을 열었어요`);
+      }
       setCollateral("");
       onCreated?.();
     } catch (err) {
@@ -363,7 +372,11 @@ export function MarginCreateForm({
           </div>
         ) : null}
 
-        <MarginSimulationPreview path="/api/v1/margin/positions/simulation" payload={payload} />
+        <MarginSimulationPreview
+          path="/api/v1/margin/positions/simulation"
+          payload={payload}
+          onApplyMaxCollateral={setCollateral}
+        />
 
         <div className="space-y-2">
           <button
@@ -444,6 +457,7 @@ export function MarginCreateForm({
             {side === "LONG" ? "롱 포지션 열기" : "숏 포지션 열기"}
           </button>
           <p className="text-center text-[11px] text-app-gray-400">
+            한도·유동성을 넘으면 요청한 담보 중 가능한 만큼만 사용해 체결해요.
             마진 거래는 담보를 잃을 수 있고, 위험 비율이 유지 기준 이하로 떨어지면 강제청산될 수 있어요.
           </p>
         </div>

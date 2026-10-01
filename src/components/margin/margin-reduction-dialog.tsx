@@ -22,6 +22,7 @@ import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
   marginErrorMessage,
+  marginPartialFillText,
   marginSlippageFields,
   useReduceMarginPosition,
   validateReductionQuantity,
@@ -63,8 +64,14 @@ export function MarginReductionDialog({
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!payload || !position) return;
     try {
-      await reduceMutation.mutateAsync(payload);
-      toast.success("포지션 일부 정산이 완료되었어요");
+      const result = await reduceMutation.mutateAsync(payload);
+      if (result.execution?.partially_filled) {
+        toast.warning("요청 수량 중 일부만 정산했어요", {
+          description: `${marginPartialFillText(result.execution)}. 나머지는 자동으로 다시 주문되지 않아요.`,
+        });
+      } else {
+        toast.success("포지션 일부 정산이 완료되었어요");
+      }
       setQuantity("");
       onOpenChange(false);
     } catch (err) {

@@ -12,11 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { isDecimalInput } from "@/lib/format";
+import { fmtQuantity, isDecimalInput } from "@/lib/format";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
   marginErrorMessage,
+  marginPartialFillText,
   marginSlippageFields,
   useCloseMarginPosition,
   type MarginPosition,
@@ -54,8 +55,15 @@ export function MarginClosureDialog({
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!position || !payload) return;
     try {
-      await closeMutation.mutateAsync(payload);
-      toast.success("포지션 전액 종료 정산이 완료되었어요");
+      const result = await closeMutation.mutateAsync(payload);
+      // A 200 closure may settle only part of the position; the rest stays OPEN.
+      if (result.status === "OPEN") {
+        toast.warning("포지션을 일부만 종료했어요", {
+          description: `${result.execution ? `${marginPartialFillText(result.execution)} · ` : ""}잔여 ${fmtQuantity(result.quantity)}주는 그대로 유지돼요.`,
+        });
+      } else {
+        toast.success("포지션 전액 종료 정산이 완료되었어요");
+      }
       onOpenChange(false);
     } catch (err) {
       toast.error(marginErrorMessage(err));
@@ -68,7 +76,7 @@ export function MarginClosureDialog({
         <DialogHeader>
           <DialogTitle>포지션 전액 종료 (전체 정산)</DialogTitle>
           <DialogDescription>
-            남은 포지션 전체를 즉시 시장가로 청산 정산합니다.
+            남은 포지션 전체를 즉시 시장가로 청산 정산합니다. 슬리피지나 풀 재고 때문에 일부만 정산되면 남은 수량의 포지션은 유지됩니다.
           </DialogDescription>
         </DialogHeader>
 

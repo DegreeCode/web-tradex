@@ -8,6 +8,8 @@ import {
   validateLeverage,
   validateReductionQuantity,
   marginErrorMessage,
+  marginMaxCollateral,
+  marginPartialFillText,
 } from "../src/lib/margin";
 import { ApiError } from "../src/lib/api";
 
@@ -134,4 +136,32 @@ test("marginErrorMessage translates margin-specific error codes", () => {
   // Fallback to standard messages
   const err6 = new ApiError(409, "INSUFFICIENT_CREDIT", "insufficient credit");
   assert.equal(marginErrorMessage(err6), "Credit 잔액이 부족해요");
+});
+
+test("marginMaxCollateral keeps exact decimal strings from simulations and zero-fill errors", () => {
+  assert.equal(marginMaxCollateral("12.3456789012345678"), "12.3456789012345678");
+  assert.equal(marginMaxCollateral("12.34567890123456789"), null);
+  assert.equal(marginMaxCollateral("0"), "0");
+  assert.equal(marginMaxCollateral(undefined), null);
+  assert.equal(marginMaxCollateral(10), null);
+  assert.equal(marginMaxCollateral("-1"), null);
+  const rejection = new ApiError(400, "INSUFFICIENT_CREDIT", "insufficient", "", { max_collateral: "7.5", field: "collateral" });
+  assert.equal(marginMaxCollateral(rejection), "7.5");
+  assert.equal(marginMaxCollateral(new ApiError(403, "MARGIN_BLOCKED", "blocked")), null);
+});
+
+test("marginPartialFillText describes clipped entries and settlements", () => {
+  const base = { filled_quantity: "150", partially_filled: true, principal: "15", fee: "0.0015", total_debit: "0", net_proceeds: "0" };
+  assert.equal(
+    marginPartialFillText({ ...base, action: "OPEN", requested_collateral: "100", used_collateral: "10", unused_collateral: "90", limit_reasons: ["CREDIT_BALANCE", "SLIPPAGE"] }),
+    "요청 담보 100 Credit 중 10 Credit 사용 · 제한: 가용 Credit·슬리피지",
+  );
+  assert.equal(
+    marginPartialFillText({ ...base, action: "CLOSE", requested_quantity: "200", limit_reasons: ["UNKNOWN_REASON"] }),
+    "요청 200주 중 150주 정산 · 제한: UNKNOWN_REASON",
+  );
+  assert.equal(
+    marginPartialFillText({ ...base, action: "REDUCE", requested_quantity: "200", limit_reasons: [] }),
+    "요청 200주 중 150주 정산",
+  );
 });
