@@ -1,9 +1,15 @@
 "use client";
 
-import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
+import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
-import { useSlippagePreference } from "@/lib/preferences";
+import { useInstrument } from "@/lib/hooks";
+import {
+  liveReferencePrice,
+  slippageRequestFields,
+  slippageSettingsError,
+  useSlippageSettings,
+} from "@/lib/slippage";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
@@ -20,7 +26,6 @@ import {
   isMarginRiskAtOrBelow,
   marginErrorMessage,
   marginPartialFillText,
-  marginSlippageFields,
   useCloseMarginPosition,
   type MarginPosition,
 } from "@/lib/margin";
@@ -36,8 +41,8 @@ export function MarginClosureDialog({
 }) {
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [slippagePercent, setSlippagePercent] = useSlippagePreference();
-  const [referencePrice, setReferencePrice] = useState("");
+  const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
+  const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
   const closeMutation = useCloseMarginPosition(position?.position_id ?? "");
 
   if (!position) return null;
@@ -47,17 +52,22 @@ export function MarginClosureDialog({
     position.risk_ratio_ppm,
     exchangeInfo?.margin.maintenance_ppm,
   );
-  const payload = slippageError(slippagePercent, exchangeInfo?.trade)
+  // Exiting a Long sells and exiting a Short buys back.
+  const exitSide = position.side === "LONG" ? "SELL" : "BUY";
+  const referencePrice = liveReferencePrice(slippageSettings, curvePrice);
+  const payload = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
     ? null
-    : marginSlippageFields(slippagePercent, referencePrice);
+    : slippageRequestFields(slippageSettings);
 
   async function handleClose(e: React.FormEvent) {
     e.preventDefault();
-    const invalidSlippage = slippageError(slippagePercent, exchangeInfo?.trade);
+    const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!position || !payload) return;
     try {
-      const result = await closeMutation.mutateAsync(payload);
+      const result = await closeMutation.mutateAsync(
+        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
+      );
       // A 200 closure may settle only part of the position; the rest stays OPEN.
       if (result.status === "OPEN") {
         toast.warning("포지션을 일부만 종료했어요", {
@@ -139,15 +149,17 @@ export function MarginClosureDialog({
                 aria-hidden="true"
                 className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
               />
-              고급 설정 (슬리피지)
+              고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
             {showAdvanced ? (
               <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
-                  slippage={slippagePercent}
-                  onSlippageChange={setSlippagePercent}
-                  referencePrice={referencePrice}
-                  onReferencePriceChange={setReferencePrice}
+                  side={exitSide}
+                  settings={slippageSettings}
+                  onModeChange={setSlippageMode}
+                  onSlippageChange={setSlippage}
+                  onLimitPriceChange={setLimitPrice}
+                  currentPrice={curvePrice}
                 />
               </div>
             ) : null}
@@ -156,6 +168,7 @@ export function MarginClosureDialog({
           <MarginSimulationPreview
             path={`/api/v1/margin/positions/${position.position_id}/closure/simulation`}
             payload={payload}
+            referencePrice={referencePrice}
           />
 
           <div className="flex flex-wrap justify-end gap-2 pt-2">

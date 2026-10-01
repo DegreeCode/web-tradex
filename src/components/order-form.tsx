@@ -13,13 +13,20 @@ import {
 } from "@/components/ui/dialog";
 import { Segmented } from "@/components/segmented";
 import { ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives";
-import { useExchangeInfo, slippageError } from "@/lib/exchange-info";
+import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
 import { marginLimitReasonLabel } from "@/lib/margin";
-import { shouldShowTradeExecutionPopup, useSlippagePreference } from "@/lib/preferences";
+import { shouldShowTradeExecutionPopup } from "@/lib/preferences";
+import {
+  liveReferencePrice,
+  slippageRequestFields,
+  slippageSettingsError,
+  slippageSummary,
+  useSlippageSettings,
+} from "@/lib/slippage";
 import {
   fmtCredit,
   fmtPrice,
@@ -27,7 +34,6 @@ import {
   compareDecimal,
   isDecimalInput,
   isPositiveDecimal,
-  ppmFromPercent,
   scaleDecimal,
 } from "@/lib/format";
 import { findPosition, useAccounts, useOrderSimulation, usePlaceOrder, usePortfolio } from "@/lib/hooks";
@@ -54,8 +60,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
   const [targetPrice, setTargetPrice] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [slippage, setSlippage] = useSlippagePreference();
-  const [referencePrice, setReferencePrice] = useState("");
+  const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
   const [result, setResult] = useState<Order | null>(null);
   const fieldId = useId();
 
@@ -97,10 +102,15 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
         return "목표 가격을 입력해주세요";
       }
     }
-    const slippageValidation = slippageError(slippage, exchangeInfo?.trade);
+    const slippageValidation = slippageSettingsError(slippageSettings, side, exchangeInfo?.trade);
     if (slippageValidation) return slippageValidation;
-    if (referencePrice && (!isDecimalInput(referencePrice, 8) || !isPositiveDecimal(referencePrice))) {
-      return "기준가는 0보다 큰 가격이어야 해요";
+    // The order fills at the target price, so a limit on the wrong side of it can never fill.
+    if (
+      orderMode === "TRIGGER" &&
+      slippageSettings.mode === "PRICE_LIMIT" &&
+      compareDecimal(slippageSettings.limitPrice.trim(), targetPrice) * (side === "BUY" ? 1 : -1) < 0
+    ) {
+      return side === "BUY" ? "매수 상한가는 목표 가격 이상이어야 해요" : "매도 하한가는 목표 가격 이하여야 해요";
     }
     return null;
   }, [
@@ -111,8 +121,8 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
     orderQuantity,
     orderMode,
     targetPrice,
-    slippage,
-    referencePrice,
+    slippageSettings,
+    side,
   ]);
 
   const accountFeedback = balanceError
@@ -137,11 +147,12 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
       ...(effectiveAmountMode === "CREDIT"
         ? { credit_amount: orderAmount.trim() }
         : { quantity: orderQuantity.trim() }),
-      ...(slippage.trim() ? { slippage_ppm: ppmFromPercent(slippage.trim()) } : {}),
-      ...(referencePrice.trim() ? { slippage_reference_price: referencePrice.trim() } : {}),
+      ...slippageRequestFields(slippageSettings),
     };
-  }, [orderMode, inputError, balanceReady, instrument.symbol, side, resolvedAccountId, effectiveAmountMode, orderAmount, orderQuantity, slippage, referencePrice]);
-  const simulation = useOrderSimulation(simulationPayload);
+  }, [orderMode, inputError, balanceReady, instrument.symbol, side, resolvedAccountId, effectiveAmountMode, orderAmount, orderQuantity, slippageSettings]);
+  // Trigger orders leave the reference to the server, which uses the target price.
+  const referencePrice = orderMode === "MARKET" ? liveReferencePrice(slippageSettings, spot) : undefined;
+  const simulation = useOrderSimulation(simulationPayload, referencePrice);
   const quote = simulation.data;
 
   function submit() {
@@ -157,6 +168,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
       symbol: instrument.symbol,
       side,
       order_type: orderMode,
+      ...slippageRequestFields(slippageSettings),
     };
     if (resolvedAccountId) payload.account_id = resolvedAccountId;
     if (orderMode === "TRIGGER") {
@@ -166,8 +178,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
     }
     if (effectiveAmountMode === "CREDIT") payload.credit_amount = orderAmount.trim();
     else payload.quantity = orderQuantity.trim();
-    if (slippage.trim()) payload.slippage_ppm = ppmFromPercent(slippage.trim());
-    if (referencePrice.trim()) payload.slippage_reference_price = referencePrice.trim();
+    if (referencePrice) payload.slippage_reference_price = referencePrice;
 
     placeOrder.mutate(payload, {
       onSuccess: (order) => {
@@ -200,7 +211,6 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
   // An empty form already reads as "enter an amount"; only surface problems
   // once there is something to correct.
   const feedback = !inputValue.trim() && !accountFeedback && trading ? null : validationError;
-  const defaultSlippage = exchangeInfo ? `${exchangeInfo.trade.default_slippage_ppm / 10_000}%` : null;
 
   return (
     <>
@@ -211,6 +221,8 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
             onChange={(next) => {
               setSide(next);
               setLinkedPercent(null);
+              // A buy cap means nothing as a sell floor.
+              setLimitPrice("");
               setResult(null);
             }}
             options={[
@@ -420,7 +432,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
             >
               고급 설정
               <span className="flex items-center gap-1 font-medium text-app-gray-400">
-                {slippage.trim() ? `슬리피지 ${slippage.trim()}%` : defaultSlippage ? `슬리피지 ${defaultSlippage}` : null}
+                {slippageSummary(slippageSettings, side, exchangeInfo?.trade.default_slippage_ppm, fmtPrice)}
                 <ChevronDown
                   aria-hidden="true"
                   className={advancedOpen ? "size-4 rotate-180 transition-transform" : "size-4 transition-transform"}
@@ -431,10 +443,13 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
             {advancedOpen ? (
               <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
-                  slippage={slippage}
+                  side={side}
+                  settings={slippageSettings}
+                  onModeChange={setSlippageMode}
                   onSlippageChange={setSlippage}
-                  referencePrice={referencePrice}
-                  onReferencePriceChange={setReferencePrice}
+                  onLimitPriceChange={setLimitPrice}
+                  currentPrice={orderMode === "MARKET" ? spot : undefined}
+                  trigger={orderMode === "TRIGGER"}
                 />
                 <div className="border-t border-app-gray-200 pt-2">
                   <TradePolicy />

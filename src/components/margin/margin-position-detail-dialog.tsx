@@ -304,12 +304,14 @@ export function MarginPositionDetailDialog({
       />
 
       <MarginReductionDialog
+        key={position?.position_id}
         position={position}
         open={reductionOpen}
         onOpenChange={setReductionOpen}
       />
 
       <MarginClosureDialog
+        key={position?.position_id}
         position={position}
         open={closureOpen}
         onOpenChange={setClosureOpen}
