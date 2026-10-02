@@ -3,16 +3,18 @@
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { onSessionExpired } from "@/lib/api";
+import { onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
 import { clearSessionCache, useMe } from "@/lib/hooks";
-import type { User } from "@/lib/types";
+import type { SessionScope, User } from "@/lib/types";
 
 export type { AuthStatus };
 
 interface AuthValue {
   status: AuthStatus;
   user: User | null;
+  /** The scope of a device-linked session; null for a full (passkey) session. */
+  linkedScope: SessionScope | null;
   refresh: () => void;
 }
 
@@ -30,6 +32,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [queryClient],
   );
 
+  // Any request refused for a changed network means /me will be refused too;
+  // re-reading it moves the app to the linked-blocked state.
+  useEffect(
+    () =>
+      onLinkedNetworkChanged(() => {
+        void queryClient.invalidateQueries({ queryKey: ["me"] });
+      }),
+    [queryClient],
+  );
+
   const value = useMemo<AuthValue>(() => {
     const data = query.data as User | null | undefined;
     const errorCode =
@@ -39,9 +51,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const status = authStatus(data, query.isError, errorCode);
 
+    const user = status === "authenticated" ? data ?? null : null;
     return {
       status,
-      user: status === "authenticated" ? data ?? null : null,
+      user,
+      linkedScope: user?.session_type === "LINKED" ? user.scope ?? null : null,
       refresh: () => {
         void queryClient.invalidateQueries({ queryKey: ["me"] });
       },

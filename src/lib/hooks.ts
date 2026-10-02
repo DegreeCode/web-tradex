@@ -374,10 +374,11 @@ export function useSessions() {
   });
 }
 
-export function usePasskeys() {
+export function usePasskeys(enabled = true) {
   return useQuery({
     queryKey: ["passkeys"],
     queryFn: () => apiData<Passkey[]>("/api/v1/me/passkeys"),
+    enabled,
     staleTime: 15_000,
   });
 }

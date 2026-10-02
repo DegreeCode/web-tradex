@@ -1,6 +1,7 @@
 import type { Page } from "./types";
 
 const SESSION_EXPIRED_EVENT = "tradex:session-expired";
+const LINKED_NETWORK_CHANGED_EVENT = "tradex:linked-network-changed";
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
@@ -61,6 +62,11 @@ const MESSAGES: Record<string, string> = {
   ORIGIN_FORBIDDEN: "허용되지 않은 접근이에요",
   CSRF_INVALID: "보안 토큰이 만료됐어요. 새로고침 후 다시 시도해주세요",
   RECOVERY_RESTRICTED: "복구 모드에서는 사용할 수 없어요",
+  DEVICE_LINK_INVALID: "연결 요청을 찾을 수 없어요. 새 코드를 받아주세요",
+  DEVICE_LINK_EXPIRED: "코드가 만료됐어요. 새 코드를 받아주세요",
+  DEVICE_LINK_RATE_LIMITED: "요청이 너무 많아요. 잠시 후 다시 시도해주세요",
+  SESSION_SCOPE_FORBIDDEN: "이 연결된 기기에 허용되지 않은 기능이에요",
+  DEVICE_LINK_LIMIT: "진행 중인 연결 요청이 너무 많아요. 잠시 후 다시 시도해주세요",
   ACCESS_DENIED: "접근 권한이 없어요",
   ACL_FORBIDDEN: "접근 권한이 없어요",
   NOT_FOUND: "대상을 찾을 수 없어요",
@@ -91,7 +97,20 @@ const MESSAGES: Record<string, string> = {
   INTERNAL_ERROR: "일시적인 오류가 발생했어요",
 };
 
+/**
+ * Why a device-linked session was refused: its network binding no longer
+ * matches, the scope lacks the permission, or the route is never open to it.
+ */
+export function scopeDenialReason(error: unknown): "NETWORK_MISMATCH" | "PERMISSION" | "ROUTE" | null {
+  if (!(error instanceof ApiError) || error.code !== "SESSION_SCOPE_FORBIDDEN") return null;
+  const reason = error.details?.reason;
+  return reason === "NETWORK_MISMATCH" || reason === "PERMISSION" || reason === "ROUTE" ? reason : "ROUTE";
+}
+
 export function errorMessage(error: unknown): string {
+  if (scopeDenialReason(error) === "NETWORK_MISMATCH") {
+    return "접속 위치가 바뀌어 이 연결을 더 이상 쓸 수 없어요";
+  }
   if (error instanceof ApiError) {
     return MESSAGES[error.code] ?? error.message ?? "요청을 처리하지 못했어요";
   }
@@ -208,6 +227,14 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
     if (response.status === 401 && code === "SESSION_INVALID" && typeof window !== "undefined") {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
+    if (
+      response.status === 403 &&
+      code === "SESSION_SCOPE_FORBIDDEN" &&
+      envelope.error?.details?.reason === "NETWORK_MISMATCH" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new Event(LINKED_NETWORK_CHANGED_EVENT));
+    }
     throw new ApiError(
       response.status,
       code,
@@ -247,6 +274,13 @@ export function onSessionExpired(handler: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   window.addEventListener(SESSION_EXPIRED_EVENT, handler);
   return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handler);
+}
+
+/** A linked session's network binding stopped matching; the whole session is unusable. */
+export function onLinkedNetworkChanged(handler: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(LINKED_NETWORK_CHANGED_EVENT, handler);
+  return () => window.removeEventListener(LINKED_NETWORK_CHANGED_EVENT, handler);
 }
 
 /** Notify the authenticated shell that an authenticated transport was rejected. */

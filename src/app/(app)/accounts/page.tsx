@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState, ErrorBlock, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -16,6 +17,8 @@ export default function AccountsPage() {
   const accountsQuery = useAccounts();
   const createAccount = useCreateAccount();
   const deleteAccount = useDeleteAccount();
+  // Opening or closing accounts is account management, kept to passkey sessions.
+  const manageAccess = useSessionAccess("FULL");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -51,17 +54,21 @@ export default function AccountsPage() {
         title="계좌"
         subtitle="계좌 ID를 상대방에게 알려주면 송금을 받을 수 있어요"
         action={
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={createAccount.isPending}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
-          >
-            <Plus aria-hidden="true" className="size-4" />
-            {createAccount.isPending ? "만드는 중…" : "계좌 추가"}
-          </button>
+          manageAccess.allowed ? (
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={createAccount.isPending}
+              className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
+            >
+              <Plus aria-hidden="true" className="size-4" />
+              {createAccount.isPending ? "만드는 중…" : "계좌 추가"}
+            </button>
+          ) : null
         }
       />
+
+      {manageAccess.allowed ? null : <ScopeNotice reason={`계좌 추가·삭제는 ${manageAccess.reason}`} />}
 
       {accountsQuery.isError ? <ErrorBlock message={errorMessage(accountsQuery.error)} onRetry={() => void accountsQuery.refetch()} /> : null}
       {accountsQuery.isLoading ? (
@@ -119,7 +126,7 @@ export default function AccountsPage() {
                 <p className="min-w-0 break-all text-[11px] text-app-gray-400">
                   {account.account_id} · {fmtDate(account.created_at)} 개설
                 </p>
-                {!account.is_primary ? (
+                {!account.is_primary && manageAccess.allowed ? (
                   <button
                     type="button"
                     onClick={() => setPendingDelete(account.account_id)}

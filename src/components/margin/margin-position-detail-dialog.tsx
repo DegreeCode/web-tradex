@@ -18,6 +18,7 @@ import {
 import { ErrorBlock, LoadingBlock } from "@/components/primitives";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useAccounts } from "@/lib/hooks";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginCollateralDialog } from "./margin-collateral-dialog";
 import { MarginReductionDialog } from "./margin-reduction-dialog";
 import { MarginClosureDialog } from "./margin-closure-dialog";
@@ -47,6 +48,7 @@ export function MarginPositionDetailDialog({
   );
   const effectiveCredit = positionAccount?.available_credit ?? availableCredit;
 
+  const marginAccess = useSessionAccess("MARGIN");
   const [collateralOpen, setCollateralOpen] = useState(false);
   const [reductionOpen, setReductionOpen] = useState(false);
   const [closureOpen, setClosureOpen] = useState(false);
@@ -257,7 +259,8 @@ export function MarginPositionDetailDialog({
             </div>
 
             {/* Action buttons (only when status is OPEN) */}
-            {isOpen ? (
+            {isOpen && !marginAccess.allowed ? <ScopeNotice reason={marginAccess.reason} /> : null}
+            {isOpen && marginAccess.allowed ? (
               <div className="sticky -bottom-4 -mx-4 -mb-4 flex flex-wrap gap-2 border-t border-app-gray-100 bg-popover px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <button
                   type="button"

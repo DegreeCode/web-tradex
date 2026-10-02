@@ -41,6 +41,7 @@ import {
 import { formatUnreadBadge } from "@/lib/notifications";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { BrandLogo } from "@/components/brand-logo";
+import { LinkedSessionBanner } from "@/components/linked-session-banner";
 
 const PRIMARY_NAV = [
   { href: "/", label: "홈", icon: Home },
@@ -59,6 +60,10 @@ const MORE_NAV = [
   { href: "/listings/new", label: "종목 상장", description: "새 종목 등록", icon: PlusCircle },
   { href: "/support", label: "고객센터", description: "문의 접수·답변", icon: LifeBuoy },
 ];
+
+// A device-linked session can't use notifications, inquiries or listing, so
+// those entries are left out instead of leading to refused pages.
+const LINKED_HIDDEN_NAV = new Set(["/notifications", "/support", "/listings/new"]);
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
@@ -99,11 +104,13 @@ function UnreadBadge({ label, className }: { label: string; className?: string }
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, status } = useAuth();
+  const { user, status, linkedScope } = useAuth();
   const authenticated = status === "authenticated";
+  const linked = linkedScope !== null;
+  const moreNav = linked ? MORE_NAV.filter((item) => !LINKED_HIDDEN_NAV.has(item.href)) : MORE_NAV;
   const logout = useLogout();
   const [moreOpen, setMoreOpen] = useState(false);
-  const unread = useUnreadNotifications(authenticated);
+  const unread = useUnreadNotifications(authenticated && !linked);
   const unreadCount = authenticated ? (unread.data?.data.length ?? 0) : 0;
   const unreadOverflow = authenticated && (unread.data?.page.has_more ?? false);
   const unreadBadgeLabel = formatUnreadBadge(unreadCount, unreadOverflow);
@@ -113,12 +120,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useMarketStateStream();
   useDisclosureStream();
   useSymbolMetadataSync();
-  usePrivateStream(authenticated);
+  // A linked session's private stream carries almost no events, so its private
+  // queries poll REST instead of waiting on a socket that stays quiet.
+  usePrivateStream(authenticated && !linked);
 
   const initial = user?.username.slice(0, 1).toUpperCase() ?? "⋯";
   const currentTitle =
     [...PRIMARY_NAV, ...MORE_NAV].find((item) => isActive(pathname, item.href))?.label ?? "";
-  const moreActive = MORE_NAV.some((item) => isActive(pathname, item.href));
+  const moreActive = moreNav.some((item) => isActive(pathname, item.href));
 
   function handleLogout() {
     logout.mutate(undefined, {
@@ -145,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />
           ))}
           <p className="px-3 pt-5 pb-1 text-[12px] font-semibold text-app-gray-400">더보기</p>
-          {MORE_NAV.map((item) => (
+          {moreNav.map((item) => (
             <SidebarLink
               key={item.href}
               item={item}
@@ -195,23 +204,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           )}
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              href="/notifications"
-              aria-label="알림"
-              aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
-              className={cn(
-                "relative flex size-9 items-center justify-center rounded-full shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
-                isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
-              )}
-            >
-              <Bell aria-hidden="true" className="size-4" />
-              {unreadBadgeLabel ? (
-                <UnreadBadge
-                  label={unreadBadgeLabel}
-                  className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px]"
-                />
-              ) : null}
-            </Link>
+            {linked ? null : (
+              <Link
+                href="/notifications"
+                aria-label="알림"
+                aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
+                className={cn(
+                  "relative flex size-9 items-center justify-center rounded-full shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
+                  isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
+                )}
+              >
+                <Bell aria-hidden="true" className="size-4" />
+                {unreadBadgeLabel ? (
+                  <UnreadBadge
+                    label={unreadBadgeLabel}
+                    className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px]"
+                  />
+                ) : null}
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
@@ -229,6 +240,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="mx-auto min-w-0 w-full max-w-[1280px] flex-1 px-4 pt-4 pb-10 lg:px-8 lg:pt-8 lg:pb-12 xl:px-10">
+          {linkedScope ? <LinkedSessionBanner scope={linkedScope} /> : null}
           {children}
         </main>
 
@@ -297,7 +309,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
             <div className="space-y-1">
-              {MORE_NAV.map((item) => (
+              {moreNav.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

@@ -17,6 +17,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace(`/login?next=${next}`);
     } else if (status === "recovery") {
       router.replace("/recover");
+    } else if (status === "linked-blocked") {
+      router.replace("/login?reconnect=1");
     }
   }, [status, router]);
 

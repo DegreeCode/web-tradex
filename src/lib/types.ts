@@ -8,12 +8,28 @@ export interface Page<T> {
   page: PageInfo;
 }
 
+export type LinkedPermission = "READ" | "TRADE" | "TRANSFER" | "MARGIN";
+
+/** What a device-linked (LINKED) session may do, as the server reports it. */
+export interface SessionScope {
+  name: string;
+  permissions: LinkedPermission[];
+  account_ids: string[];
+  network_bound: boolean;
+  idle_timeout_minutes: number;
+  expires_at: string;
+}
+
 export interface User {
   user_id: string;
   username: string;
   role: string;
   status: string;
   created_at: string;
+  /** NORMAL, RECOVERY or LINKED; older servers omit it. */
+  session_type?: string;
+  /** Present only for a LINKED session. */
+  scope?: SessionScope | null;
 }
 
 export interface Account {
@@ -27,7 +43,9 @@ export interface Account {
 
 export interface SessionInfo {
   session_id: string;
-  scope: string;
+  /** "NORMAL"/"RECOVERY" for full sessions; the scope object for a LINKED one. */
+  scope: string | SessionScope;
+  session_type?: string;
   created_at: string;
   last_seen_at: string;
   expires_at: string;

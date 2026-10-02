@@ -20,6 +20,7 @@ import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/acco
 import { errorMessage } from "@/lib/api";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
 import { findPosition, useAccounts, useCreateTransfer, usePortfolio } from "@/lib/hooks";
+import { useSessionAccess } from "@/components/session-access";
 
 export function TransferDialog({
   open,
@@ -48,6 +49,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
   const [symbol, setSymbol] = useState("");
   const [quantity, setQuantity] = useState("");
   const createTransfer = useCreateTransfer();
+  const transferAccess = useSessionAccess("TRANSFER");
 
   const accountId = selectedAccountId || pickDefaultAccount(accounts);
 
@@ -252,7 +254,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
         <button
           type="button"
           onClick={submit}
-          disabled={createTransfer.isPending || !allowed || !portfolio.data || accountsQuery.isError || portfolio.isError}
+          disabled={!transferAccess.allowed || createTransfer.isPending || !allowed || !portfolio.data || accountsQuery.isError || portfolio.isError}
           className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           {createTransfer.isPending ? "보내는 중…" : "송금하기"}

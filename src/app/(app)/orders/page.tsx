@@ -24,6 +24,7 @@ import {
   toNumber,
 } from "@/lib/format";
 import { useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
+import { useSessionAccess } from "@/components/session-access";
 import type { Order, OrderStatus } from "@/lib/types";
 
 type Tab = "ORDERS" | "TRADES";
@@ -50,6 +51,7 @@ export default function OrdersPage() {
   const ordersQuery = useOrders(undefined, tab === "ORDERS");
   const tradesQuery = useMyTrades(undefined, tab === "TRADES");
   const cancelOrder = useCancelOrder();
+  const tradeAccess = useSessionAccess("TRADE");
 
   const orders = useMemo(
     () => ordersQuery.data?.pages.flatMap((page) => page.data) ?? [],
@@ -207,7 +209,8 @@ export default function OrdersPage() {
                       <button
                         type="button"
                         onClick={() => handleCancel(order)}
-                        disabled={cancelingId === order.order_id}
+                        disabled={!tradeAccess.allowed || cancelingId === order.order_id}
+                        title={tradeAccess.allowed ? undefined : tradeAccess.reason}
                         className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                       >
                         {cancelingId === order.order_id ? "취소 중…" : "주문 취소"}
