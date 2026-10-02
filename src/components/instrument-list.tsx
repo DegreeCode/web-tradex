@@ -9,7 +9,7 @@ import { cn } from "cn";
 
 import { InstrumentStateChip } from "@/components/primitives";
 import { PriceFlash } from "@/components/price-flash";
-import { fmtCompact, fmtPercentFromPPM, fmtPrice } from "@/lib/format";
+import { fmtCompact, fmtCredit, fmtPercentFromPPM, fmtPrice } from "@/lib/format";
 import { isAtCurveCeiling } from "@/lib/instruments";
 import { symbolHref } from "@/lib/routes";
 import type { Instrument } from "@/lib/types";
@@ -83,11 +83,11 @@ export const InstrumentRow = memo(function InstrumentRow({
         <p className="truncate text-[12px] text-app-gray-500">
           {instrument.symbol}
           <span className="mx-1 text-app-gray-300">·</span>
-          시총 {fmtCompact(instrument.market_value)}
+          <span title={`시가총액 ${fmtCredit(instrument.market_value)} Credit`}>시총 {fmtCompact(instrument.market_value)}</span>
           {instrument.volume_credit !== "0" ? (
             <>
               <span className="mx-1 text-app-gray-300">·</span>
-              오늘 {fmtCompact(instrument.volume_credit)}
+              <span title={`오늘 거래대금 ${fmtCredit(instrument.volume_credit)} Credit`}>오늘 {fmtCompact(instrument.volume_credit)}</span>
             </>
           ) : null}
         </p>

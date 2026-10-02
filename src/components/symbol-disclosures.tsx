@@ -29,6 +29,8 @@ import {
 import { errorMessage } from "@/lib/api";
 import {
   fmtCompact,
+  fmtCompactQuantity,
+  fmtCredit,
   fmtDateTime,
   fmtPercentFromPPM,
   fmtPrice,
@@ -51,6 +53,8 @@ interface DisclosurePresentation {
 interface DisclosureDetail {
   label: string;
   value: string;
+  /** Unit-compacted value for the one-line list summary. */
+  short?: string;
 }
 
 const DISCLOSURE_PRESENTATION: Record<string, DisclosurePresentation> = {
@@ -189,8 +193,13 @@ function payloadNumber(payload: Record<string, unknown>, key: string): number | 
   return Number.isFinite(number) ? number : null;
 }
 
-function addDisclosureDetail(details: DisclosureDetail[], label: string, value: string | null): void {
-  if (value && value !== "-") details.push({ label, value });
+function addDisclosureDetail(
+  details: DisclosureDetail[],
+  label: string,
+  value: string | null,
+  short?: string,
+): void {
+  if (value && value !== "-") details.push({ label, value, short });
 }
 
 function participantsLabel(value: unknown): string | null {
@@ -221,11 +230,11 @@ function disclosureDetails(disclosure: Disclosure): DisclosureDetail[] {
   };
   const addQuantity = (label: string, key: string) => {
     const value = payloadText(payload, key);
-    addDisclosureDetail(details, label, value ? `${fmtQuantity(value)}주` : null);
+    addDisclosureDetail(details, label, value ? `${fmtQuantity(value)}주` : null, value ? `${fmtCompactQuantity(value)}주` : undefined);
   };
   const addCredit = (label: string, key: string) => {
     const value = payloadText(payload, key);
-    addDisclosureDetail(details, label, value ? `${fmtCompact(value)} Credit` : null);
+    addDisclosureDetail(details, label, value ? `${fmtCredit(value)} Credit` : null, value ? `${fmtCompact(value)} Credit` : undefined);
   };
   const addDate = (label: string, key: string) => addDisclosureDetail(details, label, fmtDateTime(payloadText(payload, key)));
   const addPpm = (label: string, key: string) => {
@@ -317,7 +326,7 @@ function disclosureDetails(disclosure: Disclosure): DisclosureDetail[] {
 function disclosureSummary(disclosure: Disclosure): string | null {
   return disclosureDetails(disclosure)
     .slice(0, 2)
-    .map(({ label, value }) => `${label} ${value}`)
+    .map(({ label, value, short }) => `${label} ${short ?? value}`)
     .join(" · ") || null;
 }
 

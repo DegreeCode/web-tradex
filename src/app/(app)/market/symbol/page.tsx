@@ -33,6 +33,8 @@ import {
   changePercent,
   compareDecimal,
   fmtCompact,
+  fmtCompactQuantity,
+  fmtCredit,
   fmtDate,
   fmtDateTime,
   fmtPrice,
@@ -55,6 +57,12 @@ const INTERVALS: { value: CandleInterval; label: string }[] = [
 ];
 
 const DEFAULT_CANDLE_INTERVAL: CandleInterval = "1h";
+
+interface StatItem {
+  label: string;
+  value: string;
+  full?: string;
+}
 
 function useCandleIntervalPreference() {
   const stored = usePreferences();
@@ -261,17 +269,41 @@ function SymbolDetail() {
   const dayPosition = dayHigh > dayLow
     ? Math.min(1, Math.max(0, (toNumber(instrument.curve_spot_price) - dayLow) / (dayHigh - dayLow)))
     : 0.5;
-  const todayStats = [
+  // Large amounts read in 만/억/조 units; `full` keeps the exact figure for the
+  // hover title.
+  const todayStats: StatItem[] = [
     { label: "시가", value: fmtPrice(instrument.open) },
-    { label: "거래량", value: `${fmtQuantity(instrument.volume_shares)}주` },
-    { label: "거래대금", value: `${fmtCompact(instrument.volume_credit)} Credit` },
+    {
+      label: "거래량",
+      value: `${fmtCompactQuantity(instrument.volume_shares)}주`,
+      full: `${fmtQuantity(instrument.volume_shares)}주`,
+    },
+    {
+      label: "거래대금",
+      value: `${fmtCompact(instrument.volume_credit)} Credit`,
+      full: `${fmtCredit(instrument.volume_credit)} Credit`,
+    },
   ];
   const lockedSupply = compareDecimal(instrument.locked_supply, "0") > 0;
-  const profile = [
-    { label: "시가총액", value: `${fmtCompact(instrument.market_value)} Credit` },
-    { label: "홀더", value: `${instrument.holder_count}명` },
-    { label: "유통 / 발행", value: `${fmtQuantity(instrument.circulating_supply)} / ${fmtQuantity(instrument.total_supply)}주` },
-    ...(lockedSupply ? [{ label: "락업", value: `${fmtQuantity(instrument.locked_supply)}주` }] : []),
+  const profile: StatItem[] = [
+    {
+      label: "시가총액",
+      value: `${fmtCompact(instrument.market_value)} Credit`,
+      full: `${fmtCredit(instrument.market_value)} Credit`,
+    },
+    { label: "홀더", value: `${instrument.holder_count.toLocaleString("en-US")}명` },
+    {
+      label: "유통 / 발행",
+      value: `${fmtCompactQuantity(instrument.circulating_supply)} / ${fmtCompactQuantity(instrument.total_supply)}주`,
+      full: `${fmtQuantity(instrument.circulating_supply)} / ${fmtQuantity(instrument.total_supply)}주`,
+    },
+    ...(lockedSupply
+      ? [{
+          label: "락업",
+          value: `${fmtCompactQuantity(instrument.locked_supply)}주`,
+          full: `${fmtQuantity(instrument.locked_supply)}주`,
+        }]
+      : []),
     { label: "상장일", value: fmtDate(instrument.listed_at) },
   ];
 
@@ -381,7 +413,7 @@ function SymbolDetail() {
                 {todayStats.map((item) => (
                   <div key={item.label} className="min-w-0">
                     <dt className="text-[11px] text-app-gray-500">{item.label}</dt>
-                    <dd className="numeric truncate text-[13px] font-semibold text-app-gray-900">{item.value}</dd>
+                    <dd title={item.full} className="numeric truncate text-[13px] font-semibold text-app-gray-900">{item.value}</dd>
                   </div>
                 ))}
               </dl>
@@ -390,7 +422,7 @@ function SymbolDetail() {
               {profile.map((item) => (
                 <div key={item.label} className="flex items-center justify-between gap-3 py-1.5">
                   <dt className="shrink-0 text-[13px] text-app-gray-500">{item.label}</dt>
-                  <dd className="numeric min-w-0 truncate text-right text-[13px] font-semibold text-app-gray-900">{item.value}</dd>
+                  <dd title={item.full} className="numeric min-w-0 truncate text-right text-[13px] font-semibold text-app-gray-900">{item.value}</dd>
                 </div>
               ))}
             </dl>
@@ -438,8 +470,11 @@ function SymbolDetail() {
                     <span className="numeric min-w-0 truncate text-[13px] font-semibold text-app-gray-900">
                       {fmtPrice(trade.price)}
                     </span>
-                    <span className="numeric text-right text-[13px] text-app-gray-700">
-                      {fmtQuantity(trade.quantity)}주
+                    <span
+                      title={`${fmtQuantity(trade.quantity)}주`}
+                      className="numeric text-right text-[13px] text-app-gray-700"
+                    >
+                      {fmtCompactQuantity(trade.quantity)}주
                     </span>
                     <span className="numeric w-16 text-right text-[11px] text-app-gray-400">{fmtTime(trade.timestamp)}</span>
                   </div>

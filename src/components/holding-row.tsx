@@ -5,7 +5,7 @@ import { InstrumentAvatar } from "@/components/instrument-list";
 import { ChevronRight } from "lucide-react";
 
 import { ChangeIndicator } from "@/components/primitives";
-import { fmtCredit, fmtQuantity } from "@/lib/format";
+import { fmtCompactQuantity, fmtCredit, fmtQuantity } from "@/lib/format";
 import { symbolHref } from "@/lib/routes";
 import type { Instrument, Position } from "@/lib/types";
 
@@ -29,7 +29,7 @@ export function HoldingRow({ holding }: { holding: HoldingView }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-[15px] font-semibold text-app-gray-900">{position.name}</p>
         <p className="numeric truncate text-[12px] text-app-gray-500">
-          {fmtQuantity(position.total_quantity)}주
+          <span title={`${fmtQuantity(position.total_quantity)}주`}>{fmtCompactQuantity(position.total_quantity)}주</span>
           <span className="mx-1 text-app-gray-300">·</span>
           평균 {fmtCredit(position.average_cost_basis, 8)}
         </p>
