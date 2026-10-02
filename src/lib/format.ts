@@ -57,13 +57,42 @@ export function fmtSigned(value: string | number | null | undefined, maxFrac = 6
   return parsed > 0 ? `+${formatted}` : formatted;
 }
 
-export function fmtCompact(value: string | number | null | undefined): string {
-  const parsed = toNumber(value);
-  const abs = Math.abs(parsed);
-  if (abs >= 1_000_000_000_000) return `${fmtDecimal(parsed / 1_000_000_000_000, 1)}조`;
-  if (abs >= 100_000_000) return `${fmtDecimal(parsed / 100_000_000, 1)}억`;
-  if (abs >= 10_000) return `${fmtDecimal(parsed / 10_000, 1)}만`;
-  return fmtDecimal(parsed, 2);
+const COMPACT_UNITS = [
+  { digits: 16, label: "경" },
+  { digits: 12, label: "조" },
+  { digits: 8, label: "억" },
+  { digits: 4, label: "만" },
+] as const;
+
+/**
+ * Shortens 10,000 and above to Korean units (1.23만, 45.6억, 1,234조) so large
+ * amounts fit narrow cells. Shows three to four significant digits, truncated
+ * toward zero so a value never reads larger than it is or rolls into the next
+ * unit. Smaller values keep up to `smallFrac` fraction digits.
+ */
+export function fmtCompact(value: string | number | null | undefined, smallFrac = 2): string {
+  if (value === null || value === undefined || value === "") return "0";
+  const text = typeof value === "number" ? numberToDecimal(value) : value.trim();
+  const match = text === null ? null : /^(-?)0*(\d*)(?:\.\d*)?$/.exec(text);
+  if (!match) return fmtDecimal(value, smallFrac);
+  const [, sign, integer] = match;
+  const unit = COMPACT_UNITS.find((candidate) => integer.length > candidate.digits);
+  if (!unit) return fmtDecimal(text, smallFrac);
+  const head = integer.slice(0, -unit.digits);
+  const fraction = integer.slice(-unit.digits, -unit.digits + Math.max(0, 3 - head.length));
+  return `${fmtDecimal(`${sign}${head}${fraction ? `.${fraction}` : ""}`, fraction.length)}${unit.label}`;
+}
+
+/** Compact share count; below 10,000 it keeps the full 8-digit precision. */
+export function fmtCompactQuantity(value: string | number | null | undefined): string {
+  return fmtCompact(value, 8);
+}
+
+function numberToDecimal(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  const text = String(value);
+  if (!/e/i.test(text)) return text;
+  return Math.abs(value) < 1 ? value.toFixed(20) : BigInt(Math.trunc(value)).toString();
 }
 
 export function fmtPercentFromPPM(ppm: number | null | undefined, maxFrac = 2): string {

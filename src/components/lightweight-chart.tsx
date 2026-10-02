@@ -19,7 +19,7 @@ import {
 } from "lightweight-charts";
 import { useTheme } from "next-themes";
 
-import { fmtPrice, fmtQuantity } from "@/lib/format";
+import { fmtCompactQuantity, fmtPrice } from "@/lib/format";
 import { canIncrementallyUpdate } from "@/lib/chart-updates";
 import { calculateVolumePaneHeight, setVolumePaneRatio } from "@/lib/preferences";
 
@@ -652,7 +652,7 @@ export function LightweightCandleChart({
           <span className="truncate"><span className="text-app-gray-500">고</span> {rawDecimal(active.highText, active.high, fmtPrice)}</span>
           <span className="truncate"><span className="text-app-gray-500">저</span> {rawDecimal(active.lowText, active.low, fmtPrice)}</span>
           <span className="truncate"><span className="text-app-gray-500">종</span> {rawDecimal(active.closeText, active.close, fmtPrice)}</span>
-          <span className="max-sm:hidden"><span className="text-app-gray-500">거</span> {rawDecimal(active.volume, active.volumeValue, fmtQuantity)}</span>
+          <span className="max-sm:hidden"><span className="text-app-gray-500">거</span> {fmtCompactQuantity(active.volume || active.volumeValue)}</span>
         </div>
       </div>
     </div>
