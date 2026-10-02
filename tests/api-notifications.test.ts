@@ -56,6 +56,37 @@ test("device-link security events read as sentences, not event codes", () => {
   }
 });
 
+test("trigger order lifecycle events read as sentences, not event codes", () => {
+  // Bodies and titles exactly as the backend emits them: only creation and
+  // activation carry a symbol, and the raw event type doubles as the title.
+  const created = presentNotification(notification("TRDX.M TRIGGER_CREATED", "TRIGGER_CREATED"));
+  assert.equal(created.title, "예약 주문을 등록했어요");
+  assert.equal(created.symbol, "TRDX.M");
+  assert.match(created.body, /^TRDX\.M 예약 주문을 등록했어요/);
+
+  const canceled = presentNotification(notification("TRIGGER_CANCELED", "TRIGGER_CANCELED"));
+  assert.equal(canceled.title, "예약 주문을 취소했어요");
+
+  const failed = presentNotification(notification("TRIGGER_FAILED: INSUFFICIENT_CREDIT", "TRIGGER_FAILED"));
+  assert.equal(failed.title, "예약 주문을 실행하지 못했어요");
+  assert.equal(failed.symbol, undefined);
+  assert.match(failed.body, /사유: Credit 잔액이 부족해요$/);
+
+  const prose = presentNotification(notification("TRIGGER_FAILED: held shares are no longer available", "TRIGGER_FAILED"));
+  assert.match(prose.body, /사유: 보유 수량이 부족해요$/);
+
+  for (const body of ["TRIGGER_EXPIRED: DEADLINE_EXCEEDED", "TRIGGER_EXPIRED: deadline exceeded"]) {
+    const expired = presentNotification(notification(body, "TRIGGER_EXPIRED"));
+    assert.equal(expired.title, "예약 주문이 만료됐어요");
+    assert.doesNotMatch(expired.body, /사유|deadline|DEADLINE/);
+  }
+
+  for (const view of [created, canceled, failed, prose]) {
+    assert.equal(view.label, "거래");
+    assert.doesNotMatch(view.body, /TRIGGER_|[A-Z]+_[A-Z]+/);
+  }
+});
+
 test("ceiling notice is informational and cannot halt trading, including title-only fallback", () => {
   for (const notice of [
     notification("AAA.M CURVE_CEILING_REACHED"),
