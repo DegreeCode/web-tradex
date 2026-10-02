@@ -37,6 +37,7 @@ import {
   scaleDecimal,
 } from "@/lib/format";
 import { findPosition, useAccounts, useOrderSimulation, usePlaceOrder, usePortfolio } from "@/lib/hooks";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import type { Instrument, Order, OrderRequest, OrderSimulationRequest } from "@/lib/types";
 
 type Side = "BUY" | "SELL";
@@ -68,6 +69,8 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
 
   const portfolio = usePortfolio(resolvedAccountId || undefined, Boolean(resolvedAccountId));
   const placeOrder = usePlaceOrder();
+  // Simulation shares the order route, so a session without TRADE can't quote either.
+  const tradeAccess = useSessionAccess("TRADE");
 
   const effectiveAmountMode: AmountMode = side === "SELL" ? "QUANTITY" : amountMode;
   const availableCredit = portfolio.data?.available_credit ?? "0";
@@ -138,7 +141,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
         : null
   );
   const simulationPayload = useMemo<OrderSimulationRequest | null>(() => {
-    if (orderMode !== "MARKET" || inputError || !balanceReady) return null;
+    if (!tradeAccess.allowed || orderMode !== "MARKET" || inputError || !balanceReady) return null;
     return {
       symbol: instrument.symbol,
       side,
@@ -149,7 +152,7 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
         : { quantity: orderQuantity.trim() }),
       ...slippageRequestFields(slippageSettings),
     };
-  }, [orderMode, inputError, balanceReady, instrument.symbol, side, resolvedAccountId, effectiveAmountMode, orderAmount, orderQuantity, slippageSettings]);
+  }, [tradeAccess.allowed, orderMode, inputError, balanceReady, instrument.symbol, side, resolvedAccountId, effectiveAmountMode, orderAmount, orderQuantity, slippageSettings]);
   // Trigger orders leave the reference to the server, which uses the target price.
   const referencePrice = orderMode === "MARKET" ? liveReferencePrice(slippageSettings, spot) : undefined;
   const simulation = useOrderSimulation(simulationPayload, referencePrice);
@@ -463,13 +466,14 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
           ) : null}
 
           <div className="space-y-2">
+            {tradeAccess.allowed ? null : <ScopeNotice reason={tradeAccess.reason} />}
             {feedback ? (
               <p role="status" aria-live="polite" className="text-center text-[13px] font-medium text-app-gray-500">{feedback}</p>
             ) : null}
             <button
               type="button"
               onClick={submit}
-              disabled={placeOrder.isPending || Boolean(validationError)}
+              disabled={!tradeAccess.allowed || placeOrder.isPending || Boolean(validationError)}
               className={
                 side === "BUY"
                   ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"

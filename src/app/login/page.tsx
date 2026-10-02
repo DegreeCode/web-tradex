@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ChevronRight, KeyRound, MonitorSmartphone } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -18,31 +19,74 @@ import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/brow
 
 import { useAuth } from "@/components/auth-provider";
 import { ApiError, errorMessage, postData } from "@/lib/api";
+import { useLogout } from "@/lib/hooks";
 import { getPasskeyAssertion, supportsPasskeys, webauthnErrorMessage } from "@/lib/webauthn";
 import type { CeremonyEnvelope } from "@/lib/webauthn";
 import type { User } from "@/lib/types";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { safeRedirectPath } from "@/lib/routes";
 import { BrandLogo } from "@/components/brand-logo";
+import { DeviceLinkLogin } from "@/components/device-link-login";
+
+type AdvancedMethod = "choose" | "device-link" | "recovery";
+
+const ADVANCED_TITLES: Record<AdvancedMethod, { title: string; description: string }> = {
+  choose: { title: "고급 로그인", description: "패스키로 로그인할 수 없을 때 쓸 방법을 골라주세요." },
+  "device-link": {
+    title: "다른 기기로 승인받기",
+    description: "로그인된 기기에서 승인하면 이 브라우저가 로그인돼요.",
+  },
+  recovery: { title: "복구키로 로그인", description: "가입할 때 저장해둔 복구키 8개 중 하나를 입력해주세요." },
+};
 
 function LoginScreen() {
   const router = useRouter();
   const { status, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [method, setMethod] = useState<AdvancedMethod>("choose");
   const [username, setUsername] = useState("");
   const [recoveryKey, setRecoveryKey] = useState("");
   const [recovering, setRecovering] = useState(false);
+  // A linked session whose network changed: sign it out, then reopen the
+  // device-link flow. "stuck" means the server refused even the sign-out.
+  const [reconnect, setReconnect] = useState<"idle" | "ready" | "stuck">("idle");
+  const reconnectAttempted = useRef(false);
+  const signOut = useLogout().mutate;
 
-  const next =
-    typeof window === "undefined"
-      ? "/"
-      : safeRedirectPath(new URLSearchParams(window.location.search).get("next"));
+  const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
+  const next = safeRedirectPath(params?.get("next"));
+  const reconnectRequested = params?.get("reconnect") === "1";
 
   useEffect(() => {
     if (status === "authenticated") router.replace(next);
     if (status === "recovery") router.replace("/recover");
   }, [status, router, next]);
+
+  useEffect(() => {
+    if (status !== "linked-blocked" || reconnectAttempted.current) return;
+    reconnectAttempted.current = true;
+    signOut(undefined, {
+      onSuccess: () => {
+        setReconnect("ready");
+        setMethod("device-link");
+        setAdvancedOpen(true);
+      },
+      onError: () => setReconnect("stuck"),
+    });
+  }, [status, signOut]);
+
+  const notice =
+    reconnect === "stuck"
+      ? "stuck"
+      : reconnect === "ready" || status === "linked-blocked" || reconnectRequested
+        ? "reconnect"
+        : null;
+
+  function openAdvanced() {
+    setMethod("choose");
+    setAdvancedOpen(true);
+  }
 
   async function handleLogin() {
     if (!supportsPasskeys()) {
@@ -110,6 +154,17 @@ function LoginScreen() {
           </p>
         </div>
 
+        {notice ? (
+          <div role="alert" className="mb-3 rounded-2xl bg-app-orange-light px-4 py-3.5 text-[13px] leading-relaxed break-keep text-app-gray-800">
+            <p className="font-semibold text-app-gray-900">접속 위치가 바뀌어 연결이 끊겼어요</p>
+            <p className="mt-1">
+              {notice === "stuck"
+                ? "이전 연결을 정리하지 못했어요. 승인한 기기의 보안 메뉴에서 이 연결을 끊은 뒤 다시 연결해주세요."
+                : "고급 로그인의 다른 기기로 승인받기에서 다시 연결해주세요."}
+            </p>
+          </div>
+        ) : null}
+
         <div className="rounded-2xl bg-card p-5 shadow-card">
           <Button
             type="button"
@@ -121,10 +176,10 @@ function LoginScreen() {
           </Button>
           <button
             type="button"
-            onClick={() => setRecoveryOpen(true)}
+            onClick={openAdvanced}
             className="mt-3 min-h-11 w-full rounded-xl py-2 text-[13px] font-semibold text-app-gray-500 hover:bg-app-gray-50 hover:text-app-gray-700"
           >
-            복구키로 로그인
+            고급 로그인
           </button>
         </div>
 
@@ -141,54 +196,110 @@ function LoginScreen() {
 
       <SiteDisclaimer stacked className="mt-10 w-full max-w-[400px]" />
 
-      <Dialog open={recoveryOpen} onOpenChange={setRecoveryOpen}>
+      <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <DialogContent className="rounded-2xl">
           <DialogHeader>
-            <DialogTitle>복구키로 로그인</DialogTitle>
-            <DialogDescription>
-              가입할 때 저장해둔 복구키 8개 중 하나를 입력해주세요.
-            </DialogDescription>
+            {method !== "choose" ? (
+              <button
+                type="button"
+                onClick={() => setMethod("choose")}
+                className="-ml-1 flex min-h-8 w-fit items-center gap-1 rounded-lg px-1 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-700"
+              >
+                <ArrowLeft aria-hidden="true" className="size-4" />
+                다른 방법 선택
+              </button>
+            ) : null}
+            <DialogTitle>{ADVANCED_TITLES[method].title}</DialogTitle>
+            <DialogDescription>{ADVANCED_TITLES[method].description}</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleRecovery} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="recovery-username">아이디</Label>
-              <Input
-                id="recovery-username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="아이디"
-                autoComplete="username"
-                className="h-11 rounded-xl"
+          {method === "choose" ? (
+            <div className="space-y-2">
+              <MethodOption
+                icon={<MonitorSmartphone aria-hidden="true" className="size-5" />}
+                title="다른 기기로 승인받기"
+                description="패스키를 쓸 수 없는 브라우저에서, 로그인된 기기의 승인을 받아 로그인해요"
+                onSelect={() => setMethod("device-link")}
+              />
+              <MethodOption
+                icon={<KeyRound aria-hidden="true" className="size-5" />}
+                title="복구키로 로그인"
+                description="패스키를 잃어버렸을 때 복구 모드로 들어가 새 패스키를 등록해요"
+                onSelect={() => setMethod("recovery")}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="recovery-key">복구키</Label>
-              <Input
-                id="recovery-key"
-                value={recoveryKey}
-                onChange={(event) => setRecoveryKey(event.target.value)}
-                placeholder="rck_..."
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                className="numeric h-11 rounded-xl"
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={recovering}
-              className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
-            >
-              {recovering ? "확인 중…" : "복구키 사용"}
-            </Button>
-            <p className="text-[12px] leading-relaxed text-app-gray-500">
-              복구 모드에서는 새 패스키를 등록한 뒤 다시 로그인할 수 있어요. 사용한 복구키는
-              즉시 폐기돼요.
-            </p>
-          </form>
+          ) : method === "device-link" ? (
+            <DeviceLinkLogin onSignedIn={refresh} />
+          ) : (
+            <form onSubmit={handleRecovery} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="recovery-username">아이디</Label>
+                <Input
+                  id="recovery-username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="아이디"
+                  autoComplete="username"
+                  className="h-11 rounded-xl"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="recovery-key">복구키</Label>
+                <Input
+                  id="recovery-key"
+                  value={recoveryKey}
+                  onChange={(event) => setRecoveryKey(event.target.value)}
+                  placeholder="rck_..."
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  className="numeric h-11 rounded-xl"
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={recovering}
+                className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+              >
+                {recovering ? "확인 중…" : "복구키 사용"}
+              </Button>
+              <p className="text-[12px] leading-relaxed text-app-gray-500">
+                복구 모드에서는 새 패스키를 등록한 뒤 다시 로그인할 수 있어요. 사용한 복구키는
+                즉시 폐기돼요.
+              </p>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function MethodOption({
+  icon,
+  title,
+  description,
+  onSelect,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="flex w-full items-center gap-3 rounded-xl bg-app-gray-50 px-4 py-3 text-left hover:bg-app-gray-100"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-card text-app-gray-600">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-semibold text-app-gray-900">{title}</span>
+        <span className="mt-0.5 block text-[12px] leading-relaxed break-keep text-app-gray-500">{description}</span>
+      </span>
+      <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-app-gray-400" />
+    </button>
   );
 }
 

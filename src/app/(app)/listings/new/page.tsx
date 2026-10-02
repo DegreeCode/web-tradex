@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { IconUrlField } from "@/components/symbol-icons";
 import { ErrorBlock, PageHeader, Surface } from "@/components/primitives";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,6 +45,20 @@ function periodText(hours: number) {
 }
 
 export default function NewListingPage() {
+  // Listing is never open to a device-linked session.
+  const access = useSessionAccess("FULL");
+  if (!access.allowed) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="종목 상장" subtitle="Credit을 예치해 새로운 종목을 만들고 발행사가 되어보세요" />
+        <ScopeNotice reason={`종목 상장은 ${access.reason}`} />
+      </div>
+    );
+  }
+  return <ListingForm />;
+}
+
+function ListingForm() {
   const router = useRouter();
   const exchangeQuery = useExchangeInfo();
   const exchangeInfo = exchangeQuery.data;

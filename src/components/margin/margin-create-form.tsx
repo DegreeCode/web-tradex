@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react";
 import { ErrorBlock, InstrumentStateChip, Surface } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   addDecimal,
@@ -105,6 +106,8 @@ export function MarginCreateForm({
   const isSymbolTrading = Boolean(selectedInstrument && selectedInstrument.state === "TRADING");
   const isEligibleToOpen = Boolean(eligibility?.can_open);
   const { user } = useAuth();
+  // Simulation shares the margin route, so a session without MARGIN can't quote either.
+  const marginAccess = useSessionAccess("MARGIN");
   const managerSideBlocked = Boolean(
     user &&
     selectedInstrument?.manager_user_id === user.user_id &&
@@ -112,6 +115,7 @@ export function MarginCreateForm({
   );
 
   const payload =
+    marginAccess.allowed &&
     !collateralError &&
     !leverageError &&
     currentAccountId &&
@@ -129,6 +133,7 @@ export function MarginCreateForm({
   const referencePrice = liveReferencePrice(slippageSettings, selectedInstrument?.curve_spot_price);
 
   const canSubmit =
+    marginAccess.allowed &&
     !collateralError &&
     !leverageError &&
     !isGlobalHalted &&
@@ -446,6 +451,7 @@ export function MarginCreateForm({
         </div>
 
         <div className="space-y-2">
+          {marginAccess.allowed ? null : <ScopeNotice reason={marginAccess.reason} />}
           <button
             type="submit"
             disabled={!canSubmit}

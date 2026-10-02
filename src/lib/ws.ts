@@ -105,6 +105,12 @@ export class TradexSocket {
           this.handleAuthenticationFailure();
           return;
         }
+        // A linked session without the stream in its scope will be refused on
+        // every attempt; stay closed so the private queries poll REST instead.
+        if (error instanceof ApiError && error.code === "SESSION_SCOPE_FORBIDDEN") {
+          this.setStatus("closed");
+          return;
+        }
         this.setStatus("closed");
         this.scheduleReconnect();
         return;

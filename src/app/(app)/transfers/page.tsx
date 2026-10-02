@@ -15,6 +15,7 @@ import {
 } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { TransferDialog } from "@/components/transfer-dialog";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { errorMessage } from "@/lib/api";
 import { fmtCredit, fmtDeadline, fmtQuantity, fmtRelative, shortId } from "@/lib/format";
 import { useTransferAction, useTransferDetails, useTransfers } from "@/lib/hooks";
@@ -33,6 +34,7 @@ export default function TransfersPage() {
   const [sendOpen, setSendOpen] = useState(false);
   const transfersQuery = useTransfers("mine", 50);
   const action = useTransferAction();
+  const transferAccess = useSessionAccess("TRANSFER");
   const actingId = action.isPending ? action.variables?.transferId : undefined;
 
   const items = useMemo(
@@ -102,13 +104,16 @@ export default function TransfersPage() {
           <button
             type="button"
             onClick={() => setSendOpen(true)}
-            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+            disabled={!transferAccess.allowed}
+            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
           >
             <Send aria-hidden="true" className="size-4" />
             송금하기
           </button>
         }
       />
+
+      {transferAccess.allowed ? null : <ScopeNotice reason={transferAccess.reason} />}
 
       <Segmented<Tab>
         value={tab}
@@ -194,7 +199,7 @@ export default function TransfersPage() {
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "rejection")}
-                            disabled={actingId === transfer.transfer_id}
+                            disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
                             className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                           >
                             거절
@@ -202,7 +207,7 @@ export default function TransfersPage() {
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "acceptance")}
-                            disabled={actingId === transfer.transfer_id}
+                            disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
                             className="min-h-9 rounded-lg bg-app-blue px-3 text-[12px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
                           >
                             수락
@@ -212,7 +217,7 @@ export default function TransfersPage() {
                         <button
                           type="button"
                           onClick={() => runAction(transfer.transfer_id, "cancellation")}
-                          disabled={actingId === transfer.transfer_id}
+                          disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
                           className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                         >
                           취소

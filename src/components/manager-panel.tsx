@@ -8,6 +8,7 @@ import { IconUrlField, IconRequestHistory } from "@/components/symbol-icons";
 import { UserNameLookup } from "@/components/user-name-lookup";
 import { Surface, DataRow } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +38,8 @@ import type { Instrument, IssuancePreview } from "@/lib/types";
 
 export function ManagerPanel({ instrument, userId }: { instrument: Instrument; userId: string }) {
   const [tab, setTab] = useState<"ISSUANCE" | "METADATA" | "TRANSFER">("ISSUANCE");
+  // Issuer tools sit on the listing routes, which a linked session never reaches.
+  const managerAccess = useSessionAccess("FULL");
 
   return (
     <Surface>
@@ -46,6 +49,28 @@ export function ManagerPanel({ instrument, userId }: { instrument: Instrument; u
           MANAGER
         </span>
       </div>
+      {managerAccess.allowed ? (
+        <ManagerTabs tab={tab} setTab={setTab} instrument={instrument} userId={userId} />
+      ) : (
+        <ScopeNotice reason={`발행사 관리는 ${managerAccess.reason}`} />
+      )}
+    </Surface>
+  );
+}
+
+function ManagerTabs({
+  tab,
+  setTab,
+  instrument,
+  userId,
+}: {
+  tab: "ISSUANCE" | "METADATA" | "TRANSFER";
+  setTab: (tab: "ISSUANCE" | "METADATA" | "TRANSFER") => void;
+  instrument: Instrument;
+  userId: string;
+}) {
+  return (
+    <>
       <Segmented
         value={tab}
         onChange={setTab}
@@ -59,7 +84,7 @@ export function ManagerPanel({ instrument, userId }: { instrument: Instrument; u
       {tab === "ISSUANCE" ? <IssuanceSection instrument={instrument} /> : null}
       {tab === "METADATA" ? <MetadataSection instrument={instrument} /> : null}
       {tab === "TRANSFER" ? <TransferSection instrument={instrument} userId={userId} /> : null}
-    </Surface>
+    </>
   );
 }
 
@@ -71,6 +96,8 @@ export function ManagerTransferInbox({
   userId: string;
 }) {
   const [open, setOpen] = useState(false);
+  const managerAccess = useSessionAccess("FULL");
+  if (!managerAccess.allowed) return null;
   // Rarely relevant, so it stays a single line until the user checks it.
   return (
     <div className="px-1 text-[12px] text-app-gray-500">

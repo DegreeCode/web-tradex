@@ -11,6 +11,11 @@ test("a recovery restriction wins over the anonymous value kept from the login p
   assert.equal(authStatus(undefined, true, "RECOVERY_RESTRICTED"), "recovery");
 });
 
+test("a linked session refused on /me is blocked, not signed in", () => {
+  assert.equal(authStatus(user, true, "SESSION_SCOPE_FORBIDDEN"), "linked-blocked");
+  assert.equal(authStatus(undefined, true, "SESSION_SCOPE_FORBIDDEN"), "linked-blocked");
+});
+
 test("other states keep their meaning", () => {
   assert.equal(authStatus(undefined, false), "loading");
   assert.equal(authStatus(user, false), "authenticated");
