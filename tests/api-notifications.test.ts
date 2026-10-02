@@ -43,6 +43,19 @@ test("icon rejection preserves the symbol and exact moderation reason", () => {
   client.clear();
 });
 
+test("device-link security events read as sentences, not event codes", () => {
+  for (const [code, title] of [
+    ["AUTH_DEVICE_LINK_APPROVED", "기기 연결을 승인했어요"],
+    ["AUTH_DEVICE_LINK_DENIED", "기기 연결 요청을 거부했어요"],
+    ["AUTH_LINKED_SESSION_CREATED", "연결된 기기가 로그인했어요"],
+  ]) {
+    const view = presentNotification(notification(code, code));
+    assert.equal(view.title, title);
+    assert.equal(view.label, "보안");
+    assert.doesNotMatch(view.body, /AUTH_/);
+  }
+});
+
 test("ceiling notice is informational and cannot halt trading, including title-only fallback", () => {
   for (const notice of [
     notification("AAA.M CURVE_CEILING_REACHED"),
