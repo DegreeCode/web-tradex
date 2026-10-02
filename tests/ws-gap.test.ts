@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closeSocket, getSocket } from "../src/lib/ws";
+import { ApiError } from "../src/lib/api";
+import { closeSocket, getSocket, TradexSocket } from "../src/lib/ws";
 
 test("socket lookup stays idle, remount reconnects, and a stream gap reconciles once", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -60,6 +61,33 @@ test("socket lookup stays idle, remount reconnects, and a stream gap reconciles 
     closeSocket("public");
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
     else Reflect.deleteProperty(globalThis, "window");
+    if (previousWebSocket) Object.defineProperty(globalThis, "WebSocket", previousWebSocket);
+    else Reflect.deleteProperty(globalThis, "WebSocket");
+  }
+});
+
+test("a private ticket refused for the session's scope is not asked for again until the next retain", async () => {
+  const previousWebSocket = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: class {} });
+  let asked = 0;
+  const socket = new TradexSocket("private", {
+    fetchTicket: async () => {
+      asked += 1;
+      throw new ApiError(403, "SESSION_SCOPE_FORBIDDEN", "refused");
+    },
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    const release = socket.retain();
+    for (let turn = 0; turn < 5; turn += 1) await settle();
+    assert.equal(asked, 1);
+    assert.equal(socket.getStatus(), "closed");
+    release();
+    socket.retain();
+    await settle();
+    assert.equal(asked, 2, "a new holder tries once more");
+  } finally {
+    socket.close();
     if (previousWebSocket) Object.defineProperty(globalThis, "WebSocket", previousWebSocket);
     else Reflect.deleteProperty(globalThis, "WebSocket");
   }
