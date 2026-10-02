@@ -64,7 +64,7 @@ function LinkApproval() {
   async function runLookup(raw: string) {
     const normalized = normalizeUserCode(raw);
     if (!normalized) {
-      toast.error("코드 8자리를 입력해주세요");
+      toast.error("코드 8자리를 확인해주세요. 0, 1, I, L, O는 쓰지 않아요");
       return;
     }
     setLookingUp(true);

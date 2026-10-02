@@ -141,4 +141,8 @@ test("minutes and typed codes are formatted for people", () => {
   assert.equal(normalizeUserCode("K7QM-2XR"), null);
   assert.equal(normalizeUserCode("K7QM-2XRP9"), null);
   assert.equal(normalizeUserCode("K7QM/2XRP"), null);
+  // The server's alphabet leaves out look-alikes and the old underscore.
+  for (const code of ["K7QM-2XR0", "K7QM-2XR1", "K7QI-2XRP", "K7QL-2XRP", "K7QO-2XRP", "K7Q_-2XRP"]) {
+    assert.equal(normalizeUserCode(code), null, code);
+  }
 });

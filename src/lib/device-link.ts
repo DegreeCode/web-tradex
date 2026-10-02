@@ -218,10 +218,11 @@ export function formatMinutes(minutes: number): string {
 
 /**
  * Normalises what the person typed into the server's XXXX-XXXX form, or null
- * while it isn't eight code characters yet. The server decides validity.
+ * unless it is eight characters of the code alphabet, which leaves out the
+ * look-alikes 0, 1, I, L and O. Whether the code exists is the server's call.
  */
 export function normalizeUserCode(input: string): string | null {
   const compact = input.toUpperCase().replace(/[\s-]/g, "");
-  if (!/^[0-9A-Z_]{8}$/.test(compact)) return null;
+  if (!/^[2-9A-HJKMNP-Z]{8}$/.test(compact)) return null;
   return `${compact.slice(0, 4)}-${compact.slice(4)}`;
 }

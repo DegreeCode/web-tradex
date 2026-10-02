@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { apiData, errorMessage, isApiError, postData } from "@/lib/api";
+import { apiData, errorMessage, postData } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import {
   DEVICE_LINK_CURRENT_PATH,
@@ -61,13 +61,7 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
       },
       (error: unknown) => {
         if (cancelled) return;
-        // An earlier linked session's cookie is still attached and the server
-        // refuses everything else while it lives.
-        setFailure(
-          isApiError(error, "SESSION_SCOPE_FORBIDDEN")
-            ? "이전 연결이 아직 남아 있어요. 승인한 기기의 보안 메뉴에서 그 연결을 끊은 뒤 다시 시도해주세요."
-            : errorMessage(error),
-        );
+        setFailure(errorMessage(error));
         setPhase("failed");
       },
     );
