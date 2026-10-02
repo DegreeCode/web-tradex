@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   Bell,
+  CalendarClock,
   Check,
   FileText,
   Info,
@@ -217,6 +218,34 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
     icon: Info,
     tone: "danger",
   },
+  TRIGGER_CREATED: {
+    title: "예약 주문을 등록했어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문을 등록했어요. 조건에 닿으면 자동으로 주문해요.`,
+    icon: CalendarClock,
+    tone: "info",
+  },
+  TRIGGER_CANCELED: {
+    title: "예약 주문을 취소했어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문을 취소했어요. 묶여 있던 Credit이나 주식은 다시 쓸 수 있어요.`,
+    icon: Trash2,
+    tone: "info",
+  },
+  TRIGGER_FAILED: {
+    title: "예약 주문을 실행하지 못했어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문의 조건은 충족됐지만 주문을 실행하지 못했어요. 묶여 있던 Credit이나 주식은 돌려드렸어요.`,
+    icon: Info,
+    tone: "warning",
+  },
+  TRIGGER_EXPIRED: {
+    title: "예약 주문이 만료됐어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문이 유효 기간 안에 조건에 닿지 않아 만료됐어요. 묶여 있던 Credit이나 주식은 돌려드렸어요.`,
+    icon: CalendarClock,
+    tone: "neutral",
+  },
   TRIGGER_ACTIVATED: {
     title: "예약 주문이 실행됐어요",
     label: "거래",
@@ -406,6 +435,18 @@ export const REASON_LABELS: Record<string, string> = {
   HALT_EXPIRED: "거래정지 기간 종료",
   MANUAL: "관리자 조치",
   MAINTENANCE: "시스템 점검",
+  // Why a trigger order could not run once its condition was met.
+  POOL_INVENTORY_EMPTY: "시장에 남은 물량이 없어요",
+  INSUFFICIENT_CREDIT: "Credit 잔액이 부족해요",
+  INSUFFICIENT_SHARES: "보유 수량이 부족해요",
+  "held shares are no longer available": "보유 수량이 부족해요",
+  "invalid position quantity": "보유 수량이 맞지 않아요",
+  SLIPPAGE_EXCEEDED: "허용한 슬리피지를 벗어났어요",
+  INVALID_PRICE_TICK: "주문 가격 단위가 맞지 않아요",
+  NUMERIC_OVERFLOW: "주문 금액이 너무 커요",
+  GLOBAL_HALTED: "전체 시장 거래가 멈춰 있어요",
+  SYMBOL_HALTED: "종목 거래가 멈춰 있어요",
+  PARTY_OR_SYMBOL_UNAVAILABLE: "계좌나 종목을 더 이상 쓸 수 없어요",
 };
 
 export const TONE_STYLES: Record<NotificationTone, { icon: string; body: string }> = {
@@ -425,6 +466,12 @@ export function isEnumToken(value: string): boolean {
 
 export function parseNotificationBody(body: string): ParsedNotificationBody {
   const trimmed = body.trim();
+  // "TRIGGER_FAILED: INSUFFICIENT_CREDIT" has no symbol; without this the
+  // general pattern below reads the event as the symbol and the reason as the event.
+  const unscoped = /^(?<event>[A-Za-z][A-Za-z0-9_.-]*)\s*:\s*(?<reason>.+)$/.exec(trimmed);
+  if (unscoped?.groups?.event && EVENT_CONFIG[unscoped.groups.event]) {
+    return { eventKey: unscoped.groups.event, reason: unscoped.groups.reason.trim() };
+  }
   const batch = /^(?<symbol>[^\s:]+):\s*(?<count>\d+)\s+trade\(s\)\s+executed$/i.exec(
     trimmed,
   );
@@ -474,8 +521,9 @@ export function presentNotification(notification: Notification): NotificationPre
     if (eventKey === "TRADE_EXECUTED" && parsed.count !== undefined) {
       body = `${symbol ? `${symbol} ` : ""}거래 ${parsed.count}건이 체결됐어요.`;
     }
-    // Moderation reasons are user-facing text; other reasons are codes.
-    const reason = parsed.reason
+    // Moderation reasons are user-facing text; other reasons are codes. An
+    // expiry's reason only restates the deadline the body already explains.
+    const reason = parsed.reason && eventKey !== "TRIGGER_EXPIRED"
       ? eventKey === "ICON_REJECTED" ? parsed.reason : localizeReason(parsed.reason)
       : null;
     if (reason) {
