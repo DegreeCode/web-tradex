@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { ErrorBlock, LoadingBlock, PageHeader, Surface } from "@/components/primitives";
-import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
+import { accountLabel, defaultAccountId as pickDefaultAccount, singleAccountHeading } from "@/lib/accounts";
 import { Segmented } from "@/components/segmented";
 import { addDecimal, fmtCredit } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
@@ -111,7 +111,7 @@ function MarginContent() {
             </div>
           ) : (
             <p className="text-[14px] font-bold text-app-gray-900">
-              {accountsQuery.isPending ? "계좌 불러오는 중…" : selectedAccount ? "대표 계좌" : "계좌가 없어요"}
+              {singleAccountHeading(accountsQuery.isPending, selectedAccount, accounts)}
             </p>
           )}
           {selectedAccount ? (

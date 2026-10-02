@@ -16,3 +16,13 @@ export function accountLabel(account: Pick<Account, "account_id" | "is_primary">
 export function defaultAccountId(accounts: readonly Pick<Account, "account_id" | "is_primary">[]): string {
   return accounts.find((account) => account.is_primary)?.account_id ?? accounts[0]?.account_id ?? "";
 }
+
+/** Heading where one account is shown without a picker, by its own name. */
+export function singleAccountHeading(
+  pending: boolean,
+  account: Pick<Account, "account_id" | "is_primary"> | undefined,
+  accounts: readonly Pick<Account, "account_id" | "is_primary">[],
+): string {
+  if (pending) return "계좌 불러오는 중…";
+  return account ? accountLabel(account, accounts) : "계좌가 없어요";
+}
