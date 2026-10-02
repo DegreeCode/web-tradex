@@ -49,7 +49,7 @@ function LoginScreen() {
   const [recoveryKey, setRecoveryKey] = useState("");
   const [recovering, setRecovering] = useState(false);
   // A linked session whose network changed: sign it out, then reopen the
-  // device-link flow. "stuck" means the server refused even the sign-out.
+  // device-link flow. "stuck" means the sign-out request itself failed.
   const [reconnect, setReconnect] = useState<"idle" | "ready" | "stuck">("idle");
   const reconnectAttempted = useRef(false);
   const signOut = useLogout().mutate;
@@ -159,7 +159,7 @@ function LoginScreen() {
             <p className="font-semibold text-app-gray-900">접속 위치가 바뀌어 연결이 끊겼어요</p>
             <p className="mt-1">
               {notice === "stuck"
-                ? "이전 연결을 정리하지 못했어요. 승인한 기기의 보안 메뉴에서 이 연결을 끊은 뒤 다시 연결해주세요."
+                ? "이전 연결을 정리하지 못했어요. 잠시 후 새로고침해주세요."
                 : "고급 로그인의 다른 기기로 승인받기에서 다시 연결해주세요."}
             </p>
           </div>
