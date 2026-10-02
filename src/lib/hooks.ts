@@ -124,7 +124,7 @@ import type {
   User,
   WsFrame,
 } from "./types";
-import { closeSocket, getSocket, type TradexSocket, type WsKind, type WsStatus } from "./ws";
+import { closeSocket, getSocket, type StreamSocket, type WsKind, type WsStatus } from "./ws";
 
 const PAGE_SIZE = 30;
 const TICKER_ORDER_LIMIT = 100;
@@ -1418,7 +1418,7 @@ function invalidateNotificationKeys(
  * Repeated failed reconnects must not turn this into a poller.
  */
 export function resyncPrivateStreamGaps(
-  socket: Pick<TradexSocket, "onFrame" | "onGap" | "onStatus">,
+  socket: Pick<StreamSocket, "onFrame" | "onGap" | "onStatus">,
   reconcile: () => void,
 ): () => void {
   let reconciliationRequested = false;
