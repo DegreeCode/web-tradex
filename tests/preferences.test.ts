@@ -28,51 +28,63 @@ async function loadWith(t: TestContext, localStorage: object, tag: string): Prom
   return import(`${preferenceUrl}?${tag}`);
 }
 
-test("legacy single-value keys migrate into one JSON record", async (t) => {
+test("legacy preferences migrate while chart settings get a separate record", async (t) => {
   const storage = memoryStorage({
     "tradex:trade-execution-popup:v1": "false",
     "tradex:volume-pane-ratio:v1": "0.4",
     "tradex:candle-interval:v1": "15m",
   });
   const preference = await loadWith(t, storage, "migrate");
-  const expected = { tradeExecutionPopup: false, volumePaneRatio: 0.4, candleInterval: "15m" };
+  const expected = { tradeExecutionPopup: false };
   assert.deepEqual(preference.readPreferences(), expected);
   assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), expected);
-  assert.deepEqual([...storage.stored.keys()], [KEY]);
+  assert.deepEqual(JSON.parse(storage.stored.get("tradex:chart-settings:v1")!), { volumePaneRatio: 0.4, candleInterval: "15m" });
+  assert.deepEqual([...storage.stored.keys()].sort(), ["tradex:chart-settings:v1", KEY]);
 });
 
 test("updates merge into the record, and undefined removes a field", async (t) => {
-  const storage = memoryStorage({ [KEY]: JSON.stringify({ candleInterval: "1d" }) });
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ liveNotificationPopup: false }) });
   const preference = await loadWith(t, storage, "update");
   preference.updatePreferences({ slippagePercent: "1.25" });
-  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), { candleInterval: "1d", slippagePercent: "1.25" });
+  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), { liveNotificationPopup: false, slippagePercent: "1.25" });
   preference.updatePreferences({ slippagePercent: undefined });
-  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), { candleInterval: "1d" });
+  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), { liveNotificationPopup: false });
   assert.equal(preference.shouldShowTradeExecutionPopup(), true);
 });
 
 test("malformed records and fields are dropped instead of breaking the UI", async (t) => {
   const { sanitizePreferences } = await loadWith(t, memoryStorage(), "sanitize");
   assert.deepEqual(
-    sanitizePreferences({ tradeExecutionPopup: "no", volumePaneRatio: 1, candleInterval: "", slippagePercent: "1.23456", extra: 1 }),
+    sanitizePreferences({ tradeExecutionPopup: "no", selectedAccount: { userId: "u", accountId: "" }, slippagePercent: "1.23456", extra: 1 }),
     {},
   );
-  assert.deepEqual(sanitizePreferences({ slippagePercent: "0.5", volumePaneRatio: 0.3 }), { slippagePercent: "0.5", volumePaneRatio: 0.3 });
+  assert.deepEqual(sanitizePreferences({ slippagePercent: "0.5", selectedAccount: "acc" }), { slippagePercent: "0.5" });
   for (const raw of ["junk", "[1]", "null", "2"]) {
     const preference = await loadWith(t, memoryStorage({ [KEY]: raw }), `malformed=${raw}`);
     assert.deepEqual(preference.readPreferences(), {});
-    assert.equal(preference.calculateVolumePaneHeight(260), 73, "falls back to the initial pane layout");
   }
 });
 
-test("volume pane height survives a reload and scales with the chart", async (t) => {
-  const storage = memoryStorage();
-  const original = await loadWith(t, storage, "pane-original");
-  assert.equal(original.calculateVolumePaneHeight(260), 73);
-  original.setVolumePaneRatio(109 / 260);
-  const reloaded = await loadWith(t, storage, "pane-reloaded");
-  assert.equal(reloaded.calculateVolumePaneHeight(260), 109);
-  assert.equal(reloaded.calculateVolumePaneHeight(220), 92);
+test("account selection survives reloads without overwriting other preferences", async (t) => {
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ slippagePercent: "0.5", tradeExecutionPopup: false }) });
+  const original = await loadWith(t, storage, "account-original");
+  original.updatePreferences({ selectedAccount: { userId: "u", accountId: "acc_extra" } });
+  const reloaded = await loadWith(t, storage, "account-reloaded");
+  assert.deepEqual(reloaded.readPreferences(), {
+    tradeExecutionPopup: false, slippagePercent: "0.5", selectedAccount: { userId: "u", accountId: "acc_extra" },
+  });
+});
+
+test("general preference writes preserve old chart values if migration cannot save them", async (t) => {
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ candleInterval: "1d", volumePaneRatio: 0.4 }) });
+  const originalSetItem = storage.setItem;
+  storage.setItem = (key, value) => {
+    if (key === "tradex:chart-settings:v1") throw new Error("Chart settings cannot be written");
+    originalSetItem(key, value);
+  };
+  const preference = await loadWith(t, storage, "migration-write-blocked");
+  preference.updatePreferences({ slippagePercent: "2" });
+  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), { candleInterval: "1d", volumePaneRatio: 0.4, slippagePercent: "2" });
 });
 
 test("preferences stay in memory when localStorage is blocked", async (t) => {
@@ -80,6 +92,6 @@ test("preferences stay in memory when localStorage is blocked", async (t) => {
   preference.updatePreferences({ tradeExecutionPopup: false, slippagePercent: "2" });
   assert.equal(preference.shouldShowTradeExecutionPopup(), false);
   assert.equal(preference.readPreferences().slippagePercent, "2");
-  preference.setVolumePaneRatio(0.5);
-  assert.equal(preference.calculateVolumePaneHeight(260), 130);
+  preference.updatePreferences({ selectedAccount: { userId: "u", accountId: "a" } });
+  assert.deepEqual(preference.readPreferences().selectedAccount, { userId: "u", accountId: "a" });
 });

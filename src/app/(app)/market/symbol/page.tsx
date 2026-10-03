@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarClock, Clock, OctagonAlert } from "lucide-react";
 import { cn } from "cn";
 
 import { useAuth } from "@/components/auth-provider";
 import { CandleChart } from "@/components/candle-chart";
+import { ChartSettingsButton } from "@/components/chart-settings-button";
 import { CeilingBadge, InstrumentAvatar } from "@/components/instrument-list";
-import type { ChartSeriesType } from "@/components/lightweight-chart";
 import { ManagerPanel, ManagerTransferInbox } from "@/components/manager-panel";
 import { PriceChart } from "@/components/price-chart";
 import { PriceFlash } from "@/components/price-flash";
@@ -29,9 +29,9 @@ import { GuestDetailsNotice } from "@/components/guest";
 import { ResponsiveOrderForm } from "@/components/responsive-order-form";
 import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
-import { defaultAccountId } from "@/lib/accounts";
-import { isCandleInterval } from "@/lib/candle-data";
+import { resolveAccountId } from "@/lib/accounts";
 import { buildChartHolding } from "@/lib/chart-holding";
+import { updateChartSettings, useChartSettings } from "@/lib/chart-settings";
 import {
   changePercent,
   compareDecimal,
@@ -76,37 +76,34 @@ interface StatItem {
   full?: string;
 }
 
-function useCandleIntervalPreference() {
-  const stored = usePreferences();
-  const storedInterval = stored?.candleInterval;
-  const interval = isCandleInterval(storedInterval) ? storedInterval : DEFAULT_CANDLE_INTERVAL;
-  const updateInterval = (next: CandleInterval) => updatePreferences({ candleInterval: next });
-  return { interval, updateInterval, hydrated: stored !== null };
-}
-
 function IntervalPicker({
   interval,
   onChange,
   children,
+  settings,
 }: {
   interval: CandleInterval;
   onChange: (interval: CandleInterval) => void;
   children?: React.ReactNode;
+  settings?: React.ReactNode;
 }) {
   return (
-    <div role="group" aria-label="차트 기간" className="mt-3 flex gap-1 overflow-x-auto">
-      {INTERVALS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          aria-pressed={interval === option.value}
-          className="min-h-8 shrink-0 rounded-lg px-2.5 text-[12px] font-semibold text-app-gray-500 hover:bg-app-gray-100 aria-pressed:bg-app-gray-900 aria-pressed:text-app-gray-50"
-        >
-          {option.label}
-        </button>
-      ))}
+    <div role="group" aria-label="차트 기간" className="mt-3 flex items-center gap-1">
+      <div className="flex min-w-0 gap-1 overflow-x-auto">
+        {INTERVALS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={interval === option.value}
+            className="min-h-8 shrink-0 rounded-lg px-2.5 text-[12px] font-semibold text-app-gray-500 hover:bg-app-gray-100 aria-pressed:bg-app-gray-900 aria-pressed:text-app-gray-50"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
       {children}
+      {settings}
     </div>
   );
 }
@@ -177,21 +174,32 @@ function SymbolDetail() {
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol")?.trim() ?? "";
   const { user, status } = useAuth();
-  const [selectedAccount, setSelectedAccount] = useState<{ userId: string; accountId: string } | null>(null);
+  const preferences = usePreferences();
+  const selectedAccount = preferences?.selectedAccount;
   const onAccountChange = useCallback((accountId: string) => {
-    if (user) setSelectedAccount({ userId: user.user_id, accountId });
+    if (user) updatePreferences({ selectedAccount: { userId: user.user_id, accountId } });
   }, [user]);
   // A guest gets the chart and ticker only: no trades or disclosures requests.
   const guest = status === "anonymous";
-  const { interval, updateInterval, hydrated: intervalHydrated } = useCandleIntervalPreference();
-  const [chartSeriesType, setChartSeriesType] = useState<ChartSeriesType>("candle");
+  const chartSettings = useChartSettings();
+  const interval = chartSettings?.candleInterval ?? DEFAULT_CANDLE_INTERVAL;
+  const updateInterval = (next: CandleInterval) => updateChartSettings({ candleInterval: next });
+  const intervalHydrated = chartSettings !== null;
+  const chartSeriesType = chartSettings?.seriesType ?? "candle";
+  const showAverageCost = chartSettings?.showAverageCost ?? true;
+  const settingsButton = (
+    <ChartSettingsButton
+      showAverageCost={showAverageCost}
+      onShowAverageCostChange={(show) => updateChartSettings({ showAverageCost: show })}
+      disabled={!intervalHydrated}
+    />
+  );
   const instrumentQuery = useInstrument(symbol || undefined);
   const canonicalSymbol = instrumentQuery.data?.symbol;
   const accountsQuery = useAccounts(status === "authenticated" && Boolean(canonicalSymbol));
   const accountList = status === "authenticated" ? accountsQuery.data ?? [] : [];
   const selectedAccountId = selectedAccount?.userId === user?.user_id ? selectedAccount?.accountId : undefined;
-  const accountId = accountList.find((account) => account.account_id === selectedAccountId)?.account_id
-    ?? defaultAccountId(accountList);
+  const accountId = preferences !== null ? resolveAccountId(accountList, selectedAccountId) : "";
   const portfolioQuery = usePortfolio(
     accountId || undefined,
     status === "authenticated" && Boolean(canonicalSymbol) && Boolean(accountId),
@@ -235,7 +243,7 @@ function SymbolDetail() {
             <Surface>
               <p className="text-[13px] font-semibold text-app-gray-500">현재가</p>
               <p className="my-2 text-[30px] font-extrabold text-app-gray-300">—</p>
-              <IntervalPicker interval={interval} onChange={updateInterval} />
+              <IntervalPicker interval={interval} onChange={updateInterval} settings={settingsButton} />
               <div className="mt-2">
                 {failed ? (
                   <ErrorBlock message={errorMessage(instrumentQuery.error)} onRetry={() => void instrumentQuery.refetch()} />
@@ -268,10 +276,11 @@ function SymbolDetail() {
   }
 
   const instrument = instrumentQuery.data;
-  const chartHolding = status === "authenticated" ? buildChartHolding(
+  const holding = status === "authenticated" ? buildChartHolding(
     findPosition(portfolioQuery.data, instrument.symbol),
     instrument.curve_spot_price,
   ) : undefined;
+  const chartHolding = holding ? { ...holding, showAverageCost } : undefined;
   const trades = tradesQuery.data?.data ?? [];
   const candles = candlesQuery.data?.data ?? [];
   // Same rule as the line view's color: the loaded period's latest close
@@ -381,10 +390,10 @@ function SymbolDetail() {
               </div>
             </div>
 
-            <IntervalPicker interval={interval} onChange={updateInterval}>
+            <IntervalPicker interval={interval} onChange={updateInterval} settings={settingsButton}>
               <button
                 type="button"
-                onClick={() => setChartSeriesType((current) => (current === "candle" ? "line" : "candle"))}
+                onClick={() => updateChartSettings({ seriesType: chartSeriesType === "candle" ? "line" : "candle" })}
                 aria-label={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
                 title={chartSeriesType === "candle" ? "라인 차트로 보기" : "캔들 차트로 보기"}
                 className="flex min-h-8 shrink-0 items-center rounded-lg px-2 text-app-gray-500 hover:bg-app-gray-100"

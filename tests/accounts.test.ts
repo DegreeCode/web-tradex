@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { singleAccountHeading } from "../src/lib/accounts";
+import { resolveAccountId, singleAccountHeading } from "../src/lib/accounts";
 
 const primary = { account_id: "acc_primary", is_primary: true };
 const extra = { account_id: "acc_extra", is_primary: false };
@@ -17,4 +17,11 @@ test("a lone primary account keeps its name", () => {
 test("loading and empty states keep their own headings", () => {
   assert.equal(singleAccountHeading(true, undefined, []), "계좌 불러오는 중…");
   assert.equal(singleAccountHeading(false, undefined, []), "계좌가 없어요");
+});
+
+test("remembered accounts are restored only while accessible", () => {
+  assert.equal(resolveAccountId([primary, extra], extra.account_id), extra.account_id);
+  assert.equal(resolveAccountId([primary, extra], "deleted_account"), primary.account_id);
+  assert.equal(resolveAccountId([extra], primary.account_id), extra.account_id);
+  assert.equal(resolveAccountId([], extra.account_id), "");
 });
