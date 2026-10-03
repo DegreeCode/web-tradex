@@ -70,6 +70,21 @@ export function GuestOrderPrompt({ className }: { className?: string }) {
   );
 }
 
+/** Stands in for trades and disclosures, which guest browsing leaves out. */
+export function GuestDetailsNotice() {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-card p-5 shadow-card">
+      <div className="min-w-0">
+        <h2 className="text-[17px] font-bold tracking-[-0.02em] text-app-gray-900">최근 체결 · 공시</h2>
+        <p className="mt-1 text-[13px] break-keep text-app-gray-500">로그인하면 체결 내역과 공시도 볼 수 있어요.</p>
+      </div>
+      <LoginLink className="shrink-0 rounded-lg bg-app-blue-light px-3 py-2 text-[13px] font-bold text-app-blue focus-visible:outline-2 focus-visible:outline-app-blue">
+        로그인
+      </LoginLink>
+    </div>
+  );
+}
+
 /** The mobile order bar for a guest: same place as 매수·매도, leading to sign-in. */
 export function GuestOrderBar({ instrument }: { instrument: Instrument }) {
   return (
