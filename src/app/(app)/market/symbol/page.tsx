@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarClock, Clock, OctagonAlert } from "lucide-react";
 import { cn } from "cn";
@@ -26,10 +26,11 @@ import {
   Surface,
 } from "@/components/primitives";
 import { GuestDetailsNotice } from "@/components/guest";
-import { ResponsiveOrderForm } from "@/components/responsive-order-form";
+import { ResponsiveOrderForm, useIsDesktop } from "@/components/responsive-order-form";
 import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
 import { isCandleInterval } from "@/lib/candle-data";
+import { buildChartHolding, useCachedChartPortfolio } from "@/lib/chart-holding";
 import {
   changePercent,
   compareDecimal,
@@ -44,6 +45,7 @@ import {
   toNumber,
 } from "@/lib/format";
 import {
+  findPosition,
   useCandles,
   useInstrument,
   usePolledSymbolTicker,
@@ -172,6 +174,13 @@ function SymbolDetail() {
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol")?.trim() ?? "";
   const { user, status } = useAuth();
+  const isDesktop = useIsDesktop();
+  const [chartAccount, setChartAccount] = useState<{ userId: string; accountId: string } | null>(null);
+  const chartAccountId = chartAccount?.userId === user?.user_id ? chartAccount?.accountId : undefined;
+  const chartPortfolio = useCachedChartPortfolio(chartAccountId, !isDesktop && status === "authenticated");
+  const onMobileAccountChange = useCallback((accountId: string) => {
+    if (user) setChartAccount({ userId: user.user_id, accountId });
+  }, [user]);
   // A guest gets the chart and ticker only: no trades or disclosures requests.
   const guest = status === "anonymous";
   const { interval, updateInterval, hydrated: intervalHydrated } = useCandleIntervalPreference();
@@ -250,6 +259,10 @@ function SymbolDetail() {
   }
 
   const instrument = instrumentQuery.data;
+  const chartHolding = buildChartHolding(
+    findPosition(chartPortfolio, instrument.symbol),
+    instrument.curve_spot_price,
+  );
   const trades = tradesQuery.data?.data ?? [];
   const candles = candlesQuery.data?.data ?? [];
   // Same rule as the line view's color: the loaded period's latest close
@@ -384,9 +397,10 @@ function SymbolDetail() {
                   onLoadOlder={candlesQuery.loadOlder}
                   hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
                   loadingOlder={candlesQuery.isLoadingOlder}
+                  holding={chartHolding}
                 />
               ) : (
-                <PriceChart trades={trades} />
+                <PriceChart trades={trades} holding={chartHolding} />
               )}
               {candlesQuery.olderError ? (
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-app-gray-500">
@@ -457,7 +471,7 @@ function SymbolDetail() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100dvh-3rem)] lg:self-start lg:overflow-y-auto">
-          <ResponsiveOrderForm instrument={instrument} />
+          <ResponsiveOrderForm instrument={instrument} onMobileAccountChange={onMobileAccountChange} />
 
           {guest ? null : (
             <Surface className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col">

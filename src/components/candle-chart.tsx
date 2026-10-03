@@ -8,6 +8,7 @@ import {
   type LightweightCandlePoint,
 } from "@/components/lightweight-chart";
 import { decimalPrecision, toNumber } from "@/lib/format";
+import type { ChartHolding } from "@/lib/chart-holding";
 import type { Candle } from "@/lib/types";
 
 export function CandleChart({
@@ -17,6 +18,7 @@ export function CandleChart({
   onLoadOlder,
   hasOlder,
   loadingOlder,
+  holding,
 }: {
   candles: Candle[];
   seriesType?: ChartSeriesType;
@@ -24,6 +26,7 @@ export function CandleChart({
   onLoadOlder?: () => void;
   hasOlder?: boolean;
   loadingOlder?: boolean;
+  holding?: ChartHolding;
 }) {
   const pricePrecision = useMemo(
     () =>
@@ -75,6 +78,7 @@ export function CandleChart({
       onLoadOlder={onLoadOlder}
       hasOlder={hasOlder}
       loadingOlder={loadingOlder}
+      holding={holding}
     />
   );
 }

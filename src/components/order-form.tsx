@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
@@ -45,7 +45,15 @@ type Side = "BUY" | "SELL";
 type OrderMode = "MARKET" | "TRIGGER";
 type AmountMode = "CREDIT" | "QUANTITY";
 
-export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Instrument; defaultSide?: Side }) {
+export function OrderForm({
+  instrument,
+  defaultSide = "BUY",
+  onAccountChange,
+}: {
+  instrument: Instrument;
+  defaultSide?: Side;
+  onAccountChange?: (accountId: string) => void;
+}) {
   const { data: exchangeInfo } = useExchangeInfo();
   const accounts = useAccounts();
   const accountList = useMemo(() => accounts.data ?? [], [accounts.data]);
@@ -67,6 +75,10 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
   const fieldId = useId();
 
   const resolvedAccountId = accountId || pickDefaultAccount(accountList);
+
+  useEffect(() => {
+    if (resolvedAccountId) onAccountChange?.(resolvedAccountId);
+  }, [resolvedAccountId, onAccountChange]);
 
   const portfolio = usePortfolio(resolvedAccountId || undefined, Boolean(resolvedAccountId));
   const placeOrder = usePlaceOrder();
