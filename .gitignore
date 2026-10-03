@@ -64,3 +64,6 @@ Thumbs.db
 
 # local copy of the backend API docs
 docs/*
+
+# local commit/deploy guide
+/COMMIT_DEPLOY_GUIDE.md

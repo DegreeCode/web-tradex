@@ -103,7 +103,7 @@ export interface Ticker {
 }
 
 /** Server-supported ranking keys for GET /market/tickers. */
-export type TickerSort = "alphabetical" | "recent" | "popular" | "volume" | "gainers" | "losers";
+export type TickerSort = "alphabetical" | "recent" | "popular" | "market_value" | "volume" | "gainers" | "losers";
 
 /** View model composed from the separate symbol metadata and ticker contracts. */
 export interface Instrument extends MarketSymbol, Ticker {}

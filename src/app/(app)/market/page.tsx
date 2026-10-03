@@ -13,6 +13,7 @@ import type { Instrument, TickerSort } from "@/lib/types";
 const SORT_OPTIONS: { value: TickerSort; label: string }[] = [
   { value: "recent", label: "최근 상장" },
   { value: "popular", label: "인기순" },
+  { value: "market_value", label: "시가총액순" },
   { value: "volume", label: "거래량순" },
   { value: "gainers", label: "상승률순" },
   { value: "losers", label: "하락률순" },
@@ -106,6 +107,7 @@ export default function MarketPage() {
         value={sort}
         onChange={setSort}
         options={SORT_OPTIONS}
+        className="grid-cols-3! sm:grid-cols-6!"
       />
 
       {tickerOrderQuery.isLoading ? (

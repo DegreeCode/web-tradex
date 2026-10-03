@@ -20,7 +20,7 @@ function subscribeToDesktop(onChange: () => void) {
   return () => query.removeEventListener("change", onChange);
 }
 
-function useIsDesktop() {
+export function useIsDesktop() {
   return useSyncExternalStore(
     subscribeToDesktop,
     () => window.matchMedia(DESKTOP_QUERY).matches,
@@ -32,7 +32,13 @@ function useIsDesktop() {
  * On desktop the order form stays in the side column. On mobile it would sit
  * below every other section, so a bar above the tab bar opens it as a sheet.
  */
-export function ResponsiveOrderForm({ instrument }: { instrument: Instrument }) {
+export function ResponsiveOrderForm({
+  instrument,
+  onMobileAccountChange,
+}: {
+  instrument: Instrument;
+  onMobileAccountChange?: (accountId: string) => void;
+}) {
   const isDesktop = useIsDesktop();
   const { status } = useAuth();
   const [open, setOpen] = useState(false);
@@ -90,7 +96,12 @@ export function ResponsiveOrderForm({ instrument }: { instrument: Instrument }) 
         <DrawerContent className="max-h-[90dvh] bg-app-gray-50">
           <DrawerTitle className="sr-only">{instrument.symbol} 주문</DrawerTitle>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <OrderForm key={sessionId} instrument={instrument} defaultSide={side} />
+            <OrderForm
+              key={sessionId}
+              instrument={instrument}
+              defaultSide={side}
+              onAccountChange={onMobileAccountChange}
+            />
             <MarginLink symbol={instrument.symbol} className="mt-2" />
           </div>
         </DrawerContent>

@@ -9,6 +9,7 @@ import {
 } from "@/components/lightweight-chart";
 import { addDecimal, decimalPrecision, fmtPrice, toNumber } from "@/lib/format";
 import type { PublicTrade } from "@/lib/types";
+import type { ChartHolding } from "@/lib/chart-holding";
 
 function toChartTime(timestamp: string): number | null {
   const millis = Date.parse(timestamp);
@@ -19,9 +20,11 @@ function toChartTime(timestamp: string): number | null {
 export function PriceChart({
   trades,
   height = 300,
+  holding,
 }: {
   trades: PublicTrade[];
   height?: number;
+  holding?: ChartHolding;
 }) {
   const chartData = useMemo<{ points: LightweightLinePoint[]; volume: LightweightVolumePoint[]; pricePrecision: number }>(() => {
     const bySecond = new Map<number, { point: LightweightLinePoint; volume: string }>();
@@ -87,6 +90,7 @@ export function PriceChart({
       volume={chartData.volume}
       emptyMessage={points.length === 0 ? "체결 데이터가 아직 없어요" : "차트를 그릴 체결이 더 필요해요"}
       ariaLabel="최근 체결 가격 차트"
+      holding={holding}
     />
   );
 }
