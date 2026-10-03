@@ -7,6 +7,8 @@ export const PREFERENCES_STORAGE_KEY = "tradex:preferences:v1";
 
 export interface Preferences {
   tradeExecutionPopup?: boolean;
+  /** Toasts for important notifications that arrive while the app is open. */
+  liveNotificationPopup?: boolean;
   /** Volume pane height ÷ chart height, strictly between 0 and 1. */
   volumePaneRatio?: number;
   /** Validated against the supported intervals by the symbol page. */
@@ -23,6 +25,7 @@ const LEGACY_STORAGE_KEYS = {
 } as const;
 
 const DEFAULT_TRADE_EXECUTION_POPUP = true;
+const DEFAULT_LIVE_NOTIFICATION_POPUP = true;
 const SLIPPAGE_PERCENT_PATTERN = /^(?!$)\d*\.?\d{0,4}$/;
 
 let preferences: Preferences | undefined;
@@ -38,6 +41,7 @@ export function sanitizePreferences(raw: unknown): Preferences {
   const input = raw as Record<string, unknown>;
   const out: Preferences = {};
   if (typeof input.tradeExecutionPopup === "boolean") out.tradeExecutionPopup = input.tradeExecutionPopup;
+  if (typeof input.liveNotificationPopup === "boolean") out.liveNotificationPopup = input.liveNotificationPopup;
   if (isVolumePaneRatio(input.volumePaneRatio)) out.volumePaneRatio = input.volumePaneRatio;
   if (typeof input.candleInterval === "string" && input.candleInterval) out.candleInterval = input.candleInterval;
   if (typeof input.slippagePercent === "string" && SLIPPAGE_PERCENT_PATTERN.test(input.slippagePercent)) {
@@ -149,6 +153,20 @@ export function shouldShowTradeExecutionPopup(): boolean {
   // Re-read so a change made in another tab applies even without a storage event.
   preferences = loadPreferences();
   return preferences.tradeExecutionPopup ?? DEFAULT_TRADE_EXECUTION_POPUP;
+}
+
+export function useLiveNotificationPopupPreference() {
+  const stored = usePreferences();
+  const enabled = stored?.liveNotificationPopup ?? DEFAULT_LIVE_NOTIFICATION_POPUP;
+  const setEnabled = (next: boolean) => updatePreferences({ liveNotificationPopup: next });
+  return { enabled, setEnabled, hydrated: stored !== null };
+}
+
+/** Read when a notification arrives, so a change in another tab applies at once. */
+export function shouldShowLiveNotificationPopup(): boolean {
+  if (typeof window === "undefined") return false;
+  preferences = loadPreferences();
+  return preferences.liveNotificationPopup ?? DEFAULT_LIVE_NOTIFICATION_POPUP;
 }
 
 /** Allowed slippage shared by spot and margin forms; remembered once typed. */

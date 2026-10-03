@@ -4,6 +4,7 @@ import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { useInstrument } from "@/lib/hooks";
+import { noteSelfAction } from "@/lib/live-notifications";
 import {
   liveReferencePrice,
   slippageRequestFields,
@@ -75,6 +76,7 @@ export function MarginReductionDialog({
     const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!payload || !position) return;
+    noteSelfAction("TRADE_EXECUTED", position.symbol);
     try {
       const result = await reduceMutation.mutateAsync(
         referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,

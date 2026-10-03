@@ -31,6 +31,7 @@ import {
 } from "@/lib/format";
 import { defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/lib/hooks";
+import { noteSelfAction } from "@/lib/live-notifications";
 import {
   getLeverageOptions,
   marginErrorMessage,
@@ -167,6 +168,7 @@ export function MarginCreateForm({
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
     if (!canSubmit || !payload) return;
 
+    noteSelfAction("TRADE_EXECUTED", resolvedSymbol);
     try {
       const position = await createMutation.mutateAsync(
         referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,

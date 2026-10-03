@@ -17,6 +17,7 @@ import { Segmented } from "@/components/segmented";
 import { TransferDialog } from "@/components/transfer-dialog";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { errorMessage } from "@/lib/api";
+import { noteSelfAction } from "@/lib/live-notifications";
 import { fmtCredit, fmtDeadline, fmtQuantity, fmtRelative, shortId } from "@/lib/format";
 import { useTransferAction, useTransferDetails, useTransfers } from "@/lib/hooks";
 import type { Transfer } from "@/lib/types";
@@ -79,6 +80,7 @@ export default function TransfersPage() {
   const detailsError = details.find((detail) => detail.isError)?.error;
 
   function runAction(transferId: string, kind: "acceptance" | "rejection" | "cancellation") {
+    noteSelfAction("transfer.updated");
     action.mutate(
       { transferId, action: kind },
       {

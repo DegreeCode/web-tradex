@@ -39,6 +39,7 @@ import {
 } from "@/lib/device-link";
 import { fmtDateTime, fmtRelative } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
+import { noteSelfAction } from "@/lib/live-notifications";
 import type { Account, LinkedPermission } from "@/lib/types";
 import { getPasskeyAssertion, webauthnErrorMessage, type CeremonyEnvelope } from "@/lib/webauthn";
 
@@ -222,6 +223,7 @@ function ApprovalForm({
       idle_timeout_minutes: idle,
     };
     setBusy("approve");
+    noteSelfAction("AUTH_DEVICE_LINK_APPROVED");
     try {
       const options = await postData<CeremonyEnvelope<PublicKeyCredentialRequestOptionsJSON>>(
         DEVICE_LINK_APPROVE_OPTIONS_PATH,

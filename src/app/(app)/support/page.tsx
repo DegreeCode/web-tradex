@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmptyState, ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows } from "@/components/primitives";
 import { errorMessage } from "@/lib/api";
 import { fmtDateTime, fmtRelative } from "@/lib/format";
+import { noteSelfAction } from "@/lib/live-notifications";
 import {
   useCreateInquiry,
   useInquiries,
@@ -288,6 +289,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
       toast.error("답변 내용을 입력해주세요");
       return;
     }
+    noteSelfAction("inquiry.replied");
     sendReply.mutate(reply.trim(), {
       onSuccess: () => {
         toast.success("메시지를 보냈어요");

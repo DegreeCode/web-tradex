@@ -18,6 +18,7 @@ import { ExchangeInfoNotice } from "@/components/exchange-policy";
 import { ErrorBlock } from "@/components/primitives";
 import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
+import { noteSelfAction } from "@/lib/live-notifications";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
 import { findPosition, useAccounts, useCreateTransfer, usePortfolio } from "@/lib/hooks";
 import { useSessionAccess } from "@/components/session-access";
@@ -95,6 +96,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
       }
     }
 
+    noteSelfAction("transfer.updated");
     createTransfer.mutate(
       {
         account_id: accountId || undefined,
