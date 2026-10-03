@@ -495,10 +495,11 @@ export function LightweightLineChart({
   if (data.length < 2) {
     return (
       <div
-        className="flex items-center justify-center rounded-xl bg-app-gray-50 text-[13px] text-app-gray-400"
+        className="flex flex-col items-center justify-center gap-2 rounded-xl bg-app-gray-50 text-[13px] text-app-gray-400"
         style={{ height }}
       >
-        {emptyMessage}
+        <p>{emptyMessage}</p>
+        <ChartHoldingLegend holding={holding} />
       </div>
     );
   }
@@ -703,10 +704,11 @@ export function LightweightCandleChart({
   if (data.length === 0 || !active) {
     return (
       <div
-        className="flex items-center justify-center rounded-xl bg-app-gray-50 text-[13px] text-app-gray-400"
+        className="flex flex-col items-center justify-center gap-2 rounded-xl bg-app-gray-50 text-[13px] text-app-gray-400"
         style={{ height }}
       >
-        {emptyMessage}
+        <p>{emptyMessage}</p>
+        <ChartHoldingLegend holding={holding} />
       </div>
     );
   }

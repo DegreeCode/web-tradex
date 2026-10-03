@@ -414,12 +414,13 @@ export function useRealizedPnL(limit = PAGE_SIZE) {
   });
 }
 
-export function useAccounts() {
+export function useAccounts(enabled = true) {
   const staleTime = usePrivateStaleTime();
   return useQuery({
     queryKey: ["accounts"],
     queryFn: () => apiData<Account[]>("/api/v1/me/accounts"),
     staleTime,
+    enabled,
   });
 }
 

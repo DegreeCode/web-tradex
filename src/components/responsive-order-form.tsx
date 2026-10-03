@@ -6,7 +6,7 @@ import { ArrowUpRight } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
 import { GuestOrderBar, GuestOrderPrompt } from "@/components/guest";
-import { OrderForm } from "@/components/order-form";
+import { OrderForm, type OrderAccountState } from "@/components/order-form";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { fmtPrice } from "@/lib/format";
 import type { Instrument } from "@/lib/types";
@@ -20,7 +20,7 @@ function subscribeToDesktop(onChange: () => void) {
   return () => query.removeEventListener("change", onChange);
 }
 
-export function useIsDesktop() {
+function useIsDesktop() {
   return useSyncExternalStore(
     subscribeToDesktop,
     () => window.matchMedia(DESKTOP_QUERY).matches,
@@ -34,10 +34,10 @@ export function useIsDesktop() {
  */
 export function ResponsiveOrderForm({
   instrument,
-  onMobileAccountChange,
+  accountState,
 }: {
   instrument: Instrument;
-  onMobileAccountChange?: (accountId: string) => void;
+  accountState: OrderAccountState;
 }) {
   const isDesktop = useIsDesktop();
   const { status } = useAuth();
@@ -46,8 +46,7 @@ export function ResponsiveOrderForm({
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [sessionId, setSessionId] = useState(0);
 
-  // The order form reads accounts, balances and exchange settings; a guest
-  // gets a way to sign in instead.
+  // A guest gets a way to sign in instead of the authenticated order form.
   if (status !== "authenticated") {
     return isDesktop ? <GuestOrderPrompt /> : <GuestOrderBar instrument={instrument} />;
   }
@@ -61,7 +60,7 @@ export function ResponsiveOrderForm({
   if (isDesktop) {
     return (
       <div className="space-y-2">
-        <OrderForm instrument={instrument} />
+        <OrderForm instrument={instrument} accountState={accountState} />
         <MarginLink symbol={instrument.symbol} />
       </div>
     );
@@ -100,7 +99,7 @@ export function ResponsiveOrderForm({
               key={sessionId}
               instrument={instrument}
               defaultSide={side}
-              onAccountChange={onMobileAccountChange}
+              accountState={accountState}
             />
             <MarginLink symbol={instrument.symbol} className="mt-2" />
           </div>
