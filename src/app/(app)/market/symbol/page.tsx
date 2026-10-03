@@ -191,6 +191,8 @@ function SymbolDetail() {
     <ChartSettingsButton
       showAverageCost={showAverageCost}
       onShowAverageCostChange={(show) => updateChartSettings({ showAverageCost: show })}
+      logarithmic={chartSettings?.logarithmic ?? false}
+      onLogarithmicChange={(enabled) => updateChartSettings({ logarithmic: enabled })}
       disabled={!intervalHydrated}
     />
   );
