@@ -26,11 +26,12 @@ import {
   Surface,
 } from "@/components/primitives";
 import { GuestDetailsNotice } from "@/components/guest";
-import { ResponsiveOrderForm, useIsDesktop } from "@/components/responsive-order-form";
+import { ResponsiveOrderForm } from "@/components/responsive-order-form";
 import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
+import { defaultAccountId } from "@/lib/accounts";
 import { isCandleInterval } from "@/lib/candle-data";
-import { buildChartHolding, useCachedChartPortfolio } from "@/lib/chart-holding";
+import { buildChartHolding } from "@/lib/chart-holding";
 import {
   changePercent,
   compareDecimal,
@@ -46,9 +47,11 @@ import {
 } from "@/lib/format";
 import {
   findPosition,
+  useAccounts,
   useCandles,
   useInstrument,
   usePolledSymbolTicker,
+  usePortfolio,
   useSymbolTradeStream,
   useSymbolTrades,
 } from "@/lib/hooks";
@@ -174,12 +177,9 @@ function SymbolDetail() {
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol")?.trim() ?? "";
   const { user, status } = useAuth();
-  const isDesktop = useIsDesktop();
-  const [chartAccount, setChartAccount] = useState<{ userId: string; accountId: string } | null>(null);
-  const chartAccountId = chartAccount?.userId === user?.user_id ? chartAccount?.accountId : undefined;
-  const chartPortfolio = useCachedChartPortfolio(chartAccountId, !isDesktop && status === "authenticated");
-  const onMobileAccountChange = useCallback((accountId: string) => {
-    if (user) setChartAccount({ userId: user.user_id, accountId });
+  const [selectedAccount, setSelectedAccount] = useState<{ userId: string; accountId: string } | null>(null);
+  const onAccountChange = useCallback((accountId: string) => {
+    if (user) setSelectedAccount({ userId: user.user_id, accountId });
   }, [user]);
   // A guest gets the chart and ticker only: no trades or disclosures requests.
   const guest = status === "anonymous";
@@ -187,6 +187,15 @@ function SymbolDetail() {
   const [chartSeriesType, setChartSeriesType] = useState<ChartSeriesType>("candle");
   const instrumentQuery = useInstrument(symbol || undefined);
   const canonicalSymbol = instrumentQuery.data?.symbol;
+  const accountsQuery = useAccounts(status === "authenticated" && Boolean(canonicalSymbol));
+  const accountList = status === "authenticated" ? accountsQuery.data ?? [] : [];
+  const selectedAccountId = selectedAccount?.userId === user?.user_id ? selectedAccount?.accountId : undefined;
+  const accountId = accountList.find((account) => account.account_id === selectedAccountId)?.account_id
+    ?? defaultAccountId(accountList);
+  const portfolioQuery = usePortfolio(
+    accountId || undefined,
+    status === "authenticated" && Boolean(canonicalSymbol) && Boolean(accountId),
+  );
   const tradesQuery = useSymbolTrades(canonicalSymbol, 150);
   const candlesQuery = useCandles(canonicalSymbol, interval, 200, intervalHydrated);
 
@@ -259,10 +268,10 @@ function SymbolDetail() {
   }
 
   const instrument = instrumentQuery.data;
-  const chartHolding = buildChartHolding(
-    findPosition(chartPortfolio, instrument.symbol),
+  const chartHolding = status === "authenticated" ? buildChartHolding(
+    findPosition(portfolioQuery.data, instrument.symbol),
     instrument.curve_spot_price,
-  );
+  ) : undefined;
   const trades = tradesQuery.data?.data ?? [];
   const candles = candlesQuery.data?.data ?? [];
   // Same rule as the line view's color: the loaded period's latest close
@@ -471,7 +480,10 @@ function SymbolDetail() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100dvh-3rem)] lg:self-start lg:overflow-y-auto">
-          <ResponsiveOrderForm instrument={instrument} onMobileAccountChange={onMobileAccountChange} />
+          <ResponsiveOrderForm
+            instrument={instrument}
+            accountState={{ accountId, accounts: accountsQuery, portfolio: portfolioQuery, onAccountChange }}
+          />
 
           {guest ? null : (
             <Surface className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col">

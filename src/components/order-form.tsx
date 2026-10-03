@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,7 +17,7 @@ import { ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives"
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
-import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
+import { accountLabel } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
 import { marginLimitReasonLabel } from "@/lib/margin";
@@ -37,27 +38,34 @@ import {
   isPositiveDecimal,
   scaleDecimal,
 } from "@/lib/format";
-import { findPosition, useAccounts, useOrderSimulation, usePlaceOrder, usePortfolio } from "@/lib/hooks";
+import { findPosition, useOrderSimulation, usePlaceOrder } from "@/lib/hooks";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
-import type { Instrument, Order, OrderRequest, OrderSimulationRequest } from "@/lib/types";
+import type { Account, Instrument, Order, OrderRequest, OrderSimulationRequest, Portfolio } from "@/lib/types";
 
 type Side = "BUY" | "SELL";
 type OrderMode = "MARKET" | "TRIGGER";
 type AmountMode = "CREDIT" | "QUANTITY";
 
+/** The symbol screen owns one account/portfolio query for both chart and form. */
+export interface OrderAccountState {
+  accountId: string;
+  accounts: UseQueryResult<Account[]>;
+  portfolio: UseQueryResult<Portfolio>;
+  onAccountChange: (accountId: string) => void;
+}
+
 export function OrderForm({
   instrument,
   defaultSide = "BUY",
-  onAccountChange,
+  accountState,
 }: {
   instrument: Instrument;
   defaultSide?: Side;
-  onAccountChange?: (accountId: string) => void;
+  accountState: OrderAccountState;
 }) {
   const { data: exchangeInfo } = useExchangeInfo();
-  const accounts = useAccounts();
-  const accountList = useMemo(() => accounts.data ?? [], [accounts.data]);
-  const [accountId, setAccountId] = useState("");
+  const { accounts, portfolio, accountId: resolvedAccountId, onAccountChange } = accountState;
+  const accountList = accounts.data ?? [];
   const [side, setSide] = useState<Side>(defaultSide);
   const [orderMode, setOrderMode] = useState<OrderMode>("MARKET");
   const [amountMode, setAmountMode] = useState<AmountMode>("QUANTITY");
@@ -74,13 +82,6 @@ export function OrderForm({
   const [result, setResult] = useState<Order | null>(null);
   const fieldId = useId();
 
-  const resolvedAccountId = accountId || pickDefaultAccount(accountList);
-
-  useEffect(() => {
-    if (resolvedAccountId) onAccountChange?.(resolvedAccountId);
-  }, [resolvedAccountId, onAccountChange]);
-
-  const portfolio = usePortfolio(resolvedAccountId || undefined, Boolean(resolvedAccountId));
   const placeOrder = usePlaceOrder();
   // Simulation shares the order route, so a session without TRADE can't quote either.
   const tradeAccess = useSessionAccess("TRADE");
@@ -278,7 +279,7 @@ export function OrderForm({
                     key={account.account_id}
                     type="button"
                     onClick={() => {
-                      setAccountId(account.account_id);
+                      onAccountChange(account.account_id);
                       setLinkedPercent(null);
                     }}
                     aria-pressed={resolvedAccountId === account.account_id}
