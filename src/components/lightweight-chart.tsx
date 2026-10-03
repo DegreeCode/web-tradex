@@ -25,7 +25,7 @@ import { useTheme } from "next-themes";
 import { fmtCompactQuantity, fmtPrice, fmtSigned } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import { canIncrementallyUpdate } from "@/lib/chart-updates";
-import { calculateVolumePaneHeight, setVolumePaneRatio } from "@/lib/preferences";
+import { calculateVolumePaneHeight, setVolumePaneRatio } from "@/lib/chart-settings";
 
 const UP_COLOR = "#f04452";
 const DOWN_COLOR = "#3182f6";
@@ -133,7 +133,7 @@ function ChartHoldingLegend({ holding }: { holding?: ChartHolding }) {
   const percent = holding.returnPercent;
   return (
     <div className="numeric mt-0.5 flex flex-wrap gap-x-2 font-semibold">
-      <span style={{ color: HOLDING_COLOR }}>평단가 {fmtPrice(holding.averagePrice)}</span>
+      {holding.showAverageCost !== false ? <span style={{ color: HOLDING_COLOR }}>평단가 {fmtPrice(holding.averagePrice)}</span> : null}
       <span className="text-app-gray-500">
         평가수익률{" "}
         <span style={{ color: percent === null || percent === 0 ? undefined : percent > 0 ? UP_COLOR : DOWN_COLOR }}>
@@ -147,7 +147,8 @@ function ChartHoldingLegend({ holding }: { holding?: ChartHolding }) {
 function chartHoldingDescription(holding?: ChartHolding): string {
   if (!holding) return "";
   const percent = holding.returnPercent;
-  return `. 평단가 ${fmtPrice(holding.averagePrice)}. 평가수익률 ${percent === null ? "없음" : `${fmtSigned(percent, 2)}%`}`;
+  const average = holding.showAverageCost !== false ? `. 평단가 ${fmtPrice(holding.averagePrice)}` : "";
+  return `${average}. 평가수익률 ${percent === null ? "없음" : `${fmtSigned(percent, 2)}%`}`;
 }
 
 function formatChartTime(time: Time): string {
@@ -477,7 +478,7 @@ export function LightweightLineChart({
     };
   }, [hasData, height]);
   useChartTheme(chartRef, hasData, height);
-  useHoldingPriceLine(seriesRef, hasData, height, holding?.averagePrice);
+  useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -644,7 +645,7 @@ export function LightweightCandleChart({
     };
   }, [hasData, height, seriesType]);
   useChartTheme(chartRef, hasData, height, seriesType);
-  useHoldingPriceLine(seriesRef, hasData, height, holding?.averagePrice, seriesType);
+  useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined, seriesType);
 
   useEffect(() => {
     const series = seriesRef.current;

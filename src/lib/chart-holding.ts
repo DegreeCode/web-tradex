@@ -3,6 +3,7 @@ import type { Position } from "./types";
 export interface ChartHolding {
   averagePrice: string;
   returnPercent: number | null;
+  showAverageCost?: boolean;
 }
 
 export function buildChartHolding(position: Position | undefined, spotPrice: string): ChartHolding | undefined {

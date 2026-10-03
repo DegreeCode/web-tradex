@@ -1,18 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { migrateLegacyChartSettings } from "./chart-settings";
 
-/** All per-browser UI preferences live in this one JSON record. */
+/** General per-browser preferences; chart settings have their own record. */
 export const PREFERENCES_STORAGE_KEY = "tradex:preferences:v1";
 
 export interface Preferences {
   tradeExecutionPopup?: boolean;
   /** Toasts for important notifications that arrive while the app is open. */
   liveNotificationPopup?: boolean;
-  /** Volume pane height ÷ chart height, strictly between 0 and 1. */
-  volumePaneRatio?: number;
-  /** Validated against the supported intervals by the symbol page. */
-  candleInterval?: string;
+  /** Restore account choices only for the user who made them. */
+  selectedAccount?: { userId: string; accountId: string };
   /** Allowed slippage in percent as typed (≤ 4 decimals); absent means the server default. */
   slippagePercent?: string;
 }
@@ -20,8 +19,6 @@ export interface Preferences {
 // Single-value keys used before the preferences were bundled; migrated once.
 const LEGACY_STORAGE_KEYS = {
   tradeExecutionPopup: "tradex:trade-execution-popup:v1",
-  volumePaneRatio: "tradex:volume-pane-ratio:v1",
-  candleInterval: "tradex:candle-interval:v1",
 } as const;
 
 const DEFAULT_TRADE_EXECUTION_POPUP = true;
@@ -31,10 +28,6 @@ const SLIPPAGE_PERCENT_PATTERN = /^(?!$)\d*\.?\d{0,4}$/;
 let preferences: Preferences | undefined;
 const listeners = new Set<() => void>();
 
-function isVolumePaneRatio(value: unknown): value is number {
-  return typeof value === "number" && value > 0 && value < 1;
-}
-
 /** Keeps only well-formed fields so a hand-edited or stale record cannot break the UI. */
 export function sanitizePreferences(raw: unknown): Preferences {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
@@ -42,8 +35,13 @@ export function sanitizePreferences(raw: unknown): Preferences {
   const out: Preferences = {};
   if (typeof input.tradeExecutionPopup === "boolean") out.tradeExecutionPopup = input.tradeExecutionPopup;
   if (typeof input.liveNotificationPopup === "boolean") out.liveNotificationPopup = input.liveNotificationPopup;
-  if (isVolumePaneRatio(input.volumePaneRatio)) out.volumePaneRatio = input.volumePaneRatio;
-  if (typeof input.candleInterval === "string" && input.candleInterval) out.candleInterval = input.candleInterval;
+  if (input.selectedAccount && typeof input.selectedAccount === "object") {
+    const account = input.selectedAccount as Record<string, unknown>;
+    if (typeof account.userId === "string" && account.userId.trim() &&
+        typeof account.accountId === "string" && account.accountId.trim()) {
+      out.selectedAccount = { userId: account.userId, accountId: account.accountId };
+    }
+  }
   if (typeof input.slippagePercent === "string" && SLIPPAGE_PERCENT_PATTERN.test(input.slippagePercent)) {
     out.slippagePercent = input.slippagePercent;
   }
@@ -61,11 +59,8 @@ function parsePreferences(raw: string | null): Preferences {
 
 function migrateLegacyPreferences(storage: Storage): Preferences {
   const popup = storage.getItem(LEGACY_STORAGE_KEYS.tradeExecutionPopup);
-  const ratio = storage.getItem(LEGACY_STORAGE_KEYS.volumePaneRatio);
   const migrated = sanitizePreferences({
     tradeExecutionPopup: popup === "true" ? true : popup === "false" ? false : undefined,
-    volumePaneRatio: ratio === null ? undefined : Number(ratio),
-    candleInterval: storage.getItem(LEGACY_STORAGE_KEYS.candleInterval) ?? undefined,
   });
   if (Object.keys(migrated).length === 0) return migrated;
   try {
@@ -81,6 +76,11 @@ function migrateLegacyPreferences(storage: Storage): Preferences {
 function loadPreferences(): Preferences {
   try {
     const storage = window.localStorage;
+    try {
+      migrateLegacyChartSettings(storage);
+    } catch {
+      // General preferences can still be read if chart migration cannot write.
+    }
     const raw = storage.getItem(PREFERENCES_STORAGE_KEY);
     return raw === null ? migrateLegacyPreferences(storage) : parsePreferences(raw);
   } catch {
@@ -108,7 +108,18 @@ export function updatePreferences(patch: Partial<Preferences>): void {
   }
   preferences = sanitizePreferences(next);
   try {
-    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+    const storage = window.localStorage;
+    // Preserve legacy chart fields when their separate record could not be written.
+    let legacyChartFields = {};
+    try {
+      migrateLegacyChartSettings(storage);
+    } catch {
+      try {
+        const old = JSON.parse(storage.getItem(PREFERENCES_STORAGE_KEY) ?? "{}");
+        legacyChartFields = { candleInterval: old?.candleInterval, volumePaneRatio: old?.volumePaneRatio };
+      } catch { /* Ignore malformed legacy data. */ }
+    }
+    storage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ ...legacyChartFields, ...preferences }));
   } catch {
     // Keep the in-memory preferences when browser storage is unavailable.
   }
@@ -181,15 +192,4 @@ export function useSlippagePreference(): [string, (value: string) => void] {
     }
   };
   return [slippage, setSlippage];
-}
-
-export function calculateVolumePaneHeight(totalHeight: number): number {
-  const ratio = readPreferences().volumePaneRatio;
-  return ratio === undefined
-    ? Math.min(78, Math.max(56, Math.round(totalHeight * 0.28)))
-    : Math.round(totalHeight * ratio);
-}
-
-export function setVolumePaneRatio(ratio: number): void {
-  if (isVolumePaneRatio(ratio)) updatePreferences({ volumePaneRatio: ratio });
 }

@@ -17,6 +17,14 @@ export function defaultAccountId(accounts: readonly Pick<Account, "account_id" |
   return accounts.find((account) => account.is_primary)?.account_id ?? accounts[0]?.account_id ?? "";
 }
 
+/** Ignore a remembered account if it is no longer available to this user. */
+export function resolveAccountId(
+  accounts: readonly Pick<Account, "account_id" | "is_primary">[],
+  preferredId?: string,
+): string {
+  return accounts.find((account) => account.account_id === preferredId)?.account_id ?? defaultAccountId(accounts);
+}
+
 /** Heading where one account is shown without a picker, by its own name. */
 export function singleAccountHeading(
   pending: boolean,
