@@ -184,8 +184,11 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
     else payload.quantity = orderQuantity.trim();
     if (referencePrice) payload.slippage_reference_price = referencePrice;
 
-    // The fill notification can beat the response; the result dialog covers it.
-    if (orderMode === "MARKET") noteSelfAction("TRADE_EXECUTED", instrument.symbol);
+    // The fill notification can beat the response. With the result dialog on it
+    // would repeat the dialog; with it off the toast is the only confirmation.
+    if (orderMode === "MARKET" && shouldShowTradeExecutionPopup()) {
+      noteSelfAction("TRADE_EXECUTED", instrument.symbol);
+    }
     placeOrder.mutate(payload, {
       onSuccess: (order) => {
         if (order.status === "PENDING" || shouldShowTradeExecutionPopup()) {

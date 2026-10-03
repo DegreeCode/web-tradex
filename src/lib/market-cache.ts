@@ -5,6 +5,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { apiData, buildQuery } from "./api";
+import { reconcileDisclosureListings } from "./disclosure-cache";
 import { parseTradingNotification } from "./notifications";
 import {
   ensureSymbolMetadataCache,
@@ -125,6 +126,7 @@ function updateInstrumentDetail(queryClient: QueryClient, symbol: MarketSymbol, 
 }
 
 export function applySymbolMetadataCache(queryClient: QueryClient, cache: SymbolMetadataCache): void {
+  reconcileDisclosureListings(queryClient, cache.symbols);
   queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
     const previous = new Map(old?.map((instrument) => [instrument.symbol, instrument]));
     const tickers = tickersBySymbol(queryClient);
@@ -140,6 +142,7 @@ export function applySymbolMetadataDelta(
   previous: SymbolMetadataCache | null,
   next: SymbolMetadataCache,
 ): void {
+  reconcileDisclosureListings(queryClient, next.symbols);
   const previousBySymbol = new Map(previous?.symbols.map((symbol) => [symbol.symbol, symbol]));
   const nextSymbols = new Set(next.symbols.map((symbol) => symbol.symbol));
   for (const symbol of previous?.symbols ?? []) {
@@ -160,6 +163,7 @@ export function applySymbolMetadataDelta(
 }
 
 export function applySymbolToQueryCaches(queryClient: QueryClient, symbol: MarketSymbol): void {
+  reconcileDisclosureListings(queryClient, [symbol]);
   const ticker = findCachedTicker(queryClient, symbol.symbol);
   queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
     if (!old) return old;
