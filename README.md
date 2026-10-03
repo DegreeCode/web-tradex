@@ -122,6 +122,10 @@ private 소켓은 로그인 상태에서만 열리고, 로그아웃 시 닫힙�
 WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 REST snapshot으로 복구합니다.
 종목 기본정보는 `symbols/changes`와 `symbols/batch`로 별도 동기화합니다.
 
+같은 심볼이 재상장되면 새 상장 시각 이전의 공시 캐시를 제거하고, 공시 페이지 커서를 초기화해
+현재 회차를 다시 조회합니다. 빈 REST 목록에 이전 WebSocket 공시를 다시 채워 넣지 않으며,
+새 WebSocket 스냅샷은 실시간 공시 캐시를 교체합니다.
+
 ## 구현 메모
 
 - **API 호출**: 모든 요청은 `src/lib/api.ts`의 단일 클라이언트를 지나며, `NEXT_PUBLIC_API_BASE_URL` +

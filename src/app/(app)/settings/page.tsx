@@ -58,7 +58,7 @@ export default function SettingsPage() {
                 체결 완료 팝업
               </h2>
               <p className="mt-1 text-[13px] leading-5 text-app-gray-500">
-                시장가 주문이 체결되면 결과를 팝업으로 보여줘요. 예약 주문 등록 결과는 항상 보여드려요.
+                시장가 주문이 체결되면 결과를 팝업으로 보여줘요. 끄면 대신 화면 위에 짧게 알려드려요. 예약 주문 등록 결과는 항상 보여드려요.
               </p>
             </div>
           </div>
