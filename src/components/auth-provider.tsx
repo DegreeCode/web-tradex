@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
 import { clearSessionCache, useMe } from "@/lib/hooks";
+import { setSignedIn } from "@/lib/session-mode";
 import type { SessionScope, User } from "@/lib/types";
 
 export type { AuthStatus };
@@ -61,6 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     };
   }, [query.data, query.error, query.isError, queryClient]);
+
+  // Streams and session-only requests start only once the session is
+  // confirmed; until then (and after it ends) the app browses as a guest.
+  useEffect(() => {
+    setSignedIn(value.status === "authenticated");
+  }, [value.status]);
 
   // Private queries aren't keyed by user, so the cache must not outlive the
   // account that filled it: a session that ends drops it, and a different

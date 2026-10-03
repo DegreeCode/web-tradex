@@ -4,6 +4,8 @@ import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
+import { useAuth } from "@/components/auth-provider";
+import { GuestOrderBar, GuestOrderPrompt } from "@/components/guest";
 import { OrderForm } from "@/components/order-form";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { fmtPrice } from "@/lib/format";
@@ -32,10 +34,17 @@ function useIsDesktop() {
  */
 export function ResponsiveOrderForm({ instrument }: { instrument: Instrument }) {
   const isDesktop = useIsDesktop();
+  const { status } = useAuth();
   const [open, setOpen] = useState(false);
   // Kept after closing so the sheet does not empty out while it slides away.
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [sessionId, setSessionId] = useState(0);
+
+  // The order form reads accounts, balances and exchange settings; a guest
+  // gets a way to sign in instead.
+  if (status !== "authenticated") {
+    return isDesktop ? <GuestOrderPrompt /> : <GuestOrderBar instrument={instrument} />;
+  }
 
   function openOrder(next: "BUY" | "SELL") {
     setSide(next);

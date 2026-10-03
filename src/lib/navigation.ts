@@ -39,3 +39,10 @@ const LINKED_HIDDEN_NAV = new Set(["/support", "/listings/new"]);
 export function moreNavFor(linked: boolean): typeof MORE_NAV {
   return linked ? MORE_NAV.filter((item) => !LINKED_HIDDEN_NAV.has(item.href)) : MORE_NAV;
 }
+
+// Market screens read only public data, so they open without signing in.
+const GUEST_ROUTES = ["/market"];
+
+export function isGuestRoute(pathname: string): boolean {
+  return GUEST_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}

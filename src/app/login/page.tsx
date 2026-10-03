@@ -192,6 +192,14 @@ function LoginScreen() {
             초대 토큰이 있나요?
           </Link>
         </p>
+
+        <Link
+          href="/market"
+          className="mt-6 flex min-h-11 items-center justify-center gap-1 rounded-xl border border-app-gray-200 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+        >
+          로그인 없이 마켓 둘러보기
+          <ChevronRight aria-hidden="true" className="size-4" />
+        </Link>
       </div>
 
       <SiteDisclaimer stacked className="mt-10 w-full max-w-[400px]" />

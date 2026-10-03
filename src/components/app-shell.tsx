@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bell, ChevronRight, LogOut } from "lucide-react";
+import { Bell, ChevronRight, LogIn, LogOut } from "lucide-react";
 import { cn } from "cn";
 
 import { useExchangeInfo } from "@/lib/exchange-info";
@@ -27,6 +27,7 @@ import { useConnectionToast, useLiveNotificationToasts } from "@/lib/live-toasts
 import { formatUnreadBadge } from "@/lib/notifications";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { BrandLogo } from "@/components/brand-logo";
+import { GuestBanner, LoginLink } from "@/components/guest";
 import { LinkedSessionBanner } from "@/components/linked-session-banner";
 import { MORE_NAV, PRIMARY_NAV, moreNavFor } from "@/lib/navigation";
 
@@ -71,6 +72,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, status, linkedScope } = useAuth();
   const authenticated = status === "authenticated";
+  // Signed out on a market screen: browsing as a guest (other routes redirect).
+  const guest = status === "anonymous";
   const linked = linkedScope !== null;
   const moreNav = moreNavFor(linked);
   const logout = useLogout();
@@ -80,6 +83,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const unreadOverflow = authenticated && (unread.data?.page.has_more ?? false);
   const unreadBadgeLabel = formatUnreadBadge(unreadCount, unreadOverflow);
 
+  // These no-op for a guest: no socket opens and exchange info isn't read.
   useExchangeInfo(true);
   useTickerStream();
   useMarketStateStream();
@@ -92,6 +96,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useConnectionToast(authenticated);
 
   const initial = user?.username.slice(0, 1).toUpperCase() ?? "⋯";
+  const loginButton =
+    "flex items-center justify-center gap-1.5 rounded-xl bg-app-blue font-bold text-white hover:bg-app-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-blue";
   const currentTitle =
     [...PRIMARY_NAV, ...MORE_NAV].find((item) => isActive(pathname, item.href))?.label ?? "";
   const moreActive = moreNav.some((item) => isActive(pathname, item.href));
@@ -131,27 +137,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="shrink-0 border-t border-app-gray-200 p-4">
-          <div className="flex items-center gap-3">
-            <div aria-hidden="true" className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-[14px] font-bold text-app-gray-700">
-              {initial}
+          {guest ? (
+            <div className="space-y-2">
+              <LoginLink className={cn(loginButton, "h-10 w-full text-[14px]")}>
+                <LogIn aria-hidden="true" className="size-4" />
+                로그인
+              </LoginLink>
+              <Link
+                href="/signup"
+                prefetch={false}
+                className="block rounded-lg py-1.5 text-center text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-700"
+              >
+                가입하기
+              </Link>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-app-gray-900">
-                {user?.username ?? "로그인 확인 중…"}
-              </p>
-              {user ? <p className="text-[12px] text-app-gray-400">@{user.role.toLowerCase()}</p> : null}
+          ) : (
+            <div className="flex items-center gap-3">
+              <div aria-hidden="true" className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-[14px] font-bold text-app-gray-700">
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-semibold text-app-gray-900">
+                  {user?.username ?? "로그인 확인 중…"}
+                </p>
+                {user ? <p className="text-[12px] text-app-gray-400">@{user.role.toLowerCase()}</p> : null}
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={!authenticated || logout.isPending}
+                aria-label="로그아웃"
+                title="로그아웃"
+                className="rounded-lg p-2.5 text-app-gray-400 hover:bg-app-gray-100 hover:text-app-gray-700 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
+              >
+                <LogOut aria-hidden="true" className="size-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={!authenticated || logout.isPending}
-              aria-label="로그아웃"
-              title="로그아웃"
-              className="rounded-lg p-2.5 text-app-gray-400 hover:bg-app-gray-100 hover:text-app-gray-700 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
-            >
-              <LogOut aria-hidden="true" className="size-4" />
-            </button>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -171,23 +193,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           )}
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              href="/notifications"
-              aria-label="알림"
-              aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
-              className={cn(
-                "relative flex size-9 items-center justify-center rounded-full shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
-                isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
-              )}
-            >
-              <Bell aria-hidden="true" className="size-4" />
-              {unreadBadgeLabel ? (
-                <UnreadBadge
-                  label={unreadBadgeLabel}
-                  className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px]"
-                />
-              ) : null}
-            </Link>
+            {guest ? (
+              <LoginLink className={cn(loginButton, "h-9 px-3.5 text-[13px]")}>로그인</LoginLink>
+            ) : (
+              <Link
+                href="/notifications"
+                aria-label="알림"
+                aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
+                className={cn(
+                  "relative flex size-9 items-center justify-center rounded-full shadow-raised focus-visible:outline-2 focus-visible:outline-app-blue",
+                  isActive(pathname, "/notifications") ? "bg-app-blue-light text-app-blue" : "bg-card text-app-gray-700",
+                )}
+              >
+                <Bell aria-hidden="true" className="size-4" />
+                {unreadBadgeLabel ? (
+                  <UnreadBadge
+                    label={unreadBadgeLabel}
+                    className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px]"
+                  />
+                ) : null}
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
@@ -206,6 +232,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="mx-auto min-w-0 w-full max-w-[1280px] flex-1 px-4 pt-4 pb-10 lg:px-8 lg:pt-8 lg:pb-12 xl:px-10">
           {linkedScope ? <LinkedSessionBanner scope={linkedScope} /> : null}
+          {guest ? <GuestBanner /> : null}
           {children}
         </main>
 
@@ -264,15 +291,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <DrawerTitle>더보기</DrawerTitle>
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-            <div className="mb-4 flex items-center gap-3 rounded-2xl bg-app-gray-100 p-4">
-              <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-full bg-card text-[15px] font-bold text-app-gray-700">
-                {initial}
+            {guest ? (
+              <div className="mb-4 rounded-2xl bg-app-gray-100 p-4">
+                <p className="text-[15px] font-bold text-app-gray-900">로그인하고 거래를 시작하세요</p>
+                <p className="mt-0.5 text-[12px] text-app-gray-500">아래 메뉴는 로그인한 뒤에 쓸 수 있어요</p>
+                <div className="mt-3 flex gap-2">
+                  <LoginLink onClick={() => setMoreOpen(false)} className={cn(loginButton, "h-10 flex-1 text-[14px]")}>
+                    로그인
+                  </LoginLink>
+                  <Link
+                    href="/signup"
+                    prefetch={false}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex h-10 flex-1 items-center justify-center rounded-xl bg-card text-[14px] font-bold text-app-gray-700 hover:bg-app-gray-50"
+                  >
+                    가입하기
+                  </Link>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-bold text-app-gray-900">{user?.username ?? "로그인 확인 중…"}</p>
-                <p className="truncate text-[12px] text-app-gray-500">{user?.user_id}</p>
+            ) : (
+              <div className="mb-4 flex items-center gap-3 rounded-2xl bg-app-gray-100 p-4">
+                <div aria-hidden="true" className="flex size-10 items-center justify-center rounded-full bg-card text-[15px] font-bold text-app-gray-700">
+                  {initial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-bold text-app-gray-900">{user?.username ?? "로그인 확인 중…"}</p>
+                  <p className="truncate text-[12px] text-app-gray-500">{user?.user_id}</p>
+                </div>
               </div>
-            </div>
+            )}
             <div className="space-y-1">
               {moreNav.map((item) => (
                 <Link
@@ -299,17 +346,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              disabled={!authenticated || logout.isPending}
-              className="mt-4 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-app-gray-100 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
-            >
-              <div className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-app-gray-600">
-                <LogOut className="size-[18px]" />
-              </div>
-              <p className="text-[15px] font-semibold text-app-gray-900">로그아웃</p>
-            </button>
+            {guest ? null : (
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={!authenticated || logout.isPending}
+                className="mt-4 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-app-gray-100 focus-visible:outline-2 focus-visible:outline-app-blue disabled:pointer-events-none disabled:opacity-40"
+              >
+                <div className="flex size-9 items-center justify-center rounded-full bg-app-gray-100 text-app-gray-600">
+                  <LogOut className="size-[18px]" />
+                </div>
+                <p className="text-[15px] font-semibold text-app-gray-900">로그아웃</p>
+              </button>
+            )}
           </div>
         </DrawerContent>
       </Drawer>

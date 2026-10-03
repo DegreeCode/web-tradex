@@ -42,7 +42,13 @@ import {
   fmtTime,
   toNumber,
 } from "@/lib/format";
-import { useCandles, useInstrument, useSymbolTradeStream, useSymbolTrades } from "@/lib/hooks";
+import {
+  useCandles,
+  useInstrument,
+  usePolledSymbolTicker,
+  useSymbolTradeStream,
+  useSymbolTrades,
+} from "@/lib/hooks";
 import { hasDistinctLastTrade, isAtCurveCeiling } from "@/lib/instruments";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import type { CandleInterval, Instrument } from "@/lib/types";
@@ -173,6 +179,7 @@ function SymbolDetail() {
   const candlesQuery = useCandles(canonicalSymbol, interval, 200, intervalHydrated);
 
   useSymbolTradeStream(intervalHydrated ? canonicalSymbol : undefined, 150);
+  usePolledSymbolTicker(canonicalSymbol, 150);
 
   if (!symbol) {
     return (

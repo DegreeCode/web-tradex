@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiData } from "./api";
 import { fmtPercentFromPPM, isDecimalInput, ppmFromPercent } from "./format";
+import { useSignedIn } from "./session-mode";
 
 export interface ListingEvaluationCriteria {
   min_external_holders: number;
@@ -66,9 +67,12 @@ export interface ExchangeInfo {
 }
 
 export function useExchangeInfo(poll = false) {
+  // Only signed-in screens act on these settings, so a guest never asks.
+  const signedIn = useSignedIn();
   return useQuery({
     queryKey: ["exchange-info"],
     queryFn: () => apiData<ExchangeInfo>("/api/v1/exchange/info"),
+    enabled: signedIn,
     // Settings change rarely; focus/reconnect refetch only once this is stale.
     staleTime: 60_000,
     // Only the app shell owns the timer; form observers share its response.
