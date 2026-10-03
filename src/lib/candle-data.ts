@@ -336,11 +336,13 @@ export function isCandleInterval(value: unknown): value is CandleInterval {
   return typeof value === "string" && CANDLE_INTERVALS.includes(value as CandleInterval);
 }
 
+/** `count` lets one entry stand for several trades (a guest's polled ticker delta). */
 export function applyTradeToCandlePage(
   page: CandlePage,
   interval: CandleInterval,
   limit: number,
   trade: PublicTrade,
+  count = 1,
 ): { status: "updated" | "recovery"; data?: Candle[] } {
   const timestamp = candleBucketTimestamp(trade.timestamp, interval);
   if (!timestamp || !trade.price || !trade.quantity || !trade.credit) return { status: "recovery" };
@@ -374,7 +376,7 @@ export function applyTradeToCandlePage(
           close: trade.price,
           volume_shares: trade.quantity,
           volume_credit: trade.credit,
-          trade_count: 1,
+          trade_count: count,
           synthetic: false,
         }
       : {
@@ -384,7 +386,7 @@ export function applyTradeToCandlePage(
           close: trade.price,
           volume_shares: addDecimal(existing.volume_shares, trade.quantity),
           volume_credit: addDecimal(existing.volume_credit, trade.credit),
-          trade_count: existing.trade_count + 1,
+          trade_count: existing.trade_count + count,
         };
   } else {
     data.push({
@@ -397,7 +399,7 @@ export function applyTradeToCandlePage(
       close: trade.price,
       volume_shares: trade.quantity,
       volume_credit: trade.credit,
-      trade_count: 1,
+      trade_count: count,
     });
   }
   const filled = fillCandleGaps(data, interval, limit);

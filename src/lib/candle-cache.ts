@@ -49,6 +49,7 @@ export function updateCachedCandleQueries(
   queryClient: QueryClient,
   symbol: string,
   trade: PublicTrade,
+  count = 1,
 ): { updated: boolean; needsRecovery: boolean } {
   let updated = false;
   let needsRecovery = false;
@@ -76,7 +77,7 @@ export function updateCachedCandleQueries(
     }
     const syncedThrough = (unknownPage as CandlePage).syncedThrough;
     if (syncedThrough && Date.parse(trade.timestamp) < Date.parse(syncedThrough)) continue;
-    const result = applyTradeToCandlePage(unknownPage as Page<Candle>, interval, limit, trade);
+    const result = applyTradeToCandlePage(unknownPage as Page<Candle>, interval, limit, trade, count);
     if (result.status === "recovery") {
       needsRecovery = true;
     } else if (result.data) {

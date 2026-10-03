@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { applyPolledTrades, applyTickers, fetchMe } from "../src/lib/hooks";
+import { updateCachedCandleQueries } from "../src/lib/candle-cache";
+import { applyTickers, fetchMe, tradeSinceTicker } from "../src/lib/hooks";
 import { isGuestRoute } from "../src/lib/navigation";
 import { loginHref } from "../src/lib/routes";
 import type { CandlePage } from "../src/lib/candle-data";
-import type { Instrument, PublicTrade, Ticker } from "../src/lib/types";
+import type { Instrument, Ticker } from "../src/lib/types";
 
 test("only the market screens open without signing in", () => {
   assert.ok(isGuestRoute("/market"));
@@ -56,65 +57,70 @@ test("a polled ticker page merges into the cache and keeps symbols outside the p
   assert.equal(instruments?.[1].name, "B");
 });
 
-const trade = (symbol: string, sequence: number, second: number): PublicTrade => ({
-  symbol, side: "BUY", price: "10", quantity: "1", credit: "10", fee: "0",
-  timestamp: new Date(Date.UTC(2026, 9, 3, 0, 0, second)).toISOString(), sequence,
+const polled = (overrides: Partial<Ticker>): Ticker => ({
+  ...ticker("AAA.M", "10"), trade_count: 4, volume_shares: "4", volume_credit: "40", ...overrides,
+});
+const at = (second: number) => new Date(Date.UTC(2026, 9, 3, 0, 0, second));
+
+test("a ticker poll turns the trades since the last poll into one candle entry", () => {
+  const before = polled({});
+  assert.equal(tradeSinceTicker(before, before, at(5)), null);
+
+  const since = tradeSinceTicker(before, polled({
+    last_price: "12.5", trade_count: 7, volume_shares: "6.25", volume_credit: "70",
+  }), at(5));
+  assert.equal(since?.count, 3);
+  assert.equal(since?.trade.price, "12.5");
+  assert.equal(since?.trade.quantity, "2.25");
+  assert.equal(since?.trade.credit, "30");
+  assert.equal(since?.trade.timestamp, at(5).toISOString());
+
+  // A new day restarts the totals, so all of today's counts are new.
+  const nextDay = tradeSinceTicker(before, polled({
+    window_start: "2026-10-04T00:00:00+09:00", trade_count: 1, volume_shares: "1", volume_credit: "9",
+  }), at(5));
+  assert.equal(nextDay?.count, 1);
+  assert.equal(nextDay?.trade.quantity, "1");
 });
 
-function candleQuery(symbol: string) {
+test("ticker updates move the loaded candle's close, range and volume without refetching", () => {
   const client = new QueryClient();
-  const queryKey = ["candles", symbol, "1m", 200];
+  const queryKey = ["candles", "AAA.M", "1m", 200];
   let fetches = 0;
   const page: CandlePage = {
     data: [{
-      symbol, interval: "1m", timestamp: "2026-10-03T00:00:00Z",
+      symbol: "AAA.M", interval: "1m", timestamp: "2026-10-03T00:00:00Z",
       open: "10", high: "10", low: "10", close: "10",
-      volume_shares: "1", volume_credit: "10", trade_count: 1,
+      volume_shares: "4", volume_credit: "40", trade_count: 4,
     }],
     page: { has_more: false, next_cursor: null },
-    syncedThrough: "2026-10-03T00:00:10Z",
+    syncedThrough: at(1).toISOString(),
   };
   client.setQueryData(queryKey, page);
   // An observer makes the query active, as a mounted chart does.
-  const observer = new QueryObserver(client, {
+  const unsubscribe = new QueryObserver(client, {
     queryKey,
     queryFn: async () => {
       fetches += 1;
       return page;
     },
     staleTime: Infinity,
-  });
-  const unsubscribe = observer.subscribe(() => {});
-  const count = () => client.getQueryData<CandlePage>(queryKey)?.data[0].trade_count;
-  return { client, count, fetches: () => fetches, unsubscribe };
-}
+  }).subscribe(() => {});
 
-test("polled trades extend the candle once, skipping ones the candles were fetched after", () => {
-  const symbol = "POLL.M";
-  const { client, count, fetches, unsubscribe } = candleQuery(symbol);
+  const first = tradeSinceTicker(polled({}), polled({
+    last_price: "12", trade_count: 6, volume_shares: "6", volume_credit: "64",
+  }), at(10))!;
+  updateCachedCandleQueries(client, "AAA.M", first.trade, first.count);
+  const second = tradeSinceTicker(polled({ last_price: "12", trade_count: 6, volume_shares: "6" }), polled({
+    last_price: "9", trade_count: 7, volume_shares: "7",
+  }), at(20))!;
+  updateCachedCandleQueries(client, "AAA.M", second.trade, second.count);
 
-  // Trade 1 predates the candle fetch; trade 2 came after it.
-  applyPolledTrades(client, symbol, [trade(symbol, 2, 20), trade(symbol, 1, 5)]);
-  assert.equal(count(), 2);
-
-  applyPolledTrades(client, symbol, [trade(symbol, 3, 30), trade(symbol, 2, 20), trade(symbol, 1, 5)]);
-  applyPolledTrades(client, symbol, [trade(symbol, 3, 30), trade(symbol, 2, 20)]);
-  assert.equal(count(), 3);
-  assert.equal(fetches(), 0);
-  unsubscribe();
-});
-
-test("a polled page that skips past the last applied trade refetches the candles", async () => {
-  const symbol = "GAP.M";
-  const { client, count, fetches, unsubscribe } = candleQuery(symbol);
-
-  applyPolledTrades(client, symbol, [trade(symbol, 2, 20)]);
-  assert.equal(count(), 2);
-  // Trades 3 and 4 fell off the page before it was polled again.
-  applyPolledTrades(client, symbol, [trade(symbol, 6, 40), trade(symbol, 5, 35)]);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  assert.equal(fetches(), 1);
-  assert.equal(count(), 1);
+  const [candle] = client.getQueryData<CandlePage>(queryKey)!.data;
+  assert.deepEqual(
+    [candle.open, candle.high, candle.low, candle.close, candle.volume_shares, candle.trade_count],
+    ["10", "12", "9", "9", "7", 7],
+  );
+  assert.equal(fetches, 0);
   unsubscribe();
 });

@@ -39,7 +39,7 @@ import {
   updateCachedCandleQueries,
   type CandleTradeRuntime,
 } from "./candle-cache";
-import { isPositiveDecimal } from "./format";
+import { addDecimal, compareDecimal, isPositiveDecimal } from "./format";
 import { currentDisclosures } from "./disclosure-cache";
 import { invalidateMarginQueries } from "./margin";
 import {
@@ -274,44 +274,69 @@ export function useInstrument(symbol: string | undefined) {
   });
 }
 
+/** Signed in only: a guest's symbol view follows its polled ticker instead. */
 export function useSymbolTrades(symbol: string | undefined, limit = 150) {
-  const queryClient = useQueryClient();
   const signedIn = useSignedIn();
   const publicStatus = useSocketStatus("public");
-  // Public snapshots/updates own this cache while connected, and a guest's
-  // polled ticker refetches it when a trade happens. Neither should race that
-  // with a timer, focus or mount refetch.
-  const pushed = publicStatus === "open" || !signedIn;
   return useQuery({
     queryKey: ["symbol-trades", symbol, limit],
-    queryFn: async () => {
-      const page = await apiPage<PublicTrade>(
+    queryFn: () =>
+      apiPage<PublicTrade>(
         `/api/v1/market/symbols/${encodeURIComponent(symbol ?? "")}/trades${buildQuery({ limit })}`,
-      );
-      if (!signedIn && symbol) applyPolledTrades(queryClient, symbol, page.data);
-      return page;
-    },
-    enabled: Boolean(symbol),
-    refetchInterval: pushed ? false : 5_000,
-    staleTime: pushed ? Infinity : 3_000,
-    refetchOnWindowFocus: !pushed,
-    refetchOnReconnect: !pushed,
-    refetchOnMount: !pushed,
+      ),
+    enabled: Boolean(symbol) && signedIn,
+    refetchInterval: publicStatus === "open" ? false : 5_000,
+    // Public snapshots/updates own this cache while connected. Focus and mount
+    // must not race that stream with a redundant REST response.
+    staleTime: publicStatus === "open" ? Infinity : 3_000,
+    refetchOnWindowFocus: publicStatus !== "open",
+    refetchOnReconnect: publicStatus !== "open",
+    refetchOnMount: publicStatus !== "open",
   });
 }
 
-// The last polled ticker state per symbol, so a remounted detail view still
-// notices trades that happened while it was away.
-const polledTickerMarks = new Map<string, string>();
+/**
+ * What a guest's ticker poll says traded since the previous poll, as one trade
+ * at the last price carrying the volume in between, or null when nothing did.
+ * The ticker's day totals restart with a new window.
+ */
+export function tradeSinceTicker(
+  previous: Ticker,
+  current: Ticker,
+  at: Date,
+): { trade: PublicTrade; count: number } | null {
+  const sameWindow = previous.window_start === current.window_start;
+  const count = current.trade_count - (sameWindow ? previous.trade_count : 0);
+  if (count <= 0 || !current.last_price) return null;
+  const since = (now: string, before: string) => {
+    if (!sameWindow) return now;
+    const delta = addDecimal(now, before.startsWith("-") ? before.slice(1) : `-${before}`);
+    return compareDecimal(delta, "0") > 0 ? delta : "0";
+  };
+  return {
+    count,
+    trade: {
+      symbol: current.symbol,
+      side: "BUY",
+      price: current.last_price,
+      quantity: since(current.volume_shares, previous.volume_shares),
+      credit: since(current.volume_credit, previous.volume_credit),
+      fee: "0",
+      timestamp: at.toISOString(),
+      sequence: current.trade_count,
+    },
+  };
+}
 
 /**
- * A guest's symbol view has no stream: its ticker is polled every 5 seconds,
- * and trades (and through them the candles) are refetched only when the
- * ticker shows a new trade, so a quiet symbol costs one request per poll.
+ * A guest's symbol view has no stream and makes no trade or disclosure
+ * requests: its ticker is polled every 5 seconds, and each poll that shows new
+ * trades moves the candles loaded on entry (their close, high/low and volume).
  */
-export function usePolledSymbolTicker(symbol: string | undefined, limit = 150) {
+export function usePolledSymbolTicker(symbol: string | undefined) {
   const queryClient = useQueryClient();
   const signedIn = useSignedIn();
+  const previous = useRef<Ticker | null>(null);
   const { data: ticker } = useQuery({
     queryKey: ["ticker", symbol],
     queryFn: async () => {
@@ -322,20 +347,22 @@ export function usePolledSymbolTicker(symbol: string | undefined, limit = 150) {
     enabled: Boolean(symbol) && !signedIn,
     refetchInterval: GUEST_TICKER_POLL_MS,
     staleTime: GUEST_TICKER_POLL_MS,
+    // Each visit starts from a fresh ticker, the baseline for the candles it loads.
+    gcTime: 0,
   });
 
   useEffect(() => {
-    if (!symbol || !ticker || signedIn) return;
-    const mark = `${ticker.window_start}:${ticker.trade_count}:${ticker.last_price}`;
-    const previous = polledTickerMarks.get(symbol);
-    polledTickerMarks.set(symbol, mark);
-    if (previous === undefined || previous === mark) return;
-    // Joins a trades fetch that is already running (e.g. the first one on mount).
-    void queryClient.invalidateQueries(
-      { queryKey: ["symbol-trades", symbol, limit], exact: true },
-      { cancelRefetch: false },
-    );
-  }, [limit, queryClient, signedIn, symbol, ticker]);
+    previous.current = null;
+  }, [symbol, signedIn]);
+
+  useEffect(() => {
+    if (!symbol || !ticker || signedIn || ticker.symbol !== symbol) return;
+    const before = previous.current;
+    previous.current = ticker;
+    const since = before ? tradeSinceTicker(before, ticker, new Date()) : null;
+    // A candle the update can't merge into stays as it is: a guest never refetches candles.
+    if (since) updateCachedCandleQueries(queryClient, symbol, since.trade, since.count);
+  }, [queryClient, signedIn, symbol, ticker]);
 }
 
 export function useOrders(limit = PAGE_SIZE, enabled = true) {
@@ -816,6 +843,7 @@ export function useCandles(
   enabled = true,
 ) {
   const queryClient = useQueryClient();
+  const signedIn = useSignedIn();
   const queryKey = ["candles", symbol, interval, limit] as const;
   const query = useQuery({
     queryKey,
@@ -869,12 +897,14 @@ export function useCandles(
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === symbol ? previousData : undefined,
     // Re-entering an interval or returning to the tab catches up the cached tail.
-    // There is no polling; trades keep an already mounted chart live.
-    staleTime: 0,
+    // There is no polling; trades keep an already mounted chart live. A guest
+    // loads candles once per visit and its polled ticker moves them after that.
+    staleTime: signedIn ? 0 : Infinity,
+    ...(signedIn ? {} : { gcTime: 0 }),
     refetchInterval: false,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchOnReconnect: "always",
+    refetchOnMount: signedIn ? "always" : false,
+    refetchOnWindowFocus: signedIn ? "always" : false,
+    refetchOnReconnect: signedIn ? "always" : false,
     retry: false,
   });
 
@@ -910,8 +940,9 @@ export function useCandles(
   });
   const olderIsCurrent = older.variables?.symbol === symbol && older.variables?.interval === interval;
   const isLoadingOlder = olderIsCurrent && older.isPending;
+  // Older history is a signed-in feature; a guest's chart stops at its first load.
   const hasOlder = Boolean(
-    enabled && !query.isPlaceholderData && !query.isFetching &&
+    signedIn && enabled && !query.isPlaceholderData && !query.isFetching &&
     query.data?.page.has_more && query.data.page.next_cursor,
   );
   const loadOlder = () => {
@@ -954,12 +985,14 @@ export async function loadDisclosurePage(
 export function useDisclosures(options: { symbol?: string; type?: string; limit?: number; enabled?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { symbol, type, limit = 30, enabled = true } = options;
+  const signedIn = useSignedIn();
   return useInfiniteQuery({
     queryKey: ["disclosures", symbol ?? "all", type ?? "all", limit],
     queryFn: ({ pageParam, signal }) => loadDisclosurePage(queryClient, { symbol, type, limit, cursor: pageParam, signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
-    enabled,
+    // Disclosures are left out of guest browsing.
+    enabled: enabled && signedIn,
     staleTime: Infinity,
     refetchInterval: false,
     // Relisting invalidates inactive lists, which reload on their next visit.
@@ -1397,31 +1430,6 @@ function awaitSnapshot(queryClient: QueryClient, symbol: string, runtime: Candle
   runtime.seenSequences.clear();
   runtime.pendingSequences.clear();
   requestCandleRecovery(queryClient, symbol, runtime, true);
-}
-
-/**
- * Feeds a polled trades page into the candles the way stream updates would.
- * Trades already applied are skipped by sequence, and ones the candle page was
- * fetched after are skipped by time. A page that no longer reaches the last
- * applied trade missed some, so the candle tail is refetched instead.
- */
-export function applyPolledTrades(queryClient: QueryClient, symbol: string, trades: PublicTrade[]): void {
-  const runtime = candleRuntime(symbol);
-  const previous = runtime.lastSequence;
-  const fresh = trades
-    .filter((trade) => Number.isSafeInteger(trade.sequence) && (previous === undefined || trade.sequence > previous))
-    .sort((a, b) => a.sequence - b.sequence);
-  if (fresh.length === 0) return;
-  runtime.lastSequence = fresh[fresh.length - 1].sequence;
-  if (previous !== undefined && fresh[0].sequence !== previous + 1) {
-    requestCandleRecovery(queryClient, symbol, runtime);
-    return;
-  }
-  let needsRecovery = false;
-  for (const trade of fresh) {
-    if (updateCachedCandleQueries(queryClient, symbol, trade).needsRecovery) needsRecovery = true;
-  }
-  if (needsRecovery) requestCandleRecovery(queryClient, symbol, runtime);
 }
 
 export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {

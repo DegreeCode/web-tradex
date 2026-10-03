@@ -25,6 +25,7 @@ import {
   SkeletonRows,
   Surface,
 } from "@/components/primitives";
+import { GuestDetailsNotice } from "@/components/guest";
 import { ResponsiveOrderForm } from "@/components/responsive-order-form";
 import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
@@ -170,7 +171,9 @@ function LineModeIcon({ rising }: { rising: boolean }) {
 function SymbolDetail() {
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol")?.trim() ?? "";
-  const { user } = useAuth();
+  const { user, status } = useAuth();
+  // A guest gets the chart and ticker only: no trades or disclosures requests.
+  const guest = status === "anonymous";
   const { interval, updateInterval, hydrated: intervalHydrated } = useCandleIntervalPreference();
   const [chartSeriesType, setChartSeriesType] = useState<ChartSeriesType>("candle");
   const instrumentQuery = useInstrument(symbol || undefined);
@@ -179,7 +182,7 @@ function SymbolDetail() {
   const candlesQuery = useCandles(canonicalSymbol, interval, 200, intervalHydrated);
 
   useSymbolTradeStream(intervalHydrated ? canonicalSymbol : undefined, 150);
-  usePolledSymbolTicker(canonicalSymbol, 150);
+  usePolledSymbolTicker(canonicalSymbol);
 
   if (!symbol) {
     return (
@@ -456,43 +459,45 @@ function SymbolDetail() {
         <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100dvh-3rem)] lg:self-start lg:overflow-y-auto">
           <ResponsiveOrderForm instrument={instrument} />
 
-          <Surface className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col">
-            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-app-gray-900">
-              최근 체결
-            </h2>
-            {tradesQuery.isLoading ? (
-              <SkeletonRows rows={3} />
-            ) : tradesQuery.isError && trades.length === 0 ? (
-              <ErrorBlock message={errorMessage(tradesQuery.error)} onRetry={() => void tradesQuery.refetch()} />
-            ) : trades.length === 0 ? (
-              <p className="mt-2 text-[13px] text-app-gray-400">아직 체결이 없어요. 첫 거래의 주인이 되어보세요.</p>
-            ) : (
-              <div className="mt-2 divide-y divide-app-gray-100 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-                {trades.slice(0, 12).map((trade) => (
-                  <div
-                    key={`${trade.sequence}-${trade.timestamp}`}
-                    className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-x-3 py-2"
-                  >
-                    <SideBadge side={trade.side} />
-                    <span className="numeric min-w-0 truncate text-[13px] font-semibold text-app-gray-900">
-                      {fmtPrice(trade.price)}
-                    </span>
-                    <span
-                      title={`${fmtQuantity(trade.quantity)}주`}
-                      className="numeric text-right text-[13px] text-app-gray-700"
+          {guest ? null : (
+            <Surface className="lg:flex lg:min-h-56 lg:flex-1 lg:flex-col">
+              <h2 className="text-[17px] font-bold tracking-[-0.02em] text-app-gray-900">
+                최근 체결
+              </h2>
+              {tradesQuery.isLoading ? (
+                <SkeletonRows rows={3} />
+              ) : tradesQuery.isError && trades.length === 0 ? (
+                <ErrorBlock message={errorMessage(tradesQuery.error)} onRetry={() => void tradesQuery.refetch()} />
+              ) : trades.length === 0 ? (
+                <p className="mt-2 text-[13px] text-app-gray-400">아직 체결이 없어요. 첫 거래의 주인이 되어보세요.</p>
+              ) : (
+                <div className="mt-2 divide-y divide-app-gray-100 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+                  {trades.slice(0, 12).map((trade) => (
+                    <div
+                      key={`${trade.sequence}-${trade.timestamp}`}
+                      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-x-3 py-2"
                     >
-                      {fmtCompactQuantity(trade.quantity)}주
-                    </span>
-                    <span className="numeric w-16 text-right text-[11px] text-app-gray-400">{fmtTime(trade.timestamp)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Surface>
+                      <SideBadge side={trade.side} />
+                      <span className="numeric min-w-0 truncate text-[13px] font-semibold text-app-gray-900">
+                        {fmtPrice(trade.price)}
+                      </span>
+                      <span
+                        title={`${fmtQuantity(trade.quantity)}주`}
+                        className="numeric text-right text-[13px] text-app-gray-700"
+                      >
+                        {fmtCompactQuantity(trade.quantity)}주
+                      </span>
+                      <span className="numeric w-16 text-right text-[11px] text-app-gray-400">{fmtTime(trade.timestamp)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Surface>
+          )}
         </div>
 
         <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-2">
-          <SymbolDisclosures symbol={instrument.symbol} />
+          {guest ? <GuestDetailsNotice /> : <SymbolDisclosures symbol={instrument.symbol} />}
 
           {user ? (
             isManager ? (
