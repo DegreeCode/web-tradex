@@ -23,13 +23,13 @@ export function ErrorFallback({ error, reset }: { error: Error & { digest?: stri
         <button
           type="button"
           onClick={reset}
-          className="h-11 rounded-xl bg-app-blue px-5 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+          className="h-11 rounded-xl bg-app-blue px-5 text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
         >
           다시 시도
         </button>
         <Link
           href="/"
-          className="inline-flex h-11 items-center rounded-xl bg-app-gray-100 px-5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200"
+          className="inline-flex h-11 items-center rounded-xl bg-app-gray-100 px-5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 pressable"
         >
           홈으로
         </Link>

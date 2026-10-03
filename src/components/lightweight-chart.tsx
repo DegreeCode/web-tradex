@@ -105,7 +105,6 @@ function useHoldingPriceLine(
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
       axisLabelVisible: true,
-      title: "평단",
     });
     // Chart teardown removes its lines; a recreated chart owns a new series.
     lineRef.current = { series, line };

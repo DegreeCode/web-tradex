@@ -59,7 +59,7 @@ export default function AccountsPage() {
               type="button"
               onClick={handleCreate}
               disabled={createAccount.isPending}
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
+              className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50 pressable"
             >
               <Plus aria-hidden="true" className="size-4" />
               {createAccount.isPending ? "만드는 중…" : "계좌 추가"}

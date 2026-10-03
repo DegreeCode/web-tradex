@@ -80,7 +80,7 @@ export default function NotificationsPage() {
           type="button"
           onClick={filter === "UNREAD" ? handleMarkLoaded : handleMarkAll}
           disabled={notifications.isPending || markAll.isPending || markBatch.isPending || (filter === "UNREAD" && unreadRows.length === 0)}
-          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-app-gray-100 px-3.5 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl bg-app-gray-100 px-3.5 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50 pressable"
         >
           <CheckCheck aria-hidden="true" className="size-4" />
           {filter === "UNREAD" ? "목록 읽음" : "모두 읽음"}
@@ -190,7 +190,7 @@ function NotificationCard({
       onClick={() => onOpen(item)}
       aria-label={`${presentation.title}, ${item.read ? "읽음" : "안 읽음"}`}
       aria-haspopup="dialog"
-      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-card hover:bg-app-gray-50 ${
+      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-card transition-colors hover:bg-app-gray-50 ${
         item.read
           ? "bg-card"
           : "border border-app-blue/15 bg-app-blue-faint"

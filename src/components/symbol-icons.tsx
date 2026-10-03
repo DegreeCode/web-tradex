@@ -72,7 +72,7 @@ function IconPreview({ request }: { request: IconRequest }) {
           setOpen(!open);
           setFailed(false);
         }}
-        className="text-[12px] font-semibold text-app-blue hover:text-app-blue-dark"
+        className="text-[12px] font-semibold text-app-blue"
       >
         {open ? "미리보기 닫기" : "제출 이미지 확인"}
       </button>
@@ -90,7 +90,7 @@ function IconPreview({ request }: { request: IconRequest }) {
             width={64}
             height={64}
             onError={() => setFailed(true)}
-            className="mt-2 animate-reveal rounded-lg"
+            className="mt-2 rounded-lg"
           />
         ))}
     </div>

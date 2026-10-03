@@ -132,7 +132,7 @@ function LinkApproval() {
             <Button
               type="submit"
               disabled={lookingUp}
-              className="h-11 rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+              className="h-11 rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
             >
               {lookingUp ? "확인 중…" : "확인"}
             </Button>
@@ -392,7 +392,7 @@ function ApprovalForm({
             type="button"
             onClick={() => void approve()}
             disabled={busy !== null || problem !== null}
-            className="h-12 rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover"
+            className="h-12 rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover pressable"
           >
             {busy === "approve" ? "확인 중…" : "패스키로 승인"}
           </Button>

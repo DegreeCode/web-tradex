@@ -67,7 +67,7 @@ export default function SupportPage() {
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-app-blue px-3.5 text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
           >
             <Plus aria-hidden="true" className="size-4" />
             문의하기
@@ -97,7 +97,7 @@ export default function SupportPage() {
               type="button"
               onClick={() => setTicket(inquiry.ticket)}
               aria-haspopup="dialog"
-              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-card hover:bg-app-gray-50"
+              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-card transition-colors hover:bg-app-gray-50"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -245,7 +245,7 @@ function CreateInquiryForm({ onDone }: { onDone: (ticket: string) => void }) {
           type="button"
           onClick={submit}
           disabled={createInquiry.isPending}
-          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
         >
           {createInquiry.isPending ? "접수 중…" : "문의 접수"}
         </button>
@@ -360,7 +360,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
               type="button"
               onClick={submitReply}
               disabled={sendReply.isPending}
-              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
             >
               <Send aria-hidden="true" className="size-4" />
               {sendReply.isPending ? "전송 중…" : "메시지 보내기"}
@@ -375,7 +375,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
                   })
                 }
                 disabled={resolve.isPending}
-                className="h-11 rounded-xl bg-app-gray-100 px-4 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-40"
+                className="h-11 rounded-xl bg-app-gray-100 px-4 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-40 pressable"
               >
                 해결됨
               </button>

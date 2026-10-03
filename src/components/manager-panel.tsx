@@ -112,11 +112,7 @@ export function ManagerTransferInbox({
           요청 확인
         </button>
       </div>
-      {open ? (
-        <div className="animate-reveal">
-          <ManagerTransferInboxResults instrument={instrument} userId={userId} />
-        </div>
-      ) : null}
+      {open ? <ManagerTransferInboxResults instrument={instrument} userId={userId} /> : null}
     </div>
   );
 }
@@ -284,7 +280,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
           !isPositiveDecimal(deposit) ||
           (data ? !data.accepted : false)
         }
-        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
       >
         {issuance.isPending ? "발행 중…" : "추가 발행하기"}
       </Button>
@@ -360,7 +356,7 @@ function MetadataSection({ instrument }: { instrument: Instrument }) {
         type="button"
         onClick={submit}
         disabled={update.isPending}
-        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
       >
         {update.isPending ? "저장 중…" : "저장하기"}
       </Button>
@@ -428,7 +424,7 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
         type="button"
         onClick={submit}
         disabled={createRequest.isPending}
-        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+        className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
       >
         {createRequest.isPending ? "요청 중…" : "이전 요청 보내기"}
       </Button>

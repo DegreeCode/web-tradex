@@ -45,7 +45,7 @@ function SidebarLink({ item, active, badge }: { item: NavItem; active: boolean; 
       href={item.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue",
+        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue",
         active ? "bg-app-blue-light text-app-blue-dark" : "text-app-gray-600 hover:bg-app-gray-100 active:bg-app-gray-200",
       )}
     >
@@ -60,10 +60,7 @@ function UnreadBadge({ label, className }: { label: string; className?: string }
   return (
     <span
       aria-label={`안 읽은 알림 ${label}개`}
-      className={cn(
-        "rounded-full bg-app-red px-1.5 py-0.5 text-[11px] leading-none font-bold text-white motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200 motion-safe:ease-fluid",
-        className,
-      )}
+      className={cn("rounded-full bg-app-red px-1.5 py-0.5 text-[11px] leading-none font-bold text-white", className)}
     >
       {label}
     </span>
@@ -100,7 +97,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const initial = user?.username.slice(0, 1).toUpperCase() ?? "⋯";
   const loginButton =
-    "flex items-center justify-center gap-1.5 rounded-xl bg-app-blue font-bold text-white hover:bg-app-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-blue";
+    "flex items-center justify-center gap-1.5 rounded-xl bg-app-blue font-bold text-white hover:bg-app-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-blue pressable";
   const currentTitle =
     [...PRIMARY_NAV, ...MORE_NAV].find((item) => isActive(pathname, item.href))?.label ?? "";
   const moreActive = moreNav.some((item) => isActive(pathname, item.href));
@@ -236,9 +233,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="mx-auto min-w-0 w-full max-w-[1280px] flex-1 px-4 pt-4 pb-10 lg:px-8 lg:pt-8 lg:pb-12 xl:px-10">
           {linkedScope ? <LinkedSessionBanner scope={linkedScope} /> : null}
           {guest ? <GuestBanner /> : null}
-          <div key={pathname} className="animate-page-in">
-            {children}
-          </div>
+          {children}
         </main>
 
         {/* The bottom padding clears the mobile tab bar and the symbol page's order bar. */}
@@ -257,11 +252,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   href={item.href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold focus-visible:outline-2 focus-visible:outline-app-blue focus-visible:-outline-offset-2",
+                    "flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-app-blue focus-visible:-outline-offset-2",
                     active ? "text-app-gray-900" : "text-app-gray-400",
                   )}
                 >
-                  <item.icon aria-hidden="true" className={cn("size-5 transition-colors", active && "text-app-blue")} />
+                  <item.icon aria-hidden="true" className={cn("size-5", active && "text-app-blue")} />
                   {item.label}
                 </Link>
               );
@@ -279,7 +274,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
             >
               <span className={cn(
-                "flex size-5 items-center justify-center rounded-full text-[10px] font-bold transition-colors",
+                "flex size-5 items-center justify-center rounded-full text-[10px] font-bold",
                 moreActive || moreOpen ? "bg-app-blue-light text-app-blue" : "bg-app-gray-100 text-app-gray-600",
               )}>
                 {initial}

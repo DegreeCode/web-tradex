@@ -77,25 +77,6 @@
   --shadow-raised: 0 1px 2px 0 rgba(25, 31, 40, 0.06);
   --animate-price-flash-up: price-flash-up 0.9s ease-out;
   --animate-price-flash-down: price-flash-down 0.9s ease-out;
-  /* The drawer's settle curve, shared by every entrance so motion feels like one system. */
-  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
-  /* Content that appears in place (expanded panels, revealed results). */
-  --animate-reveal: reveal 0.22s var(--ease-fluid);
-  /* A screen's content when the route changes. Opacity only: a translate would
-     briefly re-anchor the page's position: fixed bars to the wrapper. */
-  --animate-page-in: page-in 0.24s var(--ease-fluid);
-
-  @keyframes reveal {
-    from {
-      opacity: 0;
-      translate: 0 -4px;
-    }
-  }
-  @keyframes page-in {
-    from {
-      opacity: 0;
-    }
-  }
 
   @keyframes price-flash-up {
     from {
@@ -227,6 +208,9 @@
   }
   html {
     @apply font-sans antialiased;
+    /* Short and long screens keep the same width, so centered toasts and the
+       layout don't shift sideways when a scrollbar appears. */
+    scrollbar-gutter: stable;
     -webkit-tap-highlight-color: transparent;
   }
   body {
@@ -236,19 +220,13 @@
   button {
     @apply cursor-pointer;
   }
-  /* Controls ease between hover, selected and disabled states instead of
-     snapping. Zero specificity, so any transition-* utility still wins. */
-  :where(a, button, summary, [role="button"], [role="switch"]) {
-    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke,
-      opacity, box-shadow, scale, translate;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Controls fade between hover, selected and disabled colors instead of
+     snapping. Color only: nothing moves. Zero specificity, so any transition-*
+     utility still wins. */
+  :where(a, button, summary, [role="button"]) {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow;
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
     transition-duration: 150ms;
-  }
-  /* Touch screens never see hover styles, so a press gives the feedback instead. */
-  @media (prefers-reduced-motion: no-preference) {
-    :where(button:not(:disabled), [role="button"]:not([aria-disabled="true"])):active {
-      scale: 0.98;
-    }
   }
   button:disabled {
     @apply cursor-not-allowed;
@@ -273,10 +251,15 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --animate-reveal: none;
-    --animate-page-in: none;
+/* Press feedback for a screen's main action buttons (not rows, cards or chips). */
+@utility pressable {
+  transition-property: color, background-color, border-color, opacity, box-shadow, scale;
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  transition-duration: 150ms;
+  @media (prefers-reduced-motion: no-preference) {
+    &:active:not(:disabled) {
+      scale: 0.97;
+    }
   }
 }
 

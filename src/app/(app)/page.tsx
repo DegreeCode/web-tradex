@@ -152,7 +152,7 @@ export default function HomePage() {
               key={action.href}
               href={action.href}
               prefetch={false}
-              className="flex flex-col items-center gap-1.5 rounded-xl py-3 hover:bg-app-gray-50 active:bg-app-gray-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue"
+              className="flex flex-col items-center gap-1.5 rounded-xl py-3 transition-colors hover:bg-app-gray-50 active:bg-app-gray-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue"
             >
               <span className="flex size-10 items-center justify-center rounded-full bg-app-blue-light text-app-blue-dark">
                 <action.icon aria-hidden="true" className="size-[18px]" />

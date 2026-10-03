@@ -107,7 +107,7 @@ export default function TransfersPage() {
             type="button"
             onClick={() => setSendOpen(true)}
             disabled={!transferAccess.allowed}
-            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+            className="flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
           >
             <Send aria-hidden="true" className="size-4" />
             송금하기

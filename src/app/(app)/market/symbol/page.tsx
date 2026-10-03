@@ -263,7 +263,7 @@ function SymbolDetail() {
             <Surface className="space-y-4">
               <h2 className="text-[17px] font-bold text-app-gray-900">주문</h2>
               <p role="status" className="text-[13px] text-app-gray-500">{failed ? "종목 정보를 확인한 뒤 주문할 수 있어요" : "종목 정보를 확인하고 있어요"}</p>
-              <button type="button" disabled className="h-12 w-full rounded-xl bg-app-gray-100 text-[15px] font-semibold text-app-gray-400">주문 준비 중</button>
+              <button type="button" disabled className="h-12 w-full rounded-xl bg-app-gray-100 text-[15px] font-semibold text-app-gray-400 pressable">주문 준비 중</button>
             </Surface>
             <Surface>
               <h2 className="mb-2 text-[17px] font-bold text-app-gray-900">최근 체결</h2>

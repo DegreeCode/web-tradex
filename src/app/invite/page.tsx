@@ -76,7 +76,7 @@ export default function InvitationPage() {
           <Button
             type="submit"
             disabled={busy || !token.trim() || !agreed}
-            className="h-auto min-h-12 w-full rounded-xl bg-app-blue py-3 text-[15px] font-bold whitespace-normal text-white hover:bg-app-blue-hover"
+            className="h-auto min-h-12 w-full rounded-xl bg-app-blue py-3 text-[15px] font-bold whitespace-normal text-white hover:bg-app-blue-hover pressable"
           >
             {busy ? "확인 중…" : "초대 수락하고 패스키 등록"}
           </Button>

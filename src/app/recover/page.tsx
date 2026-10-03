@@ -85,7 +85,7 @@ export default function RecoverPage() {
               type="button"
               onClick={registerNewPasskey}
               disabled={busy}
-              className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover"
+              className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover pressable"
             >
               {busy ? "패스키 생성 중…" : "새 패스키 등록하기"}
             </Button>
@@ -106,7 +106,7 @@ export default function RecoverPage() {
         </p>
         <Button
           render={<Link href="/login" prefetch={false} />}
-          className="mt-5 h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+          className="mt-5 h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
         >
           로그인으로 이동
         </Button>
