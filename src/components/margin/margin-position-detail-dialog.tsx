@@ -265,7 +265,7 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => setCollateralOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark hover:opacity-80"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark hover:opacity-80 pressable"
                 >
                   <Plus aria-hidden="true" className="size-4" />
                   담보 추가
@@ -275,7 +275,7 @@ export function MarginPositionDetailDialog({
                   onClick={() => setReductionOpen(true)}
                   disabled={reductionBlocked}
                   title={reductionBlocked ? "유지 기준 이하에서는 전액 종료만 가능해요" : undefined}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-gray-300 bg-card py-2.5 text-[13px] font-bold text-app-gray-800 hover:bg-app-gray-50 disabled:cursor-not-allowed disabled:bg-app-gray-100 disabled:text-app-gray-400"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-gray-300 bg-card py-2.5 text-[13px] font-bold text-app-gray-800 hover:bg-app-gray-50 disabled:cursor-not-allowed disabled:bg-app-gray-100 disabled:text-app-gray-400 pressable"
                 >
                   <RefreshCw aria-hidden="true" className="size-4" />
                   부분 정산
@@ -283,7 +283,7 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => setClosureOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white hover:opacity-90"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white hover:opacity-90 pressable"
                 >
                   <XCircle aria-hidden="true" className="size-4" />
                   전액 종료

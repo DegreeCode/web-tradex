@@ -257,7 +257,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
           type="button"
           onClick={submit}
           disabled={!transferAccess.allowed || createTransfer.isPending || !allowed || !portfolio.data || accountsQuery.isError || portfolio.isError}
-          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:opacity-90 disabled:opacity-40"
+          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:opacity-90 disabled:opacity-40 pressable"
         >
           {createTransfer.isPending ? "보내는 중…" : "송금하기"}
         </button>

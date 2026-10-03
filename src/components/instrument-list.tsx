@@ -68,7 +68,7 @@ export const InstrumentRow = memo(function InstrumentRow({
       href={symbolHref(instrument.symbol)}
       prefetch={false}
       className={cn(
-        "grid min-w-0 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-app-gray-50 active:bg-app-gray-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue sm:grid-cols-[40px_minmax(0,1fr)_minmax(0,auto)_16px]",
+        "grid min-w-0 grid-cols-[40px_minmax(0,1fr)_16px] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors hover:bg-app-gray-50 active:bg-app-gray-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-blue sm:grid-cols-[40px_minmax(0,1fr)_minmax(0,auto)_16px]",
         twoColumn && "xl:border-b xl:border-app-gray-100 xl:px-4 xl:odd:border-r",
       )}
     >

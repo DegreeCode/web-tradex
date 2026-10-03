@@ -110,7 +110,7 @@ export default function SignupPage() {
               type="button"
               onClick={finish}
               disabled={!savedConfirmed}
-              className="mt-4 h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+              className="mt-4 h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
             >
               시작하기
             </Button>
@@ -154,7 +154,7 @@ export default function SignupPage() {
           <Button
             type="submit"
             disabled={busy || status === "loading" || !agreed}
-            className="mt-4 h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover"
+            className="mt-4 h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover pressable"
           >
             {busy ? "패스키 생성 중…" : status === "loading" ? "로그인 상태 확인 중…" : "패스키로 가입하기"}
           </Button>

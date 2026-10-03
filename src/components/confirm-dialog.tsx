@@ -45,7 +45,7 @@ export function ConfirmDialog({
             type="button"
             onClick={() => onOpenChange(false)}
             disabled={pending}
-            className="h-11 flex-1 rounded-xl bg-app-gray-100 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+            className="h-11 flex-1 rounded-xl bg-app-gray-100 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50 pressable"
           >
             취소
           </button>
@@ -54,7 +54,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={pending}
             className={cn(
-              "h-11 flex-1 rounded-xl text-[14px] font-bold text-white hover:opacity-90 disabled:opacity-50",
+              "h-11 flex-1 rounded-xl text-[14px] font-bold text-white hover:opacity-90 disabled:opacity-50 pressable",
               destructive ? "bg-app-red" : "bg-app-blue",
             )}
           >

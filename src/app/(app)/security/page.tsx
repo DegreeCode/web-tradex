@@ -267,7 +267,7 @@ export default function SecurityPage() {
             type="button"
             onClick={() => setConfirmRotate(true)}
             disabled={rotate.isPending}
-            className="mt-3 h-11 w-full rounded-xl bg-app-gray-100 text-[14px] font-bold text-app-gray-800 hover:bg-app-gray-200 disabled:opacity-50"
+            className="mt-3 h-11 w-full rounded-xl bg-app-gray-100 text-[14px] font-bold text-app-gray-800 hover:bg-app-gray-200 disabled:opacity-50 pressable"
           >
             {rotate.isPending ? "재발급 중…" : "복구키 재발급"}
           </button>
@@ -283,7 +283,7 @@ export default function SecurityPage() {
           type="button"
           onClick={handleLogout}
           disabled={logout.isPending}
-          className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-app-red-light text-[14px] font-bold text-app-red hover:opacity-90 disabled:opacity-50"
+          className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-app-red-light text-[14px] font-bold text-app-red hover:opacity-90 disabled:opacity-50 pressable"
         >
           <LogOut aria-hidden="true" className="size-4" />
           {logout.isPending ? "로그아웃 중…" : "로그아웃"}
@@ -313,7 +313,7 @@ export default function SecurityPage() {
             type="button"
             onClick={() => setRecoveryKeys(null)}
             disabled={!recoverySaved}
-            className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40"
+            className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
           >
             확인
           </button>

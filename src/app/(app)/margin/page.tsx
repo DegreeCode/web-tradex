@@ -82,7 +82,7 @@ function MarginContent() {
             onClick={() => void positionsQuery.refetch()}
             disabled={!effectiveAccountId || positionsQuery.isRefetching}
             aria-label="새로고침"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:opacity-50"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:opacity-50 pressable"
           >
             <RefreshCw
               aria-hidden="true"

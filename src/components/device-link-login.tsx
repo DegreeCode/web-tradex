@@ -179,7 +179,7 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
         <Button
           type="button"
           onClick={restart}
-          className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+          className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
         >
           새 코드 받기
         </Button>

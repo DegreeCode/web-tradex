@@ -23,7 +23,7 @@ export function HoldingRow({ holding }: { holding: HoldingView }) {
     <Link
       href={symbolHref(position.symbol)}
       prefetch={false}
-      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-app-gray-50 active:bg-app-gray-100"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors hover:bg-app-gray-50 active:bg-app-gray-100"
     >
       <InstrumentAvatar symbol={position.symbol} iconUrl={holding.instrument?.icon_url} />
       <div className="min-w-0 flex-1">

@@ -15,7 +15,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react";
-import { ErrorBlock, InstrumentStateChip, Surface } from "@/components/primitives";
+import { Collapse, ErrorBlock, InstrumentStateChip, Surface } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
@@ -409,7 +409,7 @@ export function MarginCreateForm({
           onApplyMaxCollateral={setCollateral}
         />
 
-        <div className="space-y-2">
+        <div>
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
@@ -419,11 +419,11 @@ export function MarginCreateForm({
             고급 설정
             <span className="flex items-center gap-1 font-medium text-app-gray-400">
               {slippageSummary(slippageSettings, tradeSide, exchangeInfo?.trade.default_slippage_ppm, fmtPrice)}
-              <ChevronDown className={`size-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+              <ChevronDown className={`size-4 transition-transform duration-250 ${showAdvanced ? "rotate-180" : ""}`} />
             </span>
           </button>
-          {showAdvanced ? (
-            <div className="animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+          <Collapse open={showAdvanced}>
+            <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
               <SlippageFields
                 side={tradeSide}
                 settings={slippageSettings}
@@ -433,23 +433,23 @@ export function MarginCreateForm({
                 currentPrice={selectedInstrument?.curve_spot_price}
               />
             </div>
-          ) : null}
+          </Collapse>
 
           <button
             type="button"
             onClick={() => setShowPolicy(!showPolicy)}
             aria-expanded={showPolicy}
-            className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-800"
+            className="mt-2 flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-800"
           >
             수수료·이자·청산 규칙
-            <ChevronDown className={`size-4 text-app-gray-400 transition-transform ${showPolicy ? "rotate-180" : ""}`} />
+            <ChevronDown className={`size-4 text-app-gray-400 transition-transform duration-250 ${showPolicy ? "rotate-180" : ""}`} />
           </button>
-          {showPolicy ? (
-            <div className="animate-reveal space-y-2">
+          <Collapse open={showPolicy}>
+            <div className="mt-2 space-y-2">
               <MarginInterestPolicy />
               <TradePolicy />
             </div>
-          ) : null}
+          </Collapse>
         </div>
 
         <div className="space-y-2">
@@ -457,7 +457,7 @@ export function MarginCreateForm({
           <button
             type="submit"
             disabled={!canSubmit}
-            className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 ${
+            className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 pressable ${
               side === "LONG" ? "bg-app-red" : "bg-app-blue"
             }`}
           >

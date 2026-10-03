@@ -136,14 +136,14 @@ export function MarginCollateralDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >
               취소
             </button>
             <button
               type="submit"
               disabled={!isValid || addCollateral.isPending}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {addCollateral.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
               담보 추가하기

@@ -56,7 +56,7 @@ export function GuestOrderPrompt({ className }: { className?: string }) {
       <p className="mt-1 text-[13px] break-keep text-app-gray-500">
         로그인하면 이 종목을 바로 사고팔 수 있어요.
       </p>
-      <LoginLink className="mt-4 flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-blue">
+      <LoginLink className="mt-4 flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-blue pressable">
         <LogIn aria-hidden="true" className="size-4" />
         로그인하고 주문하기
       </LoginLink>
@@ -94,7 +94,7 @@ export function GuestOrderBar({ instrument }: { instrument: Instrument }) {
           <p className="truncate text-[11px] font-semibold text-app-gray-500">{instrument.symbol}</p>
           <p className="numeric truncate text-[15px] font-bold text-app-gray-900">{fmtPrice(instrument.curve_spot_price)}</p>
         </div>
-        <LoginLink className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 text-[15px] font-bold text-white">
+        <LoginLink className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 text-[15px] font-bold text-white pressable">
           <LogIn aria-hidden="true" className="size-4" />
           로그인하고 주문
         </LoginLink>

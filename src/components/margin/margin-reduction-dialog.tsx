@@ -28,6 +28,7 @@ import {
   isDecimalInput,
   scaleDecimal,
 } from "@/lib/format";
+import { Collapse } from "@/components/primitives";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
@@ -196,12 +197,12 @@ export function MarginReductionDialog({
             >
               <ChevronDown
                 aria-hidden="true"
-                className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
+                className={`size-3.5 transition-transform duration-250 ${showAdvanced ? "rotate-180" : ""}`}
               />
               고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
-            {showAdvanced ? (
-              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+            <Collapse open={showAdvanced}>
+              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={exitSide}
                   settings={slippageSettings}
@@ -211,7 +212,7 @@ export function MarginReductionDialog({
                   currentPrice={curvePrice}
                 />
               </div>
-            ) : null}
+            </Collapse>
           </div>
 
           <MarginSimulationPreview
@@ -224,14 +225,14 @@ export function MarginReductionDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >
               취소
             </button>
             <button
               type="submit"
               disabled={!isValid || reduceMutation.isPending}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {reduceMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
               부분 정산하기

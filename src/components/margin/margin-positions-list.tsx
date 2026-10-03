@@ -102,7 +102,7 @@ export function MarginPositionsList({
             <button
               type="button"
               onClick={onCreate}
-              className="mx-auto mt-1 block min-h-11 rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white lg:hidden"
+              className="mx-auto mt-1 block min-h-11 rounded-xl bg-app-blue px-4 text-[14px] font-bold text-white lg:hidden pressable"
             >
               새 포지션 열기
             </button>

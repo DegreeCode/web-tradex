@@ -77,14 +77,14 @@ export function ResponsiveOrderForm({
           <button
             type="button"
             onClick={() => openOrder("SELL")}
-            className="h-11 w-24 rounded-xl bg-app-blue text-[15px] font-bold text-white"
+            className="h-11 w-24 rounded-xl bg-app-blue text-[15px] font-bold text-white pressable"
           >
             매도
           </button>
           <button
             type="button"
             onClick={() => openOrder("BUY")}
-            className="h-11 w-24 rounded-xl bg-app-red text-[15px] font-bold text-white"
+            className="h-11 w-24 rounded-xl bg-app-red text-[15px] font-bold text-white pressable"
           >
             매수
           </button>
@@ -113,7 +113,7 @@ function MarginLink({ symbol, className }: { symbol: string; className?: string 
   return (
     <Link
       href={`/margin?symbol=${encodeURIComponent(symbol)}`}
-      className={`flex items-center justify-between gap-3 rounded-xl bg-card px-4 py-3 text-[13px] text-app-gray-500 hover:bg-app-gray-50 ${className ?? ""}`}
+      className={`flex items-center justify-between gap-3 rounded-xl bg-card px-4 py-3 text-[13px] text-app-gray-500 transition-colors hover:bg-app-gray-50 ${className ?? ""}`}
     >
       레버리지로 롱·숏 거래하기
       <span className="inline-flex items-center gap-0.5 font-bold text-app-blue">

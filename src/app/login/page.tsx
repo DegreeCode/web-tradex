@@ -170,7 +170,7 @@ function LoginScreen() {
             type="button"
             onClick={handleLogin}
             disabled={busy || status === "loading"}
-            className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover"
+            className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:bg-app-blue-hover pressable"
           >
             {busy ? "확인 중…" : status === "loading" ? "로그인 상태 확인 중…" : "패스키로 로그인"}
           </Button>
@@ -195,7 +195,7 @@ function LoginScreen() {
 
         <Link
           href="/market"
-          className="mt-6 flex min-h-11 items-center justify-center gap-1 rounded-xl border border-app-gray-200 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+          className="mt-6 flex min-h-11 items-center justify-center gap-1 rounded-xl border border-app-gray-200 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
         >
           로그인 없이 마켓 둘러보기
           <ChevronRight aria-hidden="true" className="size-4" />
@@ -266,7 +266,7 @@ function LoginScreen() {
               <Button
                 type="submit"
                 disabled={recovering}
-                className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover"
+                className="h-11 w-full rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
               >
                 {recovering ? "확인 중…" : "복구키 사용"}
               </Button>

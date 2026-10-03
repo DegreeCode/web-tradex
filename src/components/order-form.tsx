@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Segmented } from "@/components/segmented";
-import { ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives";
+import { Collapse, ErrorBlock, OrderStatusChip, SideBadge } from "@/components/primitives";
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
@@ -333,7 +333,8 @@ export function OrderForm({
           ) : null}
 
           <div>
-            <div className="flex items-center justify-between gap-3">
+            {/* Fixed to the toggle's height so switching to sell (no toggle) keeps the form still. */}
+            <div className="flex min-h-8 items-center justify-between gap-3">
               <label htmlFor={`${fieldId}-amount`} className="text-[14px] font-semibold text-app-gray-500">
                 {effectiveAmountMode === "CREDIT" ? "주문 금액" : "주문 수량"}
               </label>
@@ -457,13 +458,13 @@ export function OrderForm({
                 {slippageSummary(slippageSettings, side, exchangeInfo?.trade.default_slippage_ppm, fmtPrice)}
                 <ChevronDown
                   aria-hidden="true"
-                  className={advancedOpen ? "size-4 rotate-180 transition-transform" : "size-4 transition-transform"}
+                  className={advancedOpen ? "size-4 rotate-180 transition-transform duration-250" : "size-4 transition-transform duration-250"}
                 />
               </span>
             </button>
 
-            {advancedOpen ? (
-              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+            <Collapse open={advancedOpen}>
+              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={side}
                   settings={slippageSettings}
@@ -477,7 +478,7 @@ export function OrderForm({
                   <TradePolicy />
                 </div>
               </div>
-            ) : null}
+            </Collapse>
           </div>
 
           {balanceError ? (
@@ -495,8 +496,8 @@ export function OrderForm({
               disabled={!tradeAccess.allowed || placeOrder.isPending || Boolean(validationError)}
               className={
                 side === "BUY"
-                  ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40"
-                  : "h-12 w-full rounded-xl bg-app-blue text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40"
+                  ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 pressable"
+                  : "h-12 w-full rounded-xl bg-app-blue text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 pressable"
               }
             >
               {placeOrder.isPending

@@ -84,7 +84,7 @@ export function BackLink({ href, label = "뒤로" }: { href: string; label?: str
       href={href}
       prefetch={false}
       aria-label={label}
-      className="flex size-10 shrink-0 items-center justify-center rounded-full text-app-gray-700 hover:bg-app-gray-100 active:bg-app-gray-200"
+      className="flex size-10 shrink-0 items-center justify-center rounded-full text-app-gray-700 hover:bg-app-gray-100"
     >
       <ArrowLeft className="size-5" />
     </Link>
@@ -296,7 +296,7 @@ export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: ()
         <button
           type="button"
           onClick={onRetry}
-          className="min-h-9 rounded-lg px-3 text-[13px] font-semibold text-app-blue underline underline-offset-4 hover:text-app-blue-dark"
+          className="min-h-9 rounded-lg px-3 text-[13px] font-semibold text-app-blue underline underline-offset-4"
         >
           다시 시도
         </button>
@@ -336,5 +336,23 @@ export function LoadMoreButton({
       {loading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
       {loading ? "불러오는 중…" : label}
     </button>
+  );
+}
+
+/**
+ * Expands and collapses its content by height. The content stays mounted but
+ * inert while closed, so pass spacing such as mt-2 on the child, not here.
+ */
+export function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      inert={!open}
+      className={cn(
+        "grid transition-[grid-template-rows,opacity] duration-250 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+      )}
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
   );
 }

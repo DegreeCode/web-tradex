@@ -362,7 +362,7 @@ export function SymbolDisclosures({ symbol }: { symbol: string }) {
                 type="button"
                 aria-haspopup="dialog"
                 onClick={() => setSelectedDisclosure(disclosure)}
-                className="group flex w-full items-start gap-3 rounded-xl border border-app-gray-100 bg-card p-3 text-left hover:border-app-gray-200 hover:bg-app-gray-50 focus-visible:ring-2 focus-visible:ring-app-blue focus-visible:outline-none"
+                className="group flex w-full items-start gap-3 rounded-xl border border-app-gray-100 bg-card p-3 text-left transition hover:border-app-gray-200 hover:bg-app-gray-50 focus-visible:ring-2 focus-visible:ring-app-blue focus-visible:outline-none"
               >
                 <span className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${tone.icon}`} aria-hidden="true">
                   <Icon className="size-4" />

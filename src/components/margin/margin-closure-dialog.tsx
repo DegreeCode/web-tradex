@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { fmtCredit, fmtQuantity } from "@/lib/format";
+import { Collapse } from "@/components/primitives";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
@@ -149,12 +150,12 @@ export function MarginClosureDialog({
             >
               <ChevronDown
                 aria-hidden="true"
-                className={`size-3.5 transition-transform ${showAdvanced ? "rotate-180" : ""}`}
+                className={`size-3.5 transition-transform duration-250 ${showAdvanced ? "rotate-180" : ""}`}
               />
               고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
-            {showAdvanced ? (
-              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+            <Collapse open={showAdvanced}>
+              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={exitSide}
                   settings={slippageSettings}
@@ -164,7 +165,7 @@ export function MarginClosureDialog({
                   currentPrice={curvePrice}
                 />
               </div>
-            ) : null}
+            </Collapse>
           </div>
 
           <MarginSimulationPreview
@@ -177,14 +178,14 @@ export function MarginClosureDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50"
+              className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >
               취소
             </button>
             <button
               type="submit"
               disabled={closeMutation.isPending}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {closeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
               포지션 전액 종료하기

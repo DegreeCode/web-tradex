@@ -17,7 +17,7 @@ export default function NotFound() {
       </p>
       <Link
         href="/"
-        className="mt-6 inline-flex h-11 items-center rounded-xl bg-app-blue px-5 text-[14px] font-bold text-white hover:bg-app-blue-hover"
+        className="mt-6 inline-flex h-11 items-center rounded-xl bg-app-blue px-5 text-[14px] font-bold text-white hover:bg-app-blue-hover pressable"
       >
         홈으로 가기
       </Link>
