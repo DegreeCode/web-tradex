@@ -77,6 +77,25 @@
   --shadow-raised: 0 1px 2px 0 rgba(25, 31, 40, 0.06);
   --animate-price-flash-up: price-flash-up 0.9s ease-out;
   --animate-price-flash-down: price-flash-down 0.9s ease-out;
+  /* The drawer's settle curve, shared by every entrance so motion feels like one system. */
+  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Content that appears in place (expanded panels, revealed results). */
+  --animate-reveal: reveal 0.22s var(--ease-fluid);
+  /* A screen's content when the route changes. Opacity only: a translate would
+     briefly re-anchor the page's position: fixed bars to the wrapper. */
+  --animate-page-in: page-in 0.24s var(--ease-fluid);
+
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      translate: 0 -4px;
+    }
+  }
+  @keyframes page-in {
+    from {
+      opacity: 0;
+    }
+  }
 
   @keyframes price-flash-up {
     from {
@@ -217,6 +236,20 @@
   button {
     @apply cursor-pointer;
   }
+  /* Controls ease between hover, selected and disabled states instead of
+     snapping. Zero specificity, so any transition-* utility still wins. */
+  :where(a, button, summary, [role="button"], [role="switch"]) {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke,
+      opacity, box-shadow, scale, translate;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+  /* Touch screens never see hover styles, so a press gives the feedback instead. */
+  @media (prefers-reduced-motion: no-preference) {
+    :where(button:not(:disabled), [role="button"]:not([aria-disabled="true"])):active {
+      scale: 0.98;
+    }
+  }
   button:disabled {
     @apply cursor-not-allowed;
   }
@@ -237,6 +270,13 @@
     select {
       font-size: 0.875rem;
     }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --animate-reveal: none;
+    --animate-page-in: none;
   }
 }
 

@@ -112,7 +112,11 @@ export function ManagerTransferInbox({
           요청 확인
         </button>
       </div>
-      {open ? <ManagerTransferInboxResults instrument={instrument} userId={userId} /> : null}
+      {open ? (
+        <div className="animate-reveal">
+          <ManagerTransferInboxResults instrument={instrument} userId={userId} />
+        </div>
+      ) : null}
     </div>
   );
 }

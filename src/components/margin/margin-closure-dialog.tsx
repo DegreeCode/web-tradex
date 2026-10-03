@@ -154,7 +154,7 @@ export function MarginClosureDialog({
               고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
             {showAdvanced ? (
-              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={exitSide}
                   settings={slippageSettings}
@@ -184,7 +184,7 @@ export function MarginClosureDialog({
             <button
               type="submit"
               disabled={closeMutation.isPending}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white transition-opacity hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400"
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400"
             >
               {closeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
               포지션 전액 종료하기

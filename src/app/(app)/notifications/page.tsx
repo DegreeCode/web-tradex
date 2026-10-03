@@ -190,7 +190,7 @@ function NotificationCard({
       onClick={() => onOpen(item)}
       aria-label={`${presentation.title}, ${item.read ? "읽음" : "안 읽음"}`}
       aria-haspopup="dialog"
-      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-card transition-colors hover:bg-app-gray-50 ${
+      className={`group min-w-0 w-full rounded-2xl p-4 text-left shadow-card hover:bg-app-gray-50 ${
         item.read
           ? "bg-card"
           : "border border-app-blue/15 bg-app-blue-faint"

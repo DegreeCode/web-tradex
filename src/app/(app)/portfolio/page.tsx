@@ -132,7 +132,7 @@ export default function PortfolioPage() {
           action={
             <Link
               href="/margin"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light px-3.5 text-[13px] font-bold text-app-blue-dark transition-opacity hover:opacity-80"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light px-3.5 text-[13px] font-bold text-app-blue-dark hover:opacity-80"
             >
               마진 포지션 관리
             </Link>

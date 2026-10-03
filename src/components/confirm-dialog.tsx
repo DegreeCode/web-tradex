@@ -54,7 +54,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={pending}
             className={cn(
-              "h-11 flex-1 rounded-xl text-[14px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50",
+              "h-11 flex-1 rounded-xl text-[14px] font-bold text-white hover:opacity-90 disabled:opacity-50",
               destructive ? "bg-app-red" : "bg-app-blue",
             )}
           >

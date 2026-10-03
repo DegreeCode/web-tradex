@@ -414,7 +414,7 @@ export function MarginCreateForm({
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
             aria-expanded={showAdvanced}
-            className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500"
+            className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-800"
           >
             고급 설정
             <span className="flex items-center gap-1 font-medium text-app-gray-400">
@@ -423,7 +423,7 @@ export function MarginCreateForm({
             </span>
           </button>
           {showAdvanced ? (
-            <div className="space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+            <div className="animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
               <SlippageFields
                 side={tradeSide}
                 settings={slippageSettings}
@@ -439,13 +439,13 @@ export function MarginCreateForm({
             type="button"
             onClick={() => setShowPolicy(!showPolicy)}
             aria-expanded={showPolicy}
-            className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500"
+            className="flex w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-800"
           >
             수수료·이자·청산 규칙
             <ChevronDown className={`size-4 text-app-gray-400 transition-transform ${showPolicy ? "rotate-180" : ""}`} />
           </button>
           {showPolicy ? (
-            <div className="space-y-2">
+            <div className="animate-reveal space-y-2">
               <MarginInterestPolicy />
               <TradePolicy />
             </div>
@@ -457,7 +457,7 @@ export function MarginCreateForm({
           <button
             type="submit"
             disabled={!canSubmit}
-            className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[16px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40 ${
+            className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 ${
               side === "LONG" ? "bg-app-red" : "bg-app-blue"
             }`}
           >

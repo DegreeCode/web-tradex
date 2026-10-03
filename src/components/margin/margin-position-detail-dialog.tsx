@@ -265,7 +265,7 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => setCollateralOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark transition-opacity hover:opacity-80"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light py-2.5 text-[13px] font-bold text-app-blue-dark hover:opacity-80"
                 >
                   <Plus aria-hidden="true" className="size-4" />
                   담보 추가
@@ -283,7 +283,7 @@ export function MarginPositionDetailDialog({
                 <button
                   type="button"
                   onClick={() => setClosureOpen(true)}
-                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white transition-opacity hover:opacity-90"
+                  className="flex min-h-11 min-w-24 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-red py-2.5 text-[13px] font-bold text-white hover:opacity-90"
                 >
                   <XCircle aria-hidden="true" className="size-4" />
                   전액 종료
