@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AreaSeries,
-  type AutoscaleInfo,
   CandlestickSeries,
   ColorType,
   CrosshairMode,
@@ -99,22 +98,7 @@ function useHoldingPriceLine(
     if (!series) return;
     if (previous?.series === series) series.removePriceLine(previous.line);
     const price = Number(averagePrice);
-    if (averagePrice === undefined || !Number.isFinite(price)) {
-      if (previous?.series === series) series.applyOptions({ autoscaleInfoProvider: undefined });
-      return;
-    }
-    series.applyOptions({
-      autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => {
-        const info = original();
-        return info?.priceRange ? {
-          ...info,
-          priceRange: {
-            minValue: Math.min(info.priceRange.minValue, price),
-            maxValue: Math.max(info.priceRange.maxValue, price),
-          },
-        } : info;
-      },
-    });
+    if (averagePrice === undefined || !Number.isFinite(price)) return;
     const line = series.createPriceLine({
       price,
       color: HOLDING_COLOR,
@@ -129,11 +113,11 @@ function useHoldingPriceLine(
 }
 
 function ChartHoldingLegend({ holding }: { holding?: ChartHolding }) {
-  if (!holding) return null;
+  if (!holding || holding.showAverageCost === false) return null;
   const percent = holding.returnPercent;
   return (
     <div className="numeric mt-0.5 flex flex-wrap gap-x-2 font-semibold">
-      {holding.showAverageCost !== false ? <span style={{ color: HOLDING_COLOR }}>평단가 {fmtPrice(holding.averagePrice)}</span> : null}
+      <span style={{ color: HOLDING_COLOR }}>평단가 {fmtPrice(holding.averagePrice)}</span>
       <span className="text-app-gray-500">
         평가수익률{" "}
         <span style={{ color: percent === null || percent === 0 ? undefined : percent > 0 ? UP_COLOR : DOWN_COLOR }}>
@@ -145,10 +129,9 @@ function ChartHoldingLegend({ holding }: { holding?: ChartHolding }) {
 }
 
 function chartHoldingDescription(holding?: ChartHolding): string {
-  if (!holding) return "";
+  if (!holding || holding.showAverageCost === false) return "";
   const percent = holding.returnPercent;
-  const average = holding.showAverageCost !== false ? `. 평단가 ${fmtPrice(holding.averagePrice)}` : "";
-  return `${average}. 평가수익률 ${percent === null ? "없음" : `${fmtSigned(percent, 2)}%`}`;
+  return `. 평단가 ${fmtPrice(holding.averagePrice)}. 평가수익률 ${percent === null ? "없음" : `${fmtSigned(percent, 2)}%`}`;
 }
 
 function formatChartTime(time: Time): string {
