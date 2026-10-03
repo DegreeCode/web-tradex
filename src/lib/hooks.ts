@@ -17,6 +17,7 @@ import {
   apiData,
   apiPage,
   buildQuery,
+  csrfToken,
   deleteData,
   patchIdempotentData,
   postData,
@@ -70,6 +71,7 @@ import {
 } from "./notification-cache";
 import { eventKeyFromTitle, parseNotificationBody } from "./notifications";
 import { invalidateBatched } from "./query-batch";
+import { isSignedIn, useSignedIn } from "./session-mode";
 import {
   SYMBOL_METADATA_CACHE_KEY,
   SYMBOL_METADATA_SYNC_MS,
@@ -130,11 +132,26 @@ import { closeSocket, getSocket, type StreamSocket, type WsKind, type WsStatus }
 const PAGE_SIZE = 30;
 const TICKER_ORDER_LIMIT = 100;
 const TICKER_ORDER_CACHE_MS = 60_000;
+// A guest's market screens poll one ticker request every 5 seconds: 12 of the
+// 60 anonymous requests a minute, leaving room for trades, candles, metadata
+// sync and a second tab.
+const GUEST_TICKER_POLL_MS = 5_000;
+// The API's largest page, so prices also cover search results below the order.
+const POLLED_TICKER_LIMIT = 200;
+
+/**
+ * The CSRF cookie is issued and cleared together with the session cookie, so
+ * without it there is no session to ask about and a guest never calls /me.
+ */
+export function fetchMe(): Promise<User | null> {
+  if (!csrfToken()) return Promise.resolve(null);
+  return apiData<User>("/api/v1/me");
+}
 
 export function useMe() {
   return useQuery({
     queryKey: ["me"],
-    queryFn: () => apiData<User>("/api/v1/me"),
+    queryFn: fetchMe,
     retry: false,
     staleTime: 60_000,
   });
@@ -151,13 +168,15 @@ export function useMarketState() {
   });
 }
 
+/** A guest never opens a socket, so its streams stay closed and REST stands in. */
 function useSocketStatus(kind: WsKind): WsStatus {
-  const socket = getSocket(kind);
+  const signedIn = useSignedIn();
+  const socket = signedIn ? getSocket(kind) : null;
   const subscribe = useCallback(
-    (notify: () => void) => socket.onStatus(() => notify()),
+    (notify: () => void) => socket?.onStatus(() => notify()) ?? (() => {}),
     [socket],
   );
-  const getSnapshot = useCallback(() => socket.getStatus(), [socket]);
+  const getSnapshot = useCallback((): WsStatus => socket?.getStatus() ?? "closed", [socket]);
   const getServerSnapshot = useCallback((): WsStatus => "closed", []);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
@@ -194,11 +213,24 @@ export function useInstruments() {
   });
 }
 
-/** Fetches only the server-defined ticker order; prices stay on the WS cache. */
+/**
+ * The server-defined ticker order. Signed in, only the order is fetched and
+ * prices stay on the WS cache. A guest has no stream, so one sorted page with
+ * full tickers is polled instead and carries both the order and the prices.
+ */
 export function useTickerOrder(sort: TickerSort) {
+  const queryClient = useQueryClient();
+  const signedIn = useSignedIn();
   return useQuery({
-    queryKey: ["ticker-order", sort],
+    queryKey: ["ticker-order", sort, signedIn ? "live" : "polled"],
     queryFn: async () => {
+      if (!signedIn) {
+        const page = await apiPage<Ticker>(
+          `/api/v1/market/tickers${buildQuery({ sort, limit: POLLED_TICKER_LIMIT })}`,
+        );
+        applyTickers(queryClient, page.data);
+        return [...new Set(page.data.map((ticker) => ticker.symbol))].slice(0, TICKER_ORDER_LIMIT);
+      }
       const page = await apiPage<string>(
         `/api/v1/market/tickers${buildQuery({
           sort,
@@ -209,9 +241,9 @@ export function useTickerOrder(sort: TickerSort) {
       return [...new Set(page.data)].slice(0, TICKER_ORDER_LIMIT);
     },
     // Focus, reconnect, and remount refetches are suppressed while this cache
-    // is fresh; the interval cannot issue requests more often than once/minute.
-    refetchInterval: TICKER_ORDER_CACHE_MS,
-    staleTime: TICKER_ORDER_CACHE_MS,
+    // is fresh, so neither mode asks more often than its interval.
+    refetchInterval: signedIn ? TICKER_ORDER_CACHE_MS : GUEST_TICKER_POLL_MS,
+    staleTime: signedIn ? TICKER_ORDER_CACHE_MS : GUEST_TICKER_POLL_MS,
   });
 }
 
@@ -243,22 +275,67 @@ export function useInstrument(symbol: string | undefined) {
 }
 
 export function useSymbolTrades(symbol: string | undefined, limit = 150) {
+  const queryClient = useQueryClient();
+  const signedIn = useSignedIn();
   const publicStatus = useSocketStatus("public");
+  // Public snapshots/updates own this cache while connected, and a guest's
+  // polled ticker refetches it when a trade happens. Neither should race that
+  // with a timer, focus or mount refetch.
+  const pushed = publicStatus === "open" || !signedIn;
   return useQuery({
     queryKey: ["symbol-trades", symbol, limit],
-    queryFn: () =>
-      apiPage<PublicTrade>(
+    queryFn: async () => {
+      const page = await apiPage<PublicTrade>(
         `/api/v1/market/symbols/${encodeURIComponent(symbol ?? "")}/trades${buildQuery({ limit })}`,
-      ),
+      );
+      if (!signedIn && symbol) applyPolledTrades(queryClient, symbol, page.data);
+      return page;
+    },
     enabled: Boolean(symbol),
-    refetchInterval: publicStatus === "open" ? false : 5_000,
-    // Public snapshots/updates own this cache while connected. Focus and mount
-    // must not race that stream with a redundant REST response.
-    staleTime: publicStatus === "open" ? Infinity : 3_000,
-    refetchOnWindowFocus: publicStatus !== "open",
-    refetchOnReconnect: publicStatus !== "open",
-    refetchOnMount: publicStatus !== "open",
+    refetchInterval: pushed ? false : 5_000,
+    staleTime: pushed ? Infinity : 3_000,
+    refetchOnWindowFocus: !pushed,
+    refetchOnReconnect: !pushed,
+    refetchOnMount: !pushed,
   });
+}
+
+// The last polled ticker state per symbol, so a remounted detail view still
+// notices trades that happened while it was away.
+const polledTickerMarks = new Map<string, string>();
+
+/**
+ * A guest's symbol view has no stream: its ticker is polled every 5 seconds,
+ * and trades (and through them the candles) are refetched only when the
+ * ticker shows a new trade, so a quiet symbol costs one request per poll.
+ */
+export function usePolledSymbolTicker(symbol: string | undefined, limit = 150) {
+  const queryClient = useQueryClient();
+  const signedIn = useSignedIn();
+  const { data: ticker } = useQuery({
+    queryKey: ["ticker", symbol],
+    queryFn: async () => {
+      const row = await apiData<Ticker>(`/api/v1/market/tickers/${encodeURIComponent(symbol ?? "")}`);
+      applyTickers(queryClient, [row]);
+      return row;
+    },
+    enabled: Boolean(symbol) && !signedIn,
+    refetchInterval: GUEST_TICKER_POLL_MS,
+    staleTime: GUEST_TICKER_POLL_MS,
+  });
+
+  useEffect(() => {
+    if (!symbol || !ticker || signedIn) return;
+    const mark = `${ticker.window_start}:${ticker.trade_count}:${ticker.last_price}`;
+    const previous = polledTickerMarks.get(symbol);
+    polledTickerMarks.set(symbol, mark);
+    if (previous === undefined || previous === mark) return;
+    // Joins a trades fetch that is already running (e.g. the first one on mount).
+    void queryClient.invalidateQueries(
+      { queryKey: ["symbol-trades", symbol, limit], exact: true },
+      { cancelRefetch: false },
+    );
+  }, [limit, queryClient, signedIn, symbol, ticker]);
 }
 
 export function useOrders(limit = PAGE_SIZE, enabled = true) {
@@ -436,7 +513,7 @@ export function useManagerRequests(symbol: string | undefined) {
 function invalidateTrading(queryClient: QueryClient) {
   // Batched with the TRADE_EXECUTED notification that usually follows.
   invalidateBatched(queryClient, [["orders"], ["portfolio"], ["my-trades"]]);
-  if (getSocket("public").getStatus() !== "open") {
+  if (!isSignedIn() || getSocket("public").getStatus() !== "open") {
     void queryClient.invalidateQueries({ queryKey: ["symbol-trades"] });
   }
 }
@@ -1026,13 +1103,14 @@ function useChannelFrames(
 ) {
   const handlerRef = useRef(handler);
   const gapRef = useRef(onGap);
+  const signedIn = useSignedIn();
   useEffect(() => {
     handlerRef.current = handler;
     gapRef.current = onGap;
   }, [handler, onGap]);
 
   useEffect(() => {
-    if (!channel) return;
+    if (!channel || !signedIn) return;
     const socket = getSocket(kind);
     const off = socket.onFrame((frame) => {
       if (frame.stream === channel) handlerRef.current(frame);
@@ -1046,7 +1124,45 @@ function useChannelFrames(
       offGap();
       socket.unsubscribe(channel);
     };
-  }, [kind, channel]);
+  }, [kind, channel, signedIn]);
+}
+
+type LiveTicker = Ticker & { deleted?: boolean };
+
+/**
+ * Writes tickers into the ticker cache and every instrument view. A snapshot
+ * replaces the cache; anything else (stream updates, polled pages) merges.
+ */
+export function applyTickers(queryClient: QueryClient, rows: LiveTicker[], snapshot = false): void {
+  const changed = new Map(rows.map((ticker) => [ticker.symbol, ticker]));
+  queryClient.setQueryData<Ticker[]>(["ticker-cache"], (old) => {
+    if (snapshot || !old) return rows.filter((ticker) => !ticker.deleted);
+    const known = new Set<string>();
+    const next = old.flatMap((ticker) => {
+      known.add(ticker.symbol);
+      const update = changed.get(ticker.symbol);
+      return !update ? [ticker] : update.deleted ? [] : [update];
+    });
+    for (const ticker of rows) if (!ticker.deleted && !known.has(ticker.symbol)) next.push(ticker);
+    return next;
+  });
+  // Unchanged rows keep their identity, so memoized list rows skip rendering.
+  queryClient.setQueryData<Instrument[]>(["instruments"], (old) =>
+    old?.flatMap((instrument) => {
+      const update = changed.get(instrument.symbol);
+      return !update ? [instrument] : update.deleted ? [] : [{ ...instrument, ...update }];
+    }),
+  );
+  for (const ticker of rows) {
+    if (ticker.deleted) {
+      clearTradePriceOverlay(ticker.symbol);
+      queryClient.removeQueries({ queryKey: ["instrument", ticker.symbol] });
+    } else {
+      queryClient.setQueryData<Instrument>(["instrument", ticker.symbol], (old) =>
+        old ? applyTradePriceOverlay({ ...old, ...ticker }) : old,
+      );
+    }
+  }
 }
 
 export function useTickerStream(enabled = true) {
@@ -1061,36 +1177,7 @@ export function useTickerStream(enabled = true) {
   }, [enabled]);
   const applyFrame = (frame: WsFrame) => {
     if (!Array.isArray(frame.data)) return;
-    const rows = frame.data as Array<Ticker & { deleted?: boolean }>;
-    const changed = new Map(rows.map((ticker) => [ticker.symbol, ticker]));
-    queryClient.setQueryData<Ticker[]>(["ticker-cache"], (old) => {
-      if (frame.type === "snapshot" || !old) return rows.filter((ticker) => !ticker.deleted);
-      const known = new Set<string>();
-      const next = old.flatMap((ticker) => {
-        known.add(ticker.symbol);
-        const update = changed.get(ticker.symbol);
-        return !update ? [ticker] : update.deleted ? [] : [update];
-      });
-      for (const ticker of rows) if (!ticker.deleted && !known.has(ticker.symbol)) next.push(ticker);
-      return next;
-    });
-    // Unchanged rows keep their identity, so memoized list rows skip rendering.
-    queryClient.setQueryData<Instrument[]>(["instruments"], (old) =>
-      old?.flatMap((instrument) => {
-        const update = changed.get(instrument.symbol);
-        return !update ? [instrument] : update.deleted ? [] : [{ ...instrument, ...update }];
-      }),
-    );
-    for (const ticker of rows) {
-      if (ticker.deleted) {
-        clearTradePriceOverlay(ticker.symbol);
-        queryClient.removeQueries({ queryKey: ["instrument", ticker.symbol] });
-      } else {
-        queryClient.setQueryData<Instrument>(["instrument", ticker.symbol], (old) =>
-          old ? applyTradePriceOverlay({ ...old, ...ticker }) : old,
-        );
-      }
-    }
+    applyTickers(queryClient, frame.data as LiveTicker[], frame.type === "snapshot");
   };
   useChannelFrames("public", enabled ? "tickers" : null, (frame) => {
     revision.current += 1;
@@ -1310,6 +1397,31 @@ function awaitSnapshot(queryClient: QueryClient, symbol: string, runtime: Candle
   runtime.seenSequences.clear();
   runtime.pendingSequences.clear();
   requestCandleRecovery(queryClient, symbol, runtime, true);
+}
+
+/**
+ * Feeds a polled trades page into the candles the way stream updates would.
+ * Trades already applied are skipped by sequence, and ones the candle page was
+ * fetched after are skipped by time. A page that no longer reaches the last
+ * applied trade missed some, so the candle tail is refetched instead.
+ */
+export function applyPolledTrades(queryClient: QueryClient, symbol: string, trades: PublicTrade[]): void {
+  const runtime = candleRuntime(symbol);
+  const previous = runtime.lastSequence;
+  const fresh = trades
+    .filter((trade) => Number.isSafeInteger(trade.sequence) && (previous === undefined || trade.sequence > previous))
+    .sort((a, b) => a.sequence - b.sequence);
+  if (fresh.length === 0) return;
+  runtime.lastSequence = fresh[fresh.length - 1].sequence;
+  if (previous !== undefined && fresh[0].sequence !== previous + 1) {
+    requestCandleRecovery(queryClient, symbol, runtime);
+    return;
+  }
+  let needsRecovery = false;
+  for (const trade of fresh) {
+    if (updateCachedCandleQueries(queryClient, symbol, trade).needsRecovery) needsRecovery = true;
+  }
+  if (needsRecovery) requestCandleRecovery(queryClient, symbol, runtime);
 }
 
 export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {

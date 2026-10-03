@@ -97,6 +97,27 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 종목 기본정보는 화면마다 조회하지 않고 `GET /market/symbols`(최초 1회), `/market/symbols/changes`,
 `/market/symbols/batch`로 탭 간에 공유하는 로컬 캐시를 동기화해 씁니다.
 
+## 둘러보기 (비로그인)
+
+로그인하지 않아도 마켓(`/market`)과 종목 상세(`/market/symbol`)는 볼 수 있습니다. 로그인 화면의
+"로그인 없이 마켓 둘러보기"로 들어가며, 다른 화면은 로그인 화면으로 보냅니다. 주문 영역은 로그인 후
+같은 종목으로 돌아오는 버튼으로 바뀝니다.
+
+비로그인 공개 API는 IP당 분당 60회로 제한되므로 둘러보기는 다음 원칙을 따릅니다.
+
+- WebSocket은 public·private 모두 열지 않습니다(SharedWorker도 띄우지 않음). 세션이 확인된 뒤에만 연결합니다.
+- 로그인 전용 API와 `GET /exchange/info`를 호출하지 않습니다. `tradex_csrf` 쿠키는 세션 쿠키와 함께
+  발급·삭제되므로, 이 쿠키가 없으면 `GET /me`도 보내지 않고 바로 비로그인으로 판단합니다.
+- 시세는 5초마다 폴링합니다(숨겨진 탭은 멈춤).
+  - 마켓: `GET /market/tickers?sort=…&limit=200` 한 번으로 정렬 순서와 시세를 함께 받습니다.
+  - 종목 상세: `GET /market/tickers/{symbol}`. 시세의 체결 수·체결가가 바뀐 경우에만
+    `GET /market/symbols/{symbol}/trades`를 다시 받고, 새 체결을 캔들에 합칩니다(누락이 있으면 캔들 끝부분만 재조회).
+- 그 밖에는 종목 기본정보 동기화(`symbols/changes`, 분당 1회)와 화면 진입 시 캔들·공시 조회뿐입니다.
+  조용한 종목 화면은 분당 약 13회, 체결이 계속 나는 종목도 약 25회로 두 번째 탭까지 한도 안에 듭니다.
+
+로그인 상태의 요청은 공개 API를 포함해 모두 세션 쿠키를 싣기 때문에(`credentials: "include"`),
+서버가 인증된 요청에 별도 한도를 적용하면 비로그인 IP 한도와 따로 계산됩니다.
+
 인증 화면: `/login`(패스키·복구키), `/signup`(가입 + 복구키 8개 발급), `/invite`(초대 수락),
 `/recover`(복구 모드에서 새 패스키 등록). 약관: `/terms`, `/privacy`.
 
@@ -118,7 +139,7 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 | private | `listing.updated`, `issuance.created` | 마켓 | 해당 종목 기본정보 갱신 |
 | private | `inquiry.replied` | 고객센터 | 문의 목록·상세 무효화 |
 
-private 소켓은 로그인 상태에서만 열리고, 로그아웃 시 닫힙니다. 공개 시세·체결·시장 상태·공시는
+두 소켓 모두 로그인 상태에서만 열리고(둘러보기는 위의 REST 폴링), private 소켓은 로그아웃 시 닫힙니다. 공개 시세·체결·시장 상태·공시는
 WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 REST snapshot으로 복구합니다.
 종목 기본정보는 `symbols/changes`와 `symbols/batch`로 별도 동기화합니다.
 
