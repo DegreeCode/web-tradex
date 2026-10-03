@@ -1,16 +1,17 @@
 "use client";
 
-import { BellRing, Moon, Settings2 } from "lucide-react";
+import { BellRing, Megaphone, Moon, Settings2 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useSyncExternalStore } from "react";
 
 import { PageHeader, Surface } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { Switch } from "@/components/ui/switch";
-import { useTradeExecutionPopupPreference } from "@/lib/preferences";
+import { useLiveNotificationPopupPreference, useTradeExecutionPopupPreference } from "@/lib/preferences";
 
 export default function SettingsPage() {
   const { enabled, setEnabled, hydrated } = useTradeExecutionPopupPreference();
+  const livePopup = useLiveNotificationPopupPreference();
   const { theme, setTheme } = useTheme();
   // The stored theme is only readable on the client; avoid a hydration mismatch.
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
@@ -66,6 +67,30 @@ export default function SettingsPage() {
             onCheckedChange={setEnabled}
             disabled={!hydrated}
             aria-label="주문 체결 완료 팝업 표시"
+          />
+        </div>
+      </Surface>
+
+      <Surface>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-app-blue-light text-app-blue">
+              <Megaphone aria-hidden="true" className="size-[18px]" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-bold text-app-gray-900">
+                실시간 알림 팝업
+              </h2>
+              <p className="mt-1 text-[13px] leading-5 text-app-gray-500">
+                예약 주문 체결, 마진 경고, 거래 중지, 다른 기기의 보안 변경 같은 중요한 알림이 오면 화면 위에 바로 보여줘요. 알림 목록에는 항상 남아요.
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={livePopup.enabled}
+            onCheckedChange={livePopup.setEnabled}
+            disabled={!livePopup.hydrated}
+            aria-label="실시간 알림 팝업 표시"
           />
         </div>
       </Surface>

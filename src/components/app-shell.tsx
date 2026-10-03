@@ -23,6 +23,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import { useConnectionToast, useLiveNotificationToasts } from "@/lib/live-toasts";
 import { formatUnreadBadge } from "@/lib/notifications";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { BrandLogo } from "@/components/brand-logo";
@@ -87,6 +88,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // A linked session gets the same stream; the server leaves out events for
   // accounts outside its scope.
   usePrivateStream(authenticated);
+  useLiveNotificationToasts(authenticated);
+  useConnectionToast(authenticated);
 
   const initial = user?.username.slice(0, 1).toUpperCase() ?? "⋯";
   const currentTitle =

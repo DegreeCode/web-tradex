@@ -18,6 +18,7 @@ import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
+import { noteSelfAction } from "@/lib/live-notifications";
 import { marginLimitReasonLabel } from "@/lib/margin";
 import { shouldShowTradeExecutionPopup } from "@/lib/preferences";
 import {
@@ -183,6 +184,8 @@ export function OrderForm({ instrument, defaultSide = "BUY" }: { instrument: Ins
     else payload.quantity = orderQuantity.trim();
     if (referencePrice) payload.slippage_reference_price = referencePrice;
 
+    // The fill notification can beat the response; the result dialog covers it.
+    if (orderMode === "MARKET") noteSelfAction("TRADE_EXECUTED", instrument.symbol);
     placeOrder.mutate(payload, {
       onSuccess: (order) => {
         if (order.status === "PENDING" || shouldShowTradeExecutionPopup()) {

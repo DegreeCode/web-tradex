@@ -21,6 +21,7 @@ import { RecoveryKeyGrid } from "@/components/recovery-keys";
 import { ErrorBlock, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
 import { ApiError, errorMessage, postData } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtRelative, shortId } from "@/lib/format";
+import { noteSelfAction } from "@/lib/live-notifications";
 import {
   useDeletePasskey,
   useLogout,
@@ -81,6 +82,7 @@ export default function SecurityPage() {
   }
 
   function handleRotate() {
+    noteSelfAction("AUTH_RECOVERY_ROTATED");
     rotate.mutate(undefined, {
       onSuccess: (result) => {
         setConfirmRotate(false);
@@ -93,6 +95,7 @@ export default function SecurityPage() {
 
   function handleDeletePasskey() {
     if (!pendingPasskeyDelete) return;
+    noteSelfAction("AUTH_PASSKEY_DELETED");
     deletePasskey.mutate(pendingPasskeyDelete, {
       onSuccess: () => {
         setPendingPasskeyDelete(null);
@@ -239,13 +242,14 @@ export default function SecurityPage() {
                 session={session}
                 canRevoke={session.is_current || !linked}
                 pending={revokeSessions.isPending && revokeSessions.variables?.[0] === session.session_id}
-                onRevoke={() =>
+                onRevoke={() => {
+                  noteSelfAction("AUTH_SESSIONS_REVOKED");
                   revokeSessions.mutate([session.session_id], {
                     onSuccess: (result) =>
                       result.current_revoked ? handleSessionExpired() : toast.success("세션을 해지했어요"),
                     onError: (error) => toast.error(errorMessage(error)),
-                  })
-                }
+                  });
+                }}
               />
             ))
           )}
