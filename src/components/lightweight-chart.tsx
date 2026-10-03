@@ -15,6 +15,7 @@ import {
   type ISeriesApi,
   LastPriceAnimationMode,
   LineStyle,
+  PriceScaleMode,
   type MouseEventParams,
   type Time,
   type UTCTimestamp,
@@ -24,7 +25,7 @@ import { useTheme } from "next-themes";
 import { fmtCompactQuantity, fmtPrice, fmtSigned } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import { canIncrementallyUpdate } from "@/lib/chart-updates";
-import { calculateVolumePaneHeight, setVolumePaneRatio } from "@/lib/chart-settings";
+import { calculateVolumePaneHeight, setVolumePaneRatio, useChartSettings } from "@/lib/chart-settings";
 
 const UP_COLOR = "#f04452";
 const DOWN_COLOR = "#3182f6";
@@ -301,6 +302,21 @@ function useChartTheme(
   }, [chartRef, hasData, height, resolvedTheme, seriesType]);
 }
 
+function useChartPriceScale(
+  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  hasData: boolean,
+  height: number,
+  seriesType?: ChartSeriesType,
+) {
+  const logarithmic = useChartSettings()?.logarithmic ?? false;
+  useEffect(() => {
+    // Apply only to the price series so the volume pane keeps its linear scale.
+    seriesRef.current?.priceScale().applyOptions({
+      mode: logarithmic ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+    });
+  }, [seriesRef, hasData, height, logarithmic, seriesType]);
+}
+
 function chartOptions(height: number) {
   return {
     width: 320,
@@ -460,6 +476,7 @@ export function LightweightLineChart({
     };
   }, [hasData, height]);
   useChartTheme(chartRef, hasData, height);
+  useChartPriceScale(seriesRef, hasData, height);
   useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined);
 
   useEffect(() => {
@@ -627,6 +644,7 @@ export function LightweightCandleChart({
     };
   }, [hasData, height, seriesType]);
   useChartTheme(chartRef, hasData, height, seriesType);
+  useChartPriceScale(seriesRef, hasData, height, seriesType);
   useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined, seriesType);
 
   useEffect(() => {

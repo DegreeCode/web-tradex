@@ -8,13 +8,18 @@ import { Switch } from "@/components/ui/switch";
 export function ChartSettingsButton({
   showAverageCost,
   onShowAverageCostChange,
+  logarithmic,
+  onLogarithmicChange,
   disabled,
 }: {
   showAverageCost: boolean;
   onShowAverageCostChange: (show: boolean) => void;
+  logarithmic: boolean;
+  onLogarithmicChange: (enabled: boolean) => void;
   disabled?: boolean;
 }) {
   const toggleId = useId();
+  const logarithmicId = useId();
   return (
     <Popover.Root>
       <Popover.Trigger
@@ -29,9 +34,15 @@ export function ChartSettingsButton({
         <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-50">
           <Popover.Popup className="w-60 rounded-2xl border border-app-gray-100 bg-popover p-4 text-app-gray-900 shadow-lg outline-none">
             <Popover.Title className="mb-3 text-[14px] font-bold">차트 설정</Popover.Title>
-            <div className="flex items-center justify-between gap-4">
-              <label htmlFor={toggleId} className="cursor-pointer text-[13px] font-semibold">평균단가 표시</label>
-              <Switch id={toggleId} aria-label="평균단가 표시" checked={showAverageCost} onCheckedChange={onShowAverageCostChange} />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={toggleId} className="cursor-pointer text-[13px] font-semibold">평균단가 표시</label>
+                <Switch id={toggleId} aria-label="평균단가 표시" checked={showAverageCost} onCheckedChange={onShowAverageCostChange} />
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={logarithmicId} className="cursor-pointer text-[13px] font-semibold">로그 스케일</label>
+                <Switch id={logarithmicId} aria-label="로그 스케일" checked={logarithmic} onCheckedChange={onLogarithmicChange} />
+              </div>
             </div>
           </Popover.Popup>
         </Popover.Positioner>

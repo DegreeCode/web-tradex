@@ -47,23 +47,27 @@ test("saved chart settings take precedence over leftover legacy fields", async (
   assert.deepEqual(chart.readChartSettings(), { candleInterval: "1d", showAverageCost: false });
 });
 
-test("visibility, series mode and volume height survive reloads in the chart record", async (t) => {
+test("visibility, series mode, logarithmic scale and volume height survive reloads in the chart record", async (t) => {
   const storage = memoryStorage({ [GENERAL_KEY]: JSON.stringify({ slippagePercent: "2" }) });
   const original = await loadWith(t, storage, "original");
   assert.equal(original.calculateVolumePaneHeight(260), 73);
-  original.updateChartSettings({ showAverageCost: false, seriesType: "line", candleInterval: "5m" });
+  original.updateChartSettings({ showAverageCost: false, seriesType: "line", candleInterval: "5m", logarithmic: true });
   original.setVolumePaneRatio(109 / 260);
   const reloaded = await loadWith(t, storage, "reloaded");
-  assert.deepEqual(reloaded.readChartSettings(), { candleInterval: "5m", seriesType: "line", volumePaneRatio: 109 / 260, showAverageCost: false });
+  assert.deepEqual(reloaded.readChartSettings(), { candleInterval: "5m", seriesType: "line", volumePaneRatio: 109 / 260, showAverageCost: false, logarithmic: true });
   assert.equal(reloaded.calculateVolumePaneHeight(260), 109);
   assert.equal(reloaded.calculateVolumePaneHeight(220), 92);
   assert.deepEqual(JSON.parse(storage.stored.get(GENERAL_KEY)!), { slippagePercent: "2" });
+  reloaded.updateChartSettings({ logarithmic: false });
+  const linear = await loadWith(t, storage, "linear-reloaded");
+  assert.equal(linear.readChartSettings().logarithmic, false);
+  assert.equal(linear.readChartSettings().showAverageCost, false);
 });
 
 test("invalid and malformed settings safely fall back to defaults", async (t) => {
   const { sanitizeChartSettings } = await loadWith(t, memoryStorage(), "sanitize");
-  assert.deepEqual(sanitizeChartSettings({ candleInterval: "bad", seriesType: "bars", volumePaneRatio: 1, showAverageCost: "false" }), {});
-  assert.deepEqual(sanitizeChartSettings({ candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true }), { candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true });
+  assert.deepEqual(sanitizeChartSettings({ candleInterval: "bad", seriesType: "bars", volumePaneRatio: 1, showAverageCost: "false", logarithmic: "true" }), {});
+  assert.deepEqual(sanitizeChartSettings({ candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true, logarithmic: false }), { candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true, logarithmic: false });
   for (const raw of ["junk", "[1]", "null", "2"]) {
     const chart = await loadWith(t, memoryStorage({ [KEY]: raw }), `malformed=${raw}`);
     assert.deepEqual(chart.readChartSettings(), {});
@@ -78,8 +82,8 @@ test("chart controls work in memory when browser storage is blocked", async (t) 
     removeItem: () => { throw new Error("Storage disabled"); },
   };
   const chart = await loadWith(t, blockedStorage, "blocked");
-  chart.updateChartSettings({ showAverageCost: false, seriesType: "line" });
+  chart.updateChartSettings({ showAverageCost: false, seriesType: "line", logarithmic: true });
   chart.setVolumePaneRatio(0.5);
-  assert.deepEqual(chart.readChartSettings(), { seriesType: "line", volumePaneRatio: 0.5, showAverageCost: false });
+  assert.deepEqual(chart.readChartSettings(), { seriesType: "line", volumePaneRatio: 0.5, showAverageCost: false, logarithmic: true });
   assert.equal(chart.calculateVolumePaneHeight(260), 130);
 });
