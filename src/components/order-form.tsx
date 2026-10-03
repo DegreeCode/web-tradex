@@ -450,7 +450,7 @@ export function OrderForm({
               type="button"
               onClick={() => setAdvancedOpen((open) => !open)}
               aria-expanded={advancedOpen}
-              className="flex min-h-9 w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500"
+              className="flex min-h-9 w-full items-center justify-between gap-3 text-[13px] font-semibold text-app-gray-500 hover:text-app-gray-800"
             >
               고급 설정
               <span className="flex items-center gap-1 font-medium text-app-gray-400">
@@ -463,7 +463,7 @@ export function OrderForm({
             </button>
 
             {advancedOpen ? (
-              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={side}
                   settings={slippageSettings}
@@ -495,8 +495,8 @@ export function OrderForm({
               disabled={!tradeAccess.allowed || placeOrder.isPending || Boolean(validationError)}
               className={
                 side === "BUY"
-                  ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                  : "h-12 w-full rounded-xl bg-app-blue text-[16px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40"
+                  : "h-12 w-full rounded-xl bg-app-blue text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40"
               }
             >
               {placeOrder.isPending

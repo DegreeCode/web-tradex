@@ -84,7 +84,7 @@ export function BackLink({ href, label = "뒤로" }: { href: string; label?: str
       href={href}
       prefetch={false}
       aria-label={label}
-      className="flex size-10 shrink-0 items-center justify-center rounded-full text-app-gray-700 hover:bg-app-gray-100"
+      className="flex size-10 shrink-0 items-center justify-center rounded-full text-app-gray-700 hover:bg-app-gray-100 active:bg-app-gray-200"
     >
       <ArrowLeft className="size-5" />
     </Link>
@@ -296,7 +296,7 @@ export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: ()
         <button
           type="button"
           onClick={onRetry}
-          className="min-h-9 rounded-lg px-3 text-[13px] font-semibold text-app-blue underline underline-offset-4"
+          className="min-h-9 rounded-lg px-3 text-[13px] font-semibold text-app-blue underline underline-offset-4 hover:text-app-blue-dark"
         >
           다시 시도
         </button>

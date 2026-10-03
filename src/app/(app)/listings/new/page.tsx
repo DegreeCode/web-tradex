@@ -278,7 +278,7 @@ function ListingForm() {
           type="button"
           onClick={submit}
           disabled={createListing.isPending || !acknowledged}
-          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="h-12 w-full rounded-xl bg-app-blue text-[15px] font-bold text-white hover:opacity-90 disabled:opacity-40"
         >
           {createListing.isPending ? "상장 중…" : "종목 상장하기"}
         </button>

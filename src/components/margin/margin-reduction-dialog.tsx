@@ -201,7 +201,7 @@ export function MarginReductionDialog({
               고급 설정 (슬리피지·{exitSide === "BUY" ? "상한가" : "하한가"})
             </button>
             {showAdvanced ? (
-              <div className="mt-2 space-y-2.5 rounded-xl bg-app-gray-50 p-3">
+              <div className="mt-2 animate-reveal space-y-2.5 rounded-xl bg-app-gray-50 p-3">
                 <SlippageFields
                   side={exitSide}
                   settings={slippageSettings}

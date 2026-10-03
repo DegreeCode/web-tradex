@@ -97,7 +97,7 @@ export default function SupportPage() {
               type="button"
               onClick={() => setTicket(inquiry.ticket)}
               aria-haspopup="dialog"
-              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-card transition-colors hover:bg-app-gray-50"
+              className="min-w-0 w-full rounded-2xl bg-card p-4 text-left shadow-card hover:bg-app-gray-50"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">

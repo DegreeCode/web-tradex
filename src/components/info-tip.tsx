@@ -19,7 +19,7 @@ export function InfoTip({ label, children }: { label: string; children: ReactNod
       <Popover.Portal>
         {/* Above dialogs (z-50) so tips work inside the margin dialogs. */}
         <Popover.Positioner side="top" sideOffset={6} collisionPadding={16} className="z-[60]">
-          <Popover.Popup className="max-w-[min(18rem,calc(100vw-2rem))] rounded-lg bg-app-gray-900 px-3 py-2 text-[12px] font-normal leading-relaxed text-white shadow-lg outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
+          <Popover.Popup className="max-w-[min(18rem,calc(100vw-2rem))] rounded-lg bg-app-gray-900 px-3 py-2 text-[12px] font-normal leading-relaxed text-white shadow-lg outline-none duration-150 ease-fluid origin-(--transform-origin) data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-closed:duration-100">
             {children}
           </Popover.Popup>
         </Popover.Positioner>
