@@ -436,8 +436,6 @@ export function LightweightLineChart({
     // dataset is empty, so a live trade never recreates/reset the chart.
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
-      priceLineVisible: false,
-      lastValueVisible: false,
     }, 1);
     const cleanupVolumeSync = setupVolumePaneResizeSync(chart.panes()[1], height);
     const crosshairHandler = (param: MouseEventParams<Time>) => {
@@ -604,8 +602,6 @@ export function LightweightCandleChart({
     const volumeSeries = dataRef.current.some((point) => point.volumeValue > 0 || point.volume === "0")
       ? chart.addSeries(HistogramSeries, {
           priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
-          priceLineVisible: false,
-          lastValueVisible: false,
         }, 1)
       : null;
     const cleanupVolumeSync = setupVolumePaneResizeSync(volumeSeries ? chart.panes()[1] : null, height);
