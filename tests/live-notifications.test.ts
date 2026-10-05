@@ -100,3 +100,54 @@ test("the live popup preference survives sanitizing", () => {
   assert.deepEqual(sanitizePreferences({ liveNotificationPopup: false }), { liveNotificationPopup: false });
   assert.deepEqual(sanitizePreferences({ liveNotificationPopup: "no" }), {});
 });
+
+for (const reason of ["paired OCO order executed", "OCO_PEER_EXECUTED"]) {
+  test(`OCO automatic cancellation with ${reason} pops up with an orders action`, () => {
+    for (const symbol of ["ALPHA.M", undefined]) {
+      const prefix = symbol ? `${symbol} ` : "";
+      const toast = liveToastFor(notification(`${prefix}TRIGGER_CANCELED: ${reason}`), NOW);
+      assert.ok(toast);
+      assert.equal(toast.id, "live:ntf_1");
+      assert.equal(toast.description, `${prefix}예약 주문이 반대쪽 익절·손절 주문 체결로 자동 취소됐어요.`);
+      assert.equal(toast.duration, 6_000);
+      assert.deepEqual(toast.action, { label: "주문 보기", href: "/orders" });
+    }
+  });
+}
+
+test("amendments and manual or group cancellations stay quiet", () => {
+  for (const body of [
+    "ALPHA.M TRIGGER_AMENDED",
+    "TRIGGER_AMENDED",
+    "ALPHA.M TRIGGER_CANCELED",
+    "TRIGGER_CANCELED",
+    "TRIGGER_CANCELED: GROUP_CANCELED",
+    "ALPHA.M TRIGGER_CANCELED: GROUP_CANCELED",
+    "ALPHA.M TRIGGER_CANCELED: UNKNOWN_REASON",
+  ]) {
+    assert.equal(liveToastFor(notification(body), NOW), null, body);
+  }
+  assert.equal(liveToastFor(notification("", { title: "Trigger amended" }), NOW), null);
+});
+
+test("OCO automatic cancellation still respects read and expiry checks", () => {
+  const body = "ALPHA.M TRIGGER_CANCELED: paired OCO order executed";
+  assert.equal(liveToastFor(notification(body, { read: true }), NOW), null);
+  assert.equal(liveToastFor(notification(body, { expires_at: "2026-10-02T23:59:59Z" }), NOW), null);
+});
+
+test("a manual cancellation this tab recorded cannot silence an OCO peer cancellation", (t) => {
+  t.after(clearSelfActions);
+  noteSelfAction("TRIGGER_CANCELED", "ALPHA.M", NOW);
+  assert.ok(liveToastFor(notification("ALPHA.M TRIGGER_CANCELED: OCO_PEER_EXECUTED"), NOW));
+  assert.equal(liveToastFor(notification("ALPHA.M TRIGGER_CANCELED"), NOW), null);
+});
+
+test("trigger failures and expirations keep their existing orders action", () => {
+  for (const event of ["TRIGGER_FAILED", "TRIGGER_EXPIRED"]) {
+    assert.deepEqual(
+      liveToastFor(notification(`ALPHA.M ${event}`), NOW)?.action,
+      { label: "주문 보기", href: "/orders" },
+    );
+  }
+});

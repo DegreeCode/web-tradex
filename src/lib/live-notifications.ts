@@ -6,6 +6,7 @@
 import {
   EVENT_CONFIG,
   eventKeyFromTitle,
+  isOcoPeerExecutedReason,
   parseNotificationBody,
   presentNotification,
   type NotificationTone,
@@ -40,6 +41,7 @@ interface LiveToastRule {
 }
 
 const ORDERS: LiveToastAction = { label: "주문 보기", href: "/orders" };
+const OCO_PEER_CANCELED_RULE: LiveToastRule = { action: () => ORDERS };
 const MARGIN: LiveToastAction = { label: "마진 보기", href: "/margin" };
 const SECURITY: LiveToastAction = { label: "보안 확인", href: "/security" };
 const symbolAction = (symbol: string | undefined): LiveToastAction | undefined =>
@@ -109,22 +111,24 @@ export function clearSelfActions(): void {
   selfActions.length = 0;
 }
 
-function eventOf(notification: Notification): { eventKey?: string; symbol?: string } {
+function eventOf(notification: Notification): { eventKey?: string; symbol?: string; reason?: string } {
   const parsed = parseNotificationBody(notification.body);
   const eventKey = parsed.eventKey && EVENT_CONFIG[parsed.eventKey]
     ? parsed.eventKey
     : eventKeyFromTitle(notification.title);
-  return { eventKey, symbol: parsed.symbol };
+  return { eventKey, symbol: parsed.symbol, reason: parsed.reason };
 }
 
 /** The toast for a newly created notification, or null when it shouldn't interrupt. */
 export function liveToastFor(notification: Notification, now = Date.now()): LiveToast | null {
   if (notification.read) return null;
   if (notification.expires_at && Date.parse(notification.expires_at) <= now) return null;
-  const { eventKey, symbol } = eventOf(notification);
-  const rule = eventKey ? LIVE_TOAST_RULES[eventKey] : undefined;
+  const { eventKey, symbol, reason } = eventOf(notification);
+  const ocoPeerCanceled = eventKey === "TRIGGER_CANCELED" && isOcoPeerExecutedReason(reason);
+  const rule = ocoPeerCanceled ? OCO_PEER_CANCELED_RULE : eventKey ? LIVE_TOAST_RULES[eventKey] : undefined;
   if (!eventKey || !rule) return null;
-  if (isSelfAction(eventKey, symbol, now)) return null;
+  // An OCO peer fill cancels automatically, even if this tab just canceled another order.
+  if (!ocoPeerCanceled && isSelfAction(eventKey, symbol, now)) return null;
   const presentation = presentNotification(notification);
   return {
     id: rule.slot ? `live:${rule.slot(symbol)}` : `live:${notification.notification_id}`,

@@ -87,6 +87,7 @@ import {
   withTagList,
   type SymbolMetadataCache,
 } from "./symbol-metadata";
+import { triggerEventQueryRoots, triggerNotificationQueryRoots } from "./trigger-events";
 import type {
   Account,
   Candle,
@@ -1500,8 +1501,8 @@ export function reconcileNotificationData(
 ) {
   const parsed = parseNotificationBody(notification.body);
   const event = parsed.eventKey ?? eventKeyFromTitle(notification.title);
-  const keys = new Set<string>();
-  if (["TRADE_EXECUTED", "TRIGGER_ACTIVATED", "transfer.updated", "ISSUANCE_CREATED", "LOCKUP_RELEASE"].includes(event ?? "")) {
+  const keys = new Set<string>(triggerNotificationQueryRoots(event));
+  if (["TRADE_EXECUTED", "transfer.updated", "ISSUANCE_CREATED", "LOCKUP_RELEASE"].includes(event ?? "")) {
     for (const key of ["orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl"]) keys.add(key);
   }
   if (event === "transfer.updated") keys.add("transfers");
@@ -1606,8 +1607,8 @@ export function usePrivateStream(enabled: boolean) {
       }
       // Private trade.executed is not delivered; fills arrive as notifications.
       // Domain streams below share one batched refetch with their notification.
-      if (stream === "trigger.activated") {
-        invalidateNotificationKeys(queryClient, ["orders", "my-trades", "portfolio", "nav", "nav-history"]);
+      if (stream === "trigger.activated" || stream === "trigger.updated" || stream === "trigger.group_updated") {
+        invalidateNotificationKeys(queryClient, triggerEventQueryRoots(stream, frame.data));
         return;
       }
       if (stream === "transfer.updated") {

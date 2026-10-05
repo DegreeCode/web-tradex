@@ -34,8 +34,10 @@ import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/li
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
   getLeverageOptions,
+  isIndefiniteMarginBlock,
   marginErrorMessage,
   marginPartialFillText,
+  marginSideEligible,
   useCreateMarginPosition,
   validateCollateralAmount,
   validateLeverage,
@@ -72,11 +74,28 @@ export function MarginCreateForm({
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const resolvedSymbol = symbol || initialSymbol || instruments[0]?.symbol || "";
   const [side, setSide] = useState<MarginSide>("LONG");
+  const [sideInitialized, setSideInitialized] = useState(false);
   const [collateral, setCollateral] = useState("");
   const [leverage, setLeverage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
+
+  const longEligible = marginSideEligible(eligibility, "LONG");
+  const shortEligible = marginSideEligible(eligibility, "SHORT");
+  const isEligibleToOpen = side === "LONG" ? longEligible : shortEligible;
+  const otherSideEligible = side === "LONG" ? shortEligible : longEligible;
+  const sideLabel = side === "LONG" ? "롱" : "숏";
+  const otherSideLabel = side === "LONG" ? "숏" : "롱";
+
+  // Resolve the initial side once; later eligibility updates preserve user choices.
+  if (eligibility && !sideInitialized) {
+    setSideInitialized(true);
+    if (!isEligibleToOpen && otherSideEligible) {
+      setSide(side === "LONG" ? "SHORT" : "LONG");
+      setLimitPrice("");
+    }
+  }
 
   const selectedInstrument = useInstrument(resolvedSymbol).data;
   // A Long opens by buying, a Short by selling.
@@ -105,7 +124,6 @@ export function MarginCreateForm({
 
   const isGlobalHalted = marketState?.state === "GLOBAL_HALTED";
   const isSymbolTrading = Boolean(selectedInstrument && selectedInstrument.state === "TRADING");
-  const isEligibleToOpen = Boolean(eligibility?.can_open);
   const { user } = useAuth();
   // Simulation shares the margin route, so a session without MARGIN can't quote either.
   const marginAccess = useSessionAccess("MARGIN");
@@ -191,12 +209,18 @@ export function MarginCreateForm({
 
   const availableCredit = currentAccount?.available_credit;
   const leverageIndex = Math.max(0, leverageOptions.indexOf(resolvedLeverage));
-  const blockedReason = eligibility && !isEligibleToOpen
+  const blockedReason = eligibility && !eligibility.can_open
     ? eligibility.manual_blocked
       ? "관리자가 신규 개설을 막아 둔 계정이에요."
       : eligibility.blocked_until
-        ? `강제청산이 누적되어 ${fmtDateTime(eligibility.blocked_until)}까지 신규 개설이 제한돼요.`
+        ? isIndefiniteMarginBlock(eligibility.blocked_until)
+          ? "강제청산이 누적되어 신규 개설이 무기한 제한돼요."
+          : `강제청산이 누적되어 ${fmtDateTime(eligibility.blocked_until)}까지 신규 개설이 제한돼요.`
         : "신규 개설 요건(유효 거래일 수 등)을 아직 충족하지 않았어요."
+    : eligibility && !isEligibleToOpen
+      ? otherSideEligible
+        ? `아직 ${sideLabel} 자격이 없어요. ${otherSideLabel} 포지션만 열 수 있어요.`
+        : `아직 ${sideLabel} 개설 자격을 충족하지 않았어요.`
     : null;
 
   return (
@@ -212,7 +236,7 @@ export function MarginCreateForm({
             }`}
           >
             {isEligibleToOpen ? <CheckCircle2 className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
-            {isEligibleToOpen ? "개설 가능" : "개설 제한"}
+            {sideLabel} {isEligibleToOpen ? "개설 가능" : "개설 제한"}
           </span>
         ) : eligibilityPending ? (
           <span className="text-[12px] text-app-gray-400">자격 확인 중…</span>
@@ -284,9 +308,13 @@ export function MarginCreateForm({
             setLimitPrice("");
           }}
           options={[
-            { value: "LONG", label: "롱 · 오르면 수익", tone: "buy" },
-            { value: "SHORT", label: "숏 · 내리면 수익", tone: "sell" },
+            { value: "LONG", label: eligibility && !longEligible ? `롱 · ${eligibility.can_open ? "자격 없음" : "개설 제한"}` : "롱 · 오르면 수익", tone: "buy" },
+            { value: "SHORT", label: eligibility && !shortEligible ? `숏 · ${eligibility.can_open ? "자격 없음" : "개설 제한"}` : "숏 · 내리면 수익", tone: "sell" },
           ]}
+          className={[
+            eligibility && !longEligible ? "[&>button:nth-of-type(1)]:opacity-50" : "",
+            eligibility && !shortEligible ? "[&>button:nth-of-type(2)]:opacity-50" : "",
+          ].join(" ")}
         />
         {managerSideBlocked ? (
           <p role="note" className="-mt-2 text-[12px] font-medium text-app-red">

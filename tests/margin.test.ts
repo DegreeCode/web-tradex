@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getLeverageOptions,
+  isIndefiniteMarginBlock,
   estimateMarginReturnPercent,
   validateCollateralAmount,
   validateLeverage,
@@ -10,8 +11,60 @@ import {
   marginErrorMessage,
   marginMaxCollateral,
   marginPartialFillText,
+  marginSideEligible,
 } from "../src/lib/margin";
 import { ApiError } from "../src/lib/api";
+
+test("marginSideEligible checks LONG and SHORT tiers independently", () => {
+  const longOnly = { can_open: true, max_long_leverage: "2.0", max_short_leverage: "0.9" };
+  assert.equal(marginSideEligible(longOnly, "LONG"), true);
+  assert.equal(marginSideEligible(longOnly, "SHORT"), false);
+
+  const shortOnly = { can_open: true, max_long_leverage: "1.0", max_short_leverage: "1.0" };
+  assert.equal(marginSideEligible(shortOnly, "LONG"), false);
+  assert.equal(marginSideEligible(shortOnly, "SHORT"), true);
+
+  const both = { ...longOnly, max_short_leverage: "1.5" };
+  assert.equal(marginSideEligible(both, "LONG"), true);
+  assert.equal(marginSideEligible(both, "SHORT"), true);
+  assert.equal(marginSideEligible({ ...both, can_open: false }, "LONG"), false);
+  assert.equal(marginSideEligible({ ...both, can_open: false }, "SHORT"), false);
+});
+
+test("marginSideEligible compares exact decimal tiers at the 1x boundary", () => {
+  const eligibility = { can_open: true, max_long_leverage: "1.0000000000000001", max_short_leverage: "0.9999999999999999" };
+  assert.equal(marginSideEligible(eligibility, "LONG"), true);
+  assert.equal(marginSideEligible(eligibility, "SHORT"), false);
+  assert.equal(marginSideEligible({ ...eligibility, max_long_leverage: "1.0000000000000000" }, "LONG"), false);
+  assert.equal(marginSideEligible({ ...eligibility, max_short_leverage: "1.0000000000000000" }, "SHORT"), true);
+});
+
+test("marginSideEligible rejects missing eligibility and invalid tiers", () => {
+  for (const side of ["LONG", "SHORT"] as const) {
+    assert.equal(marginSideEligible(null, side), false);
+    assert.equal(marginSideEligible(undefined, side), false);
+    for (const invalid of ["", "invalid", "NaN", "Infinity", "1e1", "0", "-1.0"]) {
+      assert.equal(marginSideEligible({ can_open: true, max_long_leverage: invalid, max_short_leverage: invalid }, side), false);
+    }
+  }
+});
+
+test("isIndefiniteMarginBlock recognizes UTC years from 9999 onward", () => {
+  assert.equal(isIndefiniteMarginBlock("9999-12-31T23:59:59Z"), true);
+  assert.equal(isIndefiniteMarginBlock("9999-01-01T00:00:00Z"), true);
+  assert.equal(isIndefiniteMarginBlock("+010000-01-01T00:00:00Z"), true);
+  assert.equal(isIndefiniteMarginBlock("2026-10-31T23:59:59Z"), false);
+  assert.equal(isIndefiniteMarginBlock("9999-01-01T00:00:00+09:00"), false);
+  assert.equal(isIndefiniteMarginBlock("9998-12-31T23:59:59-01:00"), true);
+});
+
+test("isIndefiniteMarginBlock rejects absent and invalid dates", () => {
+  assert.equal(isIndefiniteMarginBlock(null), false);
+  assert.equal(isIndefiniteMarginBlock(undefined), false);
+  assert.equal(isIndefiniteMarginBlock(""), false);
+  assert.equal(isIndefiniteMarginBlock("invalid"), false);
+  assert.equal(isIndefiniteMarginBlock("9999-13-31T23:59:59Z"), false);
+});
 
 test("estimated return uses funded LONG margin and current SHORT collateral", () => {
   const long = { status: "OPEN", side: "LONG", equity: "125", collateral: "0", borrowed_credit: "200", leverage: "3" } as const;
