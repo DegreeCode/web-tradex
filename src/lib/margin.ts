@@ -48,6 +48,21 @@ export interface MarginEligibility {
   can_open: boolean;
 }
 
+export function marginSideEligible(
+  eligibility: Pick<MarginEligibility, "can_open" | "max_long_leverage" | "max_short_leverage"> | null | undefined,
+  side: MarginSide,
+): boolean {
+  if (!eligibility?.can_open) return false;
+  const maxLeverage = side === "LONG" ? eligibility.max_long_leverage : eligibility.max_short_leverage;
+  if (typeof maxLeverage !== "string" || !isPositiveDecimal(maxLeverage)) return false;
+  const comparison = compareDecimal(maxLeverage, "1.0");
+  return side === "LONG" ? comparison > 0 : comparison >= 0;
+}
+
+export function isIndefiniteMarginBlock(blockedUntil: string | null | undefined): boolean {
+  return typeof blockedUntil === "string" && new Date(blockedUntil).getUTCFullYear() >= 9999;
+}
+
 export interface MarginPosition {
   /** Only on the response of the entry/reduction/closure that produced it. */
   execution?: MarginExecution;

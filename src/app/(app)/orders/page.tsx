@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   EmptyState,
   ErrorBlock,
@@ -21,10 +22,16 @@ import {
   fmtPrice,
   fmtQuantity,
   fmtRelative,
-  toNumber,
+  isPositiveDecimal,
 } from "@/lib/format";
 import { useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
 import { useSessionAccess } from "@/components/session-access";
+import {
+  hasTriggerOrderFields,
+  triggerCancelWarning,
+  triggerGroupRoleLabel,
+  triggerOrderDisplayRows,
+} from "@/lib/trigger-order";
 import type { Order, OrderStatus } from "@/lib/types";
 
 type Tab = "ORDERS" | "TRADES";
@@ -48,6 +55,7 @@ const FILTERS: Record<Filter, (status: OrderStatus) => boolean> = {
 export default function OrdersPage() {
   const [tab, setTab] = useState<Tab>("ORDERS");
   const [filter, setFilter] = useState<Filter>("ALL");
+  const [pendingCancel, setPendingCancel] = useState<Order | null>(null);
   const ordersQuery = useOrders(undefined, tab === "ORDERS");
   const tradesQuery = useMyTrades(undefined, tab === "TRADES");
   const cancelOrder = useCancelOrder();
@@ -67,12 +75,24 @@ export default function OrdersPage() {
   );
 
   const cancelingId = cancelOrder.isPending ? cancelOrder.variables : null;
+  const cancelWarning = pendingCancel ? triggerCancelWarning(pendingCancel.group_role) : null;
 
   function handleCancel(order: Order) {
     cancelOrder.mutate(order.order_id, {
-      onSuccess: () => toast.success("예약주문을 취소했어요"),
+      onSuccess: () => {
+        setPendingCancel((current) => current?.order_id === order.order_id ? null : current);
+        toast.success("예약주문을 취소했어요");
+      },
       onError: (error) => toast.error(errorMessage(error)),
     });
+  }
+
+  function requestCancel(order: Order) {
+    if (order.order_type === "TRIGGER" && triggerCancelWarning(order.group_role)) {
+      setPendingCancel(order);
+    } else {
+      handleCancel(order);
+    }
   }
 
   return (
@@ -130,95 +150,123 @@ export default function OrdersPage() {
             </>
           ) : (
             <div className="grid gap-2 xl:grid-cols-2">
-              {filteredOrders.map((order) => (
-                <div
-                  key={order.order_id}
-                  className="rounded-2xl bg-card p-4 shadow-card"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <SideBadge side={order.side} />
-                      <span className="text-[14px] font-bold text-app-gray-900">
-                        {order.symbol}
-                      </span>
-                      {order.order_type === "TRIGGER" ? (
-                        <span className="rounded-md bg-app-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-app-gray-600">
-                          예약
+              {filteredOrders.map((order) => {
+                const triggerFields = hasTriggerOrderFields(order);
+                const triggerRows = triggerOrderDisplayRows(order, { compact: true });
+                const groupRole = order.order_type === "TRIGGER" ? triggerGroupRoleLabel(order.group_role) : null;
+                const cumulative = triggerFields && (order.fill_count ?? 0) > 0;
+                const hasFilledQuantity = isPositiveDecimal(order.filled_quantity);
+                const hasPrincipal = isPositiveDecimal(order.principal);
+                return (
+                  <div
+                    key={order.order_id}
+                    className="rounded-2xl bg-card p-4 shadow-card"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <SideBadge side={order.side} />
+                        <span className="text-[14px] font-bold text-app-gray-900">
+                          {order.symbol}
                         </span>
+                        {order.order_type === "TRIGGER" ? (
+                          <span className="rounded-md bg-app-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-app-gray-600">
+                            예약
+                          </span>
+                        ) : null}
+                        {groupRole ? (
+                          <span className="rounded-md bg-app-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-app-gray-600">
+                            {groupRole}
+                          </span>
+                        ) : null}
+                      </div>
+                      <OrderStatusChip status={order.status} />
+                    </div>
+
+                    <div className="mt-2.5 space-y-1 text-[13px]">
+                      {order.order_type === "TRIGGER" && !triggerRows.some((row) => row.key === "trailing") ? (
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-app-gray-500">
+                            {order.trigger_condition === "GTE" ? "이상 조건" : "이하 조건"}
+                          </span>
+                          <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
+                            {fmtPrice(order.trigger_price ?? "0")}
+                          </span>
+                        </div>
+                      ) : null}
+                      {!triggerRows.some((row) => row.key === "cumulative-quantity") ? (
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-app-gray-500">
+                            {hasFilledQuantity
+                              ? cumulative ? "누적 체결 수량" : "체결 수량"
+                              : "주문 수량"}
+                          </span>
+                          <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
+                            {fmtQuantity(
+                              hasFilledQuantity
+                                ? order.filled_quantity
+                                : (order.requested_quantity ?? "0"),
+                            )}
+                            주
+                          </span>
+                        </div>
+                      ) : null}
+                      {!triggerFields || hasPrincipal ? (
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-app-gray-500">
+                            {hasPrincipal ? cumulative ? "누적 체결 금액" : "체결 금액" : "주문 금액"}
+                          </span>
+                          <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
+                            {fmtCredit(
+                              hasPrincipal
+                                ? order.principal
+                                : (order.requested_credit ?? order.max_credit_amount ?? "0"),
+                              order.trigger_price ? 6 : 2,
+                            )}{" "}
+                            Credit
+                          </span>
+                        </div>
+                      ) : null}
+                      {isPositiveDecimal(order.average_price) ? (
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-app-gray-500">평균 체결가</span>
+                          <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
+                            {fmtPrice(order.average_price)}
+                          </span>
+                        </div>
+                      ) : null}
+                      {triggerRows.map((row) => (
+                        <div key={row.key} className="flex items-start justify-between gap-3">
+                          <span className="shrink-0 text-app-gray-500">{row.label}</span>
+                          <div className="min-w-0 break-all text-right">
+                            <span className="numeric font-semibold text-app-gray-900">{row.value}</span>
+                            {row.secondary ? (
+                              <p className="text-[12px] text-app-gray-400">{row.secondary}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-app-gray-100 pt-2.5">
+                      <span className="text-[12px] text-app-gray-400">
+                        {fmtRelative(order.created_at)}
+                        {order.expires_at ? ` · ${fmtDeadline(order.expires_at)}` : ""}
+                      </span>
+                      {order.status === "PENDING" ? (
+                        <button
+                          type="button"
+                          onClick={() => requestCancel(order)}
+                          disabled={!tradeAccess.allowed || cancelingId === order.order_id}
+                          title={tradeAccess.allowed ? undefined : tradeAccess.reason}
+                          className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
+                        >
+                          {cancelingId === order.order_id ? "취소 중…" : "주문 취소"}
+                        </button>
                       ) : null}
                     </div>
-                    <OrderStatusChip status={order.status} />
                   </div>
-
-                  <div className="mt-2.5 space-y-1 text-[13px]">
-                    {order.order_type === "TRIGGER" ? (
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-app-gray-500">
-                          {order.trigger_condition === "GTE" ? "이상 조건" : "이하 조건"}
-                        </span>
-                        <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
-                          {fmtPrice(order.trigger_price ?? "0")}
-                        </span>
-                      </div>
-                    ) : null}
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="text-app-gray-500">
-                        {order.filled_quantity && toNumber(order.filled_quantity) > 0
-                          ? "체결 수량"
-                          : "주문 수량"}
-                      </span>
-                      <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
-                        {fmtQuantity(
-                          toNumber(order.filled_quantity) > 0
-                            ? order.filled_quantity
-                            : (order.requested_quantity ?? "0"),
-                        )}
-                        주
-                      </span>
-                    </div>
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="text-app-gray-500">
-                        {toNumber(order.principal) > 0 ? "체결 금액" : "주문 금액"}
-                      </span>
-                      <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
-                        {fmtCredit(
-                          toNumber(order.principal) > 0
-                            ? order.principal
-                            : (order.requested_credit ?? order.max_credit_amount ?? "0"),
-                          order.trigger_price ? 6 : 2,
-                        )}{" "}
-                        Credit
-                      </span>
-                    </div>
-                    {toNumber(order.average_price) > 0 ? (
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-app-gray-500">평균 체결가</span>
-                        <span className="numeric min-w-0 break-all text-right font-semibold text-app-gray-900">
-                          {fmtPrice(order.average_price)}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-app-gray-100 pt-2.5">
-                    <span className="text-[12px] text-app-gray-400">
-                      {fmtRelative(order.created_at)}
-                      {order.expires_at ? ` · ${fmtDeadline(order.expires_at)}` : ""}
-                    </span>
-                    {order.status === "PENDING" ? (
-                      <button
-                        type="button"
-                        onClick={() => handleCancel(order)}
-                        disabled={!tradeAccess.allowed || cancelingId === order.order_id}
-                        title={tradeAccess.allowed ? undefined : tradeAccess.reason}
-                        className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
-                      >
-                        {cancelingId === order.order_id ? "취소 중…" : "주문 취소"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               <LoadMoreButton
                 hasMore={ordersQuery.hasNextPage}
                 loading={ordersQuery.isFetchingNextPage}
@@ -274,6 +322,20 @@ export default function OrdersPage() {
           ) : null}
         </>
       )}
+      <ConfirmDialog
+        open={Boolean(pendingCancel)}
+        onOpenChange={(open) => !open && setPendingCancel(null)}
+        title="예약주문을 취소할까요?"
+        description={cancelWarning}
+        confirmLabel="주문 취소"
+        pendingLabel="취소 중…"
+        pending={cancelOrder.isPending}
+        onConfirm={() => {
+          if (pendingCancel && tradeAccess.allowed && !cancelOrder.isPending) {
+            handleCancel(pendingCancel);
+          }
+        }}
+      />
     </div>
   );
 }

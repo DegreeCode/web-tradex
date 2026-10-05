@@ -225,6 +225,13 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
     icon: CalendarClock,
     tone: "info",
   },
+  TRIGGER_AMENDED: {
+    title: "예약 주문을 정정했어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문을 정정했어요. 바뀐 조건에 따라 주문해요.`,
+    icon: CalendarClock,
+    tone: "info",
+  },
   TRIGGER_CANCELED: {
     title: "예약 주문을 취소했어요",
     label: "거래",
@@ -390,6 +397,7 @@ export const TITLE_EVENT_KEYS: Record<string, string> = {
   "symbol halted": "SYMBOL_HALTED",
   "symbol resumed": "SYMBOL_RESUMED",
   "trade executed": "TRADE_EXECUTED",
+  "trigger amended": "TRIGGER_AMENDED",
   "owner trade disclosure": "OWNER_TRADE",
   "owner stock transfer disclosure": "OWNER_STOCK_TRANSFER",
   "transfer updated": "transfer.updated",
@@ -447,6 +455,10 @@ export const REASON_LABELS: Record<string, string> = {
   GLOBAL_HALTED: "전체 시장 거래가 멈춰 있어요",
   SYMBOL_HALTED: "종목 거래가 멈춰 있어요",
   PARTY_OR_SYMBOL_UNAVAILABLE: "계좌나 종목을 더 이상 쓸 수 없어요",
+  GROUP_CANCELED: "묶음 주문을 취소했어요",
+  CREDIT_LIMIT_EXHAUSTED: "예산을 모두 사용했어요",
+  OCO_PEER_EXECUTED: "반대쪽 익절·손절 주문이 체결됐어요",
+  "paired OCO order executed": "반대쪽 익절·손절 주문이 체결됐어요",
 };
 
 export const TONE_STYLES: Record<NotificationTone, { icon: string; body: string }> = {
@@ -509,6 +521,11 @@ export function localizeReason(reason: string): string | null {
   return isEnumToken(reason) ? null : reason;
 }
 
+/** Stored OCO cancellation notices use prose; domain events can keep the token. */
+export function isOcoPeerExecutedReason(reason: string | undefined): boolean {
+  return reason === "OCO_PEER_EXECUTED" || reason === "paired OCO order executed";
+}
+
 export function presentNotification(notification: Notification): NotificationPresentation {
   const parsed = parseNotificationBody(notification.body);
   const titleEventKey = eventKeyFromTitle(notification.title);
@@ -517,13 +534,16 @@ export function presentNotification(notification: Notification): NotificationPre
 
   if (config) {
     const symbol = parsed.symbol;
+    const ocoPeerCanceled = eventKey === "TRIGGER_CANCELED" && isOcoPeerExecutedReason(parsed.reason);
     let body = config.body(symbol);
-    if (eventKey === "TRADE_EXECUTED" && parsed.count !== undefined) {
+    if (ocoPeerCanceled) {
+      body = `${symbolPrefix(symbol)}예약 주문이 반대쪽 익절·손절 주문 체결로 자동 취소됐어요.`;
+    } else if (eventKey === "TRADE_EXECUTED" && parsed.count !== undefined) {
       body = `${symbol ? `${symbol} ` : ""}거래 ${parsed.count}건이 체결됐어요.`;
     }
     // Moderation reasons are user-facing text; other reasons are codes. An
     // expiry's reason only restates the deadline the body already explains.
-    const reason = parsed.reason && eventKey !== "TRIGGER_EXPIRED"
+    const reason = parsed.reason && eventKey !== "TRIGGER_EXPIRED" && !ocoPeerCanceled
       ? eventKey === "ICON_REJECTED" ? parsed.reason : localizeReason(parsed.reason)
       : null;
     if (reason) {

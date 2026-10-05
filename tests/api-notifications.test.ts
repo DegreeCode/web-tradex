@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient } from "@tanstack/react-query";
+import { ApiError, errorMessage } from "../src/lib/api";
 import {
   presentNotification,
   parseTradingNotification,
@@ -169,3 +170,13 @@ test("notification sentences weave the symbol in and hide unknown reason codes",
   // Titles shown by earlier app versions still resolve to their event.
   assert.equal(presentNotification(notification("", "종목 거래가 중지됐어요")).title, "거래가 일시 중지됐어요");
 });
+
+for (const [code, message] of [
+  ["ORDER_REVISION_CONFLICT", "다른 곳에서 주문이 바뀌었어요. 새로고침 후 다시 시도해주세요"],
+  ["ORDER_NOT_AMENDABLE", "지금은 정정할 수 없는 주문이에요"],
+  ["ORDER_GROUP_NOT_CANCELABLE", "이미 끝나 취소할 수 없는 묶음 주문이에요"],
+]) {
+  test(`the trigger v4 conflict ${code} has a localized error message`, () => {
+    assert.equal(errorMessage(new ApiError(409, code, "server error")), message);
+  });
+}

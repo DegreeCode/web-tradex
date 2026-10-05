@@ -41,6 +41,7 @@ import {
 import { findPosition, useOrderSimulation, usePlaceOrder } from "@/lib/hooks";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import type { Account, Instrument, Order, OrderRequest, OrderSimulationRequest, Portfolio } from "@/lib/types";
+import { hasTriggerOrderFields, triggerGroupRoleLabel, triggerOrderDisplayRows } from "@/lib/trigger-order";
 
 type Side = "BUY" | "SELL";
 type OrderMode = "MARKET" | "TRIGGER";
@@ -524,16 +525,29 @@ export function OrderForm({
 function OrderResultDialog({ order }: { order: Order }) {
   const pending = order.status === "PENDING";
   const partial = order.status === "PARTIALLY_FILLED";
+  const triggerFields = hasTriggerOrderFields(order);
+  const triggerRows = triggerOrderDisplayRows(order);
+  const cumulative = triggerFields && (order.fill_count ?? 0) > 0;
+  const groupRole = order.order_type === "TRIGGER" ? triggerGroupRoleLabel(order.group_role) : null;
+  const ended = triggerFields && !pending && !partial && order.status !== "FILLED" && order.status !== "ACTIVATED";
   return (
     <div>
       <DialogHeader>
-        <DialogTitle>{pending ? "예약주문을 등록했어요" : "주문이 체결됐어요"}</DialogTitle>
+        <DialogTitle>
+          {pending
+            ? cumulative ? "남은 예약주문이 대기 중이에요" : "예약주문을 등록했어요"
+            : ended ? "예약주문이 종료됐어요" : "주문이 체결됐어요"}
+        </DialogTitle>
         <DialogDescription>
           {pending
-            ? "조건이 충족되면 자동으로 체결돼요. 주문 내역에서 취소할 수 있어요."
-            : partial
-              ? "슬리피지·재고 한도 때문에 일부만 체결됐어요."
-              : "자세한 내용은 주문 내역에서 확인할 수 있어요."}
+            ? cumulative
+              ? "일부 체결됐어요. 남은 주문은 계속 대기하며 주문 내역에서 취소할 수 있어요."
+              : "조건이 충족되면 자동으로 체결돼요. 주문 내역에서 취소할 수 있어요."
+            : triggerRows.some((row) => row.key === "terminal-reason")
+              ? "종료 사유는 아래에서 확인할 수 있어요."
+              : partial
+                ? "슬리피지·재고 한도 때문에 일부만 체결됐어요."
+                : "자세한 내용은 주문 내역에서 확인할 수 있어요."}
         </DialogDescription>
       </DialogHeader>
 
@@ -542,39 +556,61 @@ function OrderResultDialog({ order }: { order: Order }) {
           <div className="flex min-w-0 items-center gap-2">
             <SideBadge side={order.side} />
             <span className="text-[14px] font-semibold text-app-gray-900">{order.symbol}</span>
+            {groupRole ? (
+              <span className="rounded-md bg-app-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-app-gray-600">
+                {groupRole}
+              </span>
+            ) : null}
           </div>
           <OrderStatusChip status={order.status} />
         </div>
 
         {pending ? (
           <>
-            <ResultRow
-              label="목표 가격"
-              value={`${fmtPrice(order.trigger_price ?? "0")} ${
-                order.trigger_condition === "GTE" ? "이상" : "이하"
-              }`}
-            />
-            {order.requested_credit ? (
+            {!triggerRows.some((row) => row.key === "trailing") ? (
+              <ResultRow
+                label="목표 가격"
+                value={`${fmtPrice(order.trigger_price ?? "0")} ${
+                  order.trigger_condition === "GTE" ? "이상" : "이하"
+                }`}
+              />
+            ) : null}
+            {!triggerFields && order.requested_credit ? (
               <ResultRow label="주문 금액" value={`${fmtCredit(order.requested_credit)} Credit`} />
             ) : null}
             {order.requested_quantity ? (
               <ResultRow label="주문 수량" value={`${fmtQuantity(order.requested_quantity)}주`} />
             ) : null}
-            {order.max_credit_amount ? (
+            {!triggerFields && order.max_credit_amount ? (
               <ResultRow
                 label="예약 금액"
                 value={`${fmtCredit(order.max_credit_amount)} Credit`}
               />
             ) : null}
+            {cumulative ? (
+              <>
+                <ResultRow label="평균 체결가" value={`${fmtPrice(order.average_price)} Credit`} />
+                <ResultRow label="누적 체결 금액" value={`${fmtCredit(order.principal)} Credit`} />
+                <ResultRow label="누적 수수료" value={`${fmtCredit(order.fee)} Credit`} />
+              </>
+            ) : null}
           </>
         ) : (
           <>
-            <ResultRow label="체결 수량" value={`${fmtQuantity(order.filled_quantity)}주`} />
+            <ResultRow label={cumulative ? "누적 체결 수량" : "체결 수량"} value={`${fmtQuantity(order.filled_quantity)}주`} />
             <ResultRow label="평균 체결가" value={`${fmtPrice(order.average_price)} Credit`} />
-            <ResultRow label="주문 금액" value={`${fmtCredit(order.principal)} Credit`} />
-            <ResultRow label="수수료" value={`${fmtCredit(order.fee)} Credit`} />
+            <ResultRow label={triggerFields ? cumulative ? "누적 체결 금액" : "체결 금액" : "주문 금액"} value={`${fmtCredit(order.principal)} Credit`} />
+            <ResultRow label={cumulative ? "누적 수수료" : "수수료"} value={`${fmtCredit(order.fee)} Credit`} />
           </>
         )}
+        {triggerRows.map((row) => (
+          <div key={row.key}>
+            <ResultRow label={row.label} value={row.value} />
+            {row.secondary ? (
+              <p className="text-right text-[12px] text-app-gray-400">{row.secondary}</p>
+            ) : null}
+          </div>
+        ))}
       </div>
     </div>
   );

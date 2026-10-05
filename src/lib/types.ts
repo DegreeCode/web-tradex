@@ -130,6 +130,8 @@ export type OrderStatus =
   | "EXPIRED"
   | "FAILED";
 
+type FutureOrderToken = string & Record<never, never>;
+
 export interface Order {
   order_id: string;
   symbol: string;
@@ -148,6 +150,24 @@ export interface Order {
   slippage_reference_price?: string;
   max_credit_amount?: string;
   fee_ppm?: number;
+  revision?: number;
+  on_partial_fill?: "TERMINATE" | "KEEP" | FutureOrderToken;
+  on_slippage_exceeded?: "FAIL" | "RETRY" | FutureOrderToken;
+  slippage_ppm?: number;
+  fill_count?: number;
+  activation_count?: number;
+  remaining_quantity?: string;
+  remaining_credit?: string;
+  held_credit?: string;
+  held_quantity?: string;
+  hold_scope?: "ORDER" | "GROUP" | FutureOrderToken;
+  group_id?: string;
+  group_role?: "ENTRY" | "TAKE_PROFIT" | "STOP_LOSS" | FutureOrderToken;
+  parent_group_id?: string;
+  wait_reason?: "PARTIAL_FILL" | "SLIPPAGE_EXCEEDED" | FutureOrderToken;
+  terminal_reason?: string;
+  trailing_ppm?: number;
+  trailing_watermark_price?: string;
   expires_at?: string;
   created_at: string;
 }
