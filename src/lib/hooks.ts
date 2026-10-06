@@ -118,7 +118,6 @@ import type {
   Portfolio,
   Position,
   PublicTrade,
-  RealizedPnL,
   SessionList,
   Trade,
   Transfer,
@@ -366,13 +365,13 @@ export function usePolledSymbolTicker(symbol: string | undefined) {
   }, [queryClient, signedIn, symbol, ticker]);
 }
 
-export function useOrders(limit = PAGE_SIZE, enabled = true) {
+export function useOrders(limit = PAGE_SIZE, enabled = true, filters: { account_id?: string; status?: string } = {}) {
   const privateStatus = useSocketStatus("private");
   const staleTime = usePrivateStaleTime();
   return useInfiniteQuery({
-    queryKey: ["orders", limit],
+    queryKey: ["orders", limit, filters],
     queryFn: ({ pageParam }) =>
-      apiPage<Order>(`/api/v1/orders${buildQuery({ limit, cursor: pageParam })}`),
+      apiPage<Order>(`/api/v1/orders${buildQuery({ ...filters, limit, cursor: pageParam })}`),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     // Fills arrive over the private socket; a slow poll only catches silent
@@ -398,18 +397,6 @@ export function useMyTrades(limit = PAGE_SIZE, enabled = true) {
       apiPage<Trade>(`/api/v1/me/trades${buildQuery({ limit, cursor: pageParam })}`),
     staleTime,
     enabled,
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
-  });
-}
-
-export function useRealizedPnL(limit = PAGE_SIZE) {
-  const staleTime = usePrivateStaleTime();
-  return useInfiniteQuery({
-    queryKey: ["realized-pnl", limit],
-    staleTime,
-    queryFn: ({ pageParam }) =>
-      apiPage<RealizedPnL>(`/api/v1/me/realized-pnl${buildQuery({ limit, cursor: pageParam })}`),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
   });
@@ -541,7 +528,7 @@ export function useManagerRequests(symbol: string | undefined) {
 
 function invalidateTrading(queryClient: QueryClient) {
   // Batched with the TRADE_EXECUTED notification that usually follows.
-  invalidateBatched(queryClient, [["orders"], ["portfolio"], ["my-trades"]]);
+  invalidateBatched(queryClient, [["orders"], ["order-groups"], ["portfolio"], ["my-trades"], ["accounts"], ["nav"], ["pnl"], ["pnl-history"], ["margin-positions"], ["margin-position"]]);
   if (!isSignedIn() || getSocket("public").getStatus() !== "open") {
     void queryClient.invalidateQueries({ queryKey: ["symbol-trades"] });
   }
@@ -1067,7 +1054,7 @@ export function useMarkAllNotificationsRead() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiData<{ read_count: number }>("/api/v1/notifications/read-all", { method: "POST" }),
+      apiData<{ read_count: number }>("/api/v1/notifications/read-all", { method: "POST", timeoutMs: 65_000 }),
     onSuccess: () => markNotificationsReadInCaches(queryClient, "all"),
   });
 }
@@ -1503,12 +1490,12 @@ export function reconcileNotificationData(
   const event = parsed.eventKey ?? eventKeyFromTitle(notification.title);
   const keys = new Set<string>(triggerNotificationQueryRoots(event));
   if (["TRADE_EXECUTED", "transfer.updated", "ISSUANCE_CREATED", "LOCKUP_RELEASE"].includes(event ?? "")) {
-    for (const key of ["orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl"]) keys.add(key);
+    for (const key of ["orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl", "pnl", "pnl-history", "order-groups"]) keys.add(key);
   }
   if (event === "transfer.updated") keys.add("transfers");
   // Delisting settles remaining holdings into Credit.
   if (event === "DELISTED") {
-    for (const key of ["portfolio", "accounts", "nav", "nav-history", "realized-pnl"]) keys.add(key);
+    for (const key of ["portfolio", "accounts", "nav", "nav-history", "realized-pnl", "pnl", "pnl-history", "order-groups"]) keys.add(key);
   }
   if (event?.startsWith("margin.")) {
     // A warning only changes risk; settlements and liquidations move balances too.
@@ -1517,14 +1504,14 @@ export function reconcileNotificationData(
   if (event === "MANAGER_CHANGED" || event === "MANAGER_FORCED_CHANGE") keys.add("manager-requests");
   if (event === "AUTH_PASSKEY_ADDED" || event === "AUTH_PASSKEY_DELETED") keys.add("passkeys");
   if (event === "AUTH_SESSIONS_REVOKED" || event === "AUTH_LOGIN" || event === "AUTH_LOGOUT") keys.add("sessions");
-  if (event === "ICON_REJECTED") keys.add("icon-requests");
+  if (event === "ICON_REJECTED" || event === "ICON_REVOKED") keys.add("icon-requests");
   if (event === "CURVE_CEILING_REACHED") keys.add("issuance-preview");
   if ([
-    "SYMBOL_METADATA_CHANGED", "SYMBOL_LISTED", "ISSUANCE_CREATED", "LOCKUP_RELEASE",
+    "SYMBOL_METADATA_CHANGED", "SYMBOL_LISTED", "ICON_REVOKED", "ISSUANCE_CREATED", "LOCKUP_RELEASE",
     "CURVE_CEILING_REACHED", "MANAGER_CHANGED", "MANAGER_FORCED_CHANGE",
   ].includes(event ?? "")) {
     // applyTradingNotification already refreshes these metadata events.
-    if (parsed.symbol && event !== "SYMBOL_METADATA_CHANGED" && event !== "SYMBOL_LISTED") {
+    if (parsed.symbol && event !== "SYMBOL_METADATA_CHANGED" && event !== "SYMBOL_LISTED" && event !== "ICON_REVOKED") {
       void refreshSymbolMetadata(queryClient, parsed.symbol);
     }
     keys.add("icon-requests");

@@ -9,12 +9,12 @@ import {
   ChangeIndicator,
   EmptyState,
   ErrorBlock,
-  LoadMoreButton,
   PageHeader,
   SectionHeader,
   SkeletonRows,
   Surface,
 } from "@/components/primitives";
+import { PnLPanel } from "@/components/pnl-panel";
 import { Segmented } from "@/components/segmented";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
@@ -22,7 +22,6 @@ import {
   changePercent,
   fmtCredit,
   fmtDecimal,
-  fmtRelative,
   fmtSigned,
   shortId,
   toNumber,
@@ -33,20 +32,17 @@ import {
   useInstruments,
   useNav,
   useNavHistory,
-  useRealizedPnL,
 } from "@/lib/hooks";
 import type { NavRange } from "@/lib/types";
 
 export default function PortfolioPage() {
   const { accounts, portfolios, isLoading, error: portfolioError, refetch: refetchPortfolios } = useAllPortfolios();
   const instrumentsQuery = useInstruments();
-  const realizedQuery = useRealizedPnL(20);
   const accountName = (accountId: string) => {
     const account = accounts.find((row) => row.account_id === accountId);
-    return account ? accountLabel(account, accounts) : "계좌";
+    return account ? accountLabel(account, accounts) : `계좌 ${shortId(accountId)}`;
   };
   const navQuery = useNav();
-  const [realizedLimit, setRealizedLimit] = useState(5);
   const [accountFilter, setAccountFilter] = useState<string>("ALL");
   const [range, setRange] = useState<NavRange>("1mo");
   const navHistory = useNavHistory(range, accountFilter === "ALL");
@@ -113,15 +109,6 @@ export default function PortfolioPage() {
     navSeries.length >= 2
       ? toNumber(navSeries[navSeries.length - 1].value) - toNumber(navSeries[0].value)
       : null;
-
-  const loadedRealized = useMemo(
-    () => realizedQuery.data?.pages.flatMap((page) => page.data) ?? [],
-    [realizedQuery.data],
-  );
-  const realizedRows = loadedRealized.slice(0, realizedLimit);
-  // Only the rows shown are summed, so the label says how many they are.
-  const realizedTotal = realizedRows.reduce((sum, row) => sum + toNumber(row.realized_pnl), 0);
-  const canShowMoreRealized = realizedLimit < loadedRealized.length || realizedQuery.hasNextPage;
 
   return (
     <div className="space-y-6 xl:grid xl:grid-cols-12 xl:gap-5 xl:space-y-0">
@@ -284,54 +271,7 @@ export default function PortfolioPage() {
         )}
       </section>
 
-      <section className="xl:col-span-6">
-        <SectionHeader
-          title="실현 손익"
-          description={realizedRows.length > 0 ? `최근 ${realizedRows.length}건 합계 ${fmtSigned(realizedTotal, 4)} Credit` : undefined}
-        />
-        {realizedQuery.isError ? <ErrorBlock message={errorMessage(realizedQuery.error)} onRetry={() => void realizedQuery.refetch()} /> : null}
-        {realizedQuery.isLoading ? (
-          <SkeletonRows rows={2} />
-        ) : realizedRows.length === 0 && !realizedQuery.isError ? (
-          <EmptyState title="실현 손익 내역이 없어요" description="매도하면 손익이 기록돼요" />
-        ) : (
-          <>
-            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
-              {realizedRows.map((row) => (
-                <div
-                  key={`${row.trade_id}-${row.at}`}
-                  className="flex flex-wrap items-center justify-between gap-2 py-3"
-                >
-                  <div>
-                    <p className="min-w-0 break-all text-[14px] font-semibold text-app-gray-900">{row.symbol}</p>
-                    <p className="text-[12px] text-app-gray-500">{fmtRelative(row.at)}</p>
-                  </div>
-                  <p
-                    className={
-                      toNumber(row.realized_pnl) >= 0
-                        ? "numeric min-w-0 break-all text-[14px] font-bold text-app-red"
-                        : "numeric min-w-0 break-all text-[14px] font-bold text-app-blue"
-                    }
-                  >
-                    {fmtSigned(row.realized_pnl, 6)}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <LoadMoreButton
-              hasMore={canShowMoreRealized}
-              loading={realizedQuery.isFetchingNextPage}
-              onLoad={() => {
-                const next = realizedLimit + 10;
-                setRealizedLimit(next);
-                // Fetch only once the already loaded rows run out.
-                if (next > loadedRealized.length && realizedQuery.hasNextPage) void realizedQuery.fetchNextPage();
-              }}
-              className="mt-3"
-            />
-          </>
-        )}
-      </section>
+      <PnLPanel key={accountFilter} accountId={accountFilter === "ALL" ? undefined : accountFilter} accountName={accountName} />
     </div>
   );
 }

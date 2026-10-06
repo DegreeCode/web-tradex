@@ -45,6 +45,7 @@ export class ApiError extends Error {
 }
 
 const MESSAGES: Record<string, string> = {
+  PNL_HISTORY_UNAVAILABLE: "선택한 시점의 손익을 확인할 수 없어요",
   ICON_INVALID: "아이콘 URL과 이미지 형식·크기가 현재 거래소 규격에 맞는지 확인해주세요",
   ICON_REQUEST_CONFLICT: "아이콘 심사 상태가 변경됐어요. 내역을 새로고침해주세요",
   ISSUANCE_LIMIT: "가격 희석 한도를 넘어요. 예치 금액을 줄여주세요",
@@ -168,6 +169,7 @@ interface RequestOptions {
   body?: unknown;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface ErrorEnvelope {
@@ -194,7 +196,7 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
   const forwardAbort = () => controller.abort();
   options.signal?.addEventListener("abort", forwardAbort, { once: true });
   if (options.signal?.aborted) controller.abort();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
   let response: Response;
   let text: string;
   try {

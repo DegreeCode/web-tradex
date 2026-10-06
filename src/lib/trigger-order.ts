@@ -26,12 +26,19 @@ export function triggerWaitReasonLabel(reason?: string): string | null {
   switch (reason) {
     case "PARTIAL_FILL": return "부분 체결 후 남은 수량 대기";
     case "SLIPPAGE_EXCEEDED": return "슬리피지 초과로 다음 가격 변동 대기";
+    case "MARGIN_INTEREST_PENDING": return "마진 이자 정산 대기";
     default: return null;
   }
 }
 
 export function triggerTerminalReasonLabel(reason?: string): string | null {
   switch (reason) {
+    case "POSITION_EXHAUSTED": return "포지션 잔여 수량 없음";
+    case "MARGIN_POSITION_NOT_OPEN": return "포지션 종료 또는 거래 불가";
+    case "MARGIN_RISK_LIMIT": return "마진 위험 기준 초과";
+    case "MARGIN_LIQUIDITY": return "마진 정산 지급 여력 부족";
+    case "SYMBOL_DELISTED": return "종목 상장폐지";
+    case "ACCOUNT_DELETED": return "연결 계좌 삭제";
     case "CREDIT_LIMIT_EXHAUSTED": return "예산 소진";
     case "OCO_PEER_EXECUTED": return "반대쪽 주문 체결로 자동 취소";
     case "GROUP_CANCELED": return "묶음 주문 취소";
@@ -89,6 +96,7 @@ export function triggerOrderDisplayRows(
   const add = (key: string, label: string, value: string, secondary?: string) => {
     rows.push({ key, label, value, ...(secondary ? { secondary } : {}) });
   };
+  if (order.margin_position_id) add("margin", "마진 종료", order.margin_side === "SHORT" ? "숏 포지션 매수 종료" : "롱 포지션 매도 종료", "추가 자산 잠금 없음 · 마진 정산 수수료 적용");
 
   if (order.requested_credit != null) {
     add("budget", "주문 예산", `${fmtCredit(order.requested_credit)} Credit`);

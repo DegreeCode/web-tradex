@@ -7,21 +7,21 @@ import { invalidateBatched } from "../src/lib/query-batch";
 import { triggerEventQueryRoots, triggerNotificationQueryRoots } from "../src/lib/trigger-events";
 import type { Notification } from "../src/lib/types";
 
-const holdRoots = ["orders", "accounts", "portfolio", "nav"];
-const activationRoots = ["orders", "my-trades", "portfolio", "nav", "nav-history"];
+const holdRoots = ["orders", "order-groups", "accounts", "portfolio", "nav"];
+const activationRoots = ["orders", "order-groups", "my-trades", "portfolio", "nav", "nav-history", "pnl", "pnl-history", "margin-positions", "margin-position"];
 const activationNotificationRoots = [
-  "orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl",
+  "orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl", "pnl", "pnl-history", "order-groups", "margin-positions", "margin-position",
 ];
 const streamCases: Array<[string, string, string[]]> = [
   ["trigger.activated", "TRIGGER_ACTIVATED", activationRoots],
   ["trigger.updated", "TRIGGER_AMENDED", holdRoots],
-  ["trigger.updated", "TRIGGER_REQUEUED", ["orders"]],
-  ["trigger.updated", "TRIGGER_RETRY_DEFERRED", ["orders"]],
-  ["trigger.updated", "TRIGGER_TRAIL_UPDATED", ["orders"]],
+  ["trigger.updated", "TRIGGER_REQUEUED", ["orders", "order-groups"]],
+  ["trigger.updated", "TRIGGER_RETRY_DEFERRED", ["orders", "order-groups"]],
+  ["trigger.updated", "TRIGGER_TRAIL_UPDATED", ["orders", "order-groups"]],
   ["trigger.updated", "TRIGGER_CANCELED", holdRoots],
   ["trigger.updated", "TRIGGER_EXPIRED", holdRoots],
   ["trigger.updated", "TRIGGER_FAILED", holdRoots],
-  ["trigger.group_updated", "TRIGGER_GROUP_CREATED", ["orders"]],
+  ["trigger.group_updated", "TRIGGER_GROUP_CREATED", ["orders", "order-groups"]],
   ["trigger.group_updated", "TRIGGER_GROUP_CLAIMED", holdRoots],
   ["trigger.group_updated", "TRIGGER_GROUP_CLOSED", holdRoots],
 ];
@@ -34,16 +34,16 @@ for (const [stream, event, expected] of streamCases) {
 
 test("unknown events on the new trigger streams only refresh orders", () => {
   for (const stream of ["trigger.updated", "trigger.group_updated"]) {
-    assert.deepEqual(triggerEventQueryRoots(stream, { event_type: "TRIGGER_FUTURE_EVENT" }), ["orders"]);
+    assert.deepEqual(triggerEventQueryRoots(stream, { event_type: "TRIGGER_FUTURE_EVENT" }), ["orders", "order-groups"]);
   }
-  assert.deepEqual(triggerEventQueryRoots("trigger.updated", { event_type: "TRIGGER_GROUP_CLOSED" }), ["orders"]);
-  assert.deepEqual(triggerEventQueryRoots("trigger.group_updated", { event_type: "TRIGGER_AMENDED" }), ["orders"]);
+  assert.deepEqual(triggerEventQueryRoots("trigger.updated", { event_type: "TRIGGER_GROUP_CLOSED" }), ["orders", "order-groups"]);
+  assert.deepEqual(triggerEventQueryRoots("trigger.group_updated", { event_type: "TRIGGER_AMENDED" }), ["orders", "order-groups"]);
 });
 
 test("missing or malformed data on the new trigger streams still refreshes orders", () => {
   for (const stream of ["trigger.updated", "trigger.group_updated"]) {
     for (const data of [undefined, null, {}, { event_type: null }, { event_type: 1 }, [], 1, "TRIGGER_AMENDED"]) {
-      assert.deepEqual(triggerEventQueryRoots(stream, data), ["orders"]);
+      assert.deepEqual(triggerEventQueryRoots(stream, data), ["orders", "order-groups"]);
     }
   }
 });
@@ -51,7 +51,7 @@ test("missing or malformed data on the new trigger streams still refreshes order
 test("trigger event fields are read directly from frame.data", () => {
   assert.deepEqual(triggerEventQueryRoots("trigger.updated", {
     data: { event_type: "TRIGGER_AMENDED" },
-  }), ["orders"]);
+  }), ["orders", "order-groups"]);
   assert.deepEqual(triggerEventQueryRoots("trigger.updated", {
     event_type: "TRIGGER_AMENDED",
     data: { event_type: "TRIGGER_TRAIL_UPDATED" },
@@ -110,7 +110,7 @@ function notification(body: string, title = "Notice"): Notification {
 test("backend trigger notification bodies reconcile holds, including OCO cancellation reasons", () => {
   for (const event of storedEvents) {
     const client = new QueryClient();
-    const roots = [...holdRoots, "my-trades", "nav-history", "realized-pnl", "transfers", "notifications"];
+    const roots = [...holdRoots, "my-trades", "nav-history", "realized-pnl", "pnl", "pnl-history", "order-groups", "margin-positions", "margin-position", "transfers", "notifications"];
     try {
       for (const root of roots) client.setQueryData([root, "cached"], {});
       const body = event === "TRIGGER_CANCELED"

@@ -46,7 +46,7 @@ interface IconRequest {
   request_id: string;
   symbol: string;
   source_url: string;
-  state: "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED";
+  state: "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED" | "REVOKED";
   width: number;
   height: number;
   created_at: string;
@@ -56,13 +56,14 @@ const states = {
   PENDING: "심사 대기",
   APPROVED: "승인",
   REJECTED: "거절",
+  REVOKED: "게시 중단",
   SUPERSEDED: "새 요청으로 대체",
 };
 
 function IconPreview({ request }: { request: IconRequest }) {
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
-  if (request.state === "REJECTED" || request.state === "SUPERSEDED")
+  if (request.state === "REJECTED" || request.state === "SUPERSEDED" || request.state === "REVOKED")
     return null;
   return (
     <div>
@@ -144,7 +145,7 @@ export function IconRequestHistory({ symbol }: { symbol: string }) {
               <time dateTime={request.created_at}>{fmtDateTime(request.created_at)}</time>
             </div>
             <p className="break-all text-app-gray-500">{request.source_url}</p>
-            {request.reason && <p>심사 사유: {request.reason}</p>}
+            {request.reason && <p>{request.state === "REVOKED" ? "게시 중단 사유" : "심사 사유"}: {request.reason}</p>}
             <IconPreview request={request} />
           </div>
         ))}

@@ -416,7 +416,7 @@ export function applyTradingNotification(queryClient: QueryClient, notification:
 
   const symbol = canonicalSymbol(rawSymbol);
   if (!symbol) return;
-  if (eventType === "SYMBOL_METADATA_CHANGED") {
+  if (eventType === "SYMBOL_METADATA_CHANGED" || eventType === "ICON_REVOKED") {
     void refreshSymbolMetadata(queryClient, symbol);
     return;
   }

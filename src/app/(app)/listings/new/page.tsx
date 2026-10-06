@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { DelistLockupPolicy } from "@/components/exchange-policy";
 import { IconUrlField } from "@/components/symbol-icons";
 import { ErrorBlock, PageHeader, Surface } from "@/components/primitives";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
@@ -171,6 +172,7 @@ function ListingForm() {
         </div>
 
         <IconUrlField value={iconUrl} onChange={setIconUrl} />
+        <DelistLockupPolicy />
 
         <div className="space-y-1.5">
           <Label htmlFor="listing-tags">태그 (선택)</Label>
