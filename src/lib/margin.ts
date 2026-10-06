@@ -285,7 +285,7 @@ export function invalidateMarginQueries(
   if (options?.balances === false) return;
   invalidateBatched(
     queryClient,
-    [["accounts"], ["portfolio"], ["nav"], ["orders"], ["my-trades"], ["realized-pnl"]],
+    [["accounts"], ["portfolio"], ["nav"], ["orders"], ["my-trades"], ["realized-pnl"], ["pnl"], ["pnl-history"], ["order-groups"]],
   );
   invalidateBatched(queryClient, [["nav-history"]], { passive: true });
 }

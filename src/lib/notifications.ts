@@ -59,7 +59,8 @@ export type TradingEventType =
   | "DELIST_CANCELED"
   | "DELISTED"
   | "SYMBOL_LISTED"
-  | "SYMBOL_METADATA_CHANGED";
+  | "SYMBOL_METADATA_CHANGED"
+  | "ICON_REVOKED";
 
 export const TRADING_EVENT_TYPES: ReadonlySet<TradingEventType> = new Set<TradingEventType>([
   "SYMBOL_HALTED",
@@ -71,6 +72,7 @@ export const TRADING_EVENT_TYPES: ReadonlySet<TradingEventType> = new Set<Tradin
   "DELISTED",
   "SYMBOL_LISTED",
   "SYMBOL_METADATA_CHANGED",
+  "ICON_REVOKED",
 ]);
 
 export function isTradingEventType(value: string): value is TradingEventType {
@@ -78,6 +80,11 @@ export function isTradingEventType(value: string): value is TradingEventType {
 }
 
 export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
+  ICON_REVOKED: {
+    title: "종목 아이콘 게시가 중단됐어요", label: "아이콘 심사",
+    body: (symbol) => `${symbolPrefix(symbol)}아이콘 게시가 중단됐어요. 발행사 관리에서 사유를 확인해주세요.`,
+    icon: Info, tone: "warning",
+  },
   ICON_REJECTED: {
     title: "아이콘이 승인되지 않았어요",
     label: "아이콘 심사",
@@ -390,6 +397,7 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
 };
 
 export const TITLE_EVENT_KEYS: Record<string, string> = {
+  "종목 아이콘 게시 중단": "ICON_REVOKED",
   "종목 아이콘 승인 거절": "ICON_REJECTED",
   "가격 밴드 상단 도달": "CURVE_CEILING_REACHED",
   "global market halted": "GLOBAL_MARKET_HALTED",
@@ -411,6 +419,7 @@ export const TITLE_EVENT_KEYS: Record<string, string> = {
   "symbol delisted": "DELISTED",
   "inquiry reply": "inquiry.replied",
   // Titles earlier app versions showed, which may still come back as titles.
+  "종목 아이콘 게시가 중단됐어요": "ICON_REVOKED",
   "종목 아이콘 승인이 거절됐어요": "ICON_REJECTED",
   "시장 전체 거래가 중지됐어요": "GLOBAL_MARKET_HALTED",
   "시장 거래가 재개됐어요": "GLOBAL_MARKET_RESUMED",
@@ -544,7 +553,7 @@ export function presentNotification(notification: Notification): NotificationPre
     // Moderation reasons are user-facing text; other reasons are codes. An
     // expiry's reason only restates the deadline the body already explains.
     const reason = parsed.reason && eventKey !== "TRIGGER_EXPIRED" && !ocoPeerCanceled
-      ? eventKey === "ICON_REJECTED" ? parsed.reason : localizeReason(parsed.reason)
+      ? (eventKey === "ICON_REJECTED" || eventKey === "ICON_REVOKED") ? parsed.reason : localizeReason(parsed.reason)
       : null;
     if (reason) {
       body = eventKey === "ICON_REJECTED"

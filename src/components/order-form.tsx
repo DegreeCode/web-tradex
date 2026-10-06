@@ -17,6 +17,9 @@ import { Collapse, ErrorBlock, OrderStatusChip, SideBadge } from "@/components/p
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
+import { ExitOrderDialog } from "@/components/exit-order-dialog";
+import { OrderInput, TriggerPolicyFields } from "@/components/trigger-controls";
+import { exitPriceError, trailingDistance } from "@/lib/advanced-order";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
@@ -78,6 +81,13 @@ export function OrderForm({
   const [condition, setCondition] = useState<"GTE" | "LTE">("LTE");
   const [targetPrice, setTargetPrice] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [trailing, setTrailing] = useState(false);
+  const [trailingPercent, setTrailingPercent] = useState("");
+  const [triggerPolicy, setTriggerPolicy] = useState<import("@/lib/types").TriggerPolicy>({});
+  const [bracket, setBracket] = useState(false);
+  const [takeProfit, setTakeProfit] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [exitOpen, setExitOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
   const [result, setResult] = useState<Order | null>(null);
@@ -116,8 +126,14 @@ export function OrderForm({
       }
     }
     if (orderMode === "TRIGGER") {
-      if (!isDecimalInput(targetPrice, 8) || !isPositiveDecimal(targetPrice)) {
+      if (trailing && trailingDistance(trailingPercent) === null) return "추적 거리는 0.0001~99.9999%로 입력해주세요";
+      if (trailing && slippageSettings.mode === "PRICE_LIMIT") return "추적 주문은 슬리피지 비율로 설정해주세요";
+      if (!trailing && (!isDecimalInput(targetPrice, 8) || !isPositiveDecimal(targetPrice))) {
         return "목표 가격을 입력해주세요";
+      }
+      if (bracket && side === "BUY") {
+        const error = exitPriceError(takeProfit.trim(), stopLoss.trim());
+        if (error) return error;
       }
     }
     const slippageValidation = slippageSettingsError(slippageSettings, side, exchangeInfo?.trade);
@@ -125,6 +141,7 @@ export function OrderForm({
     // The order fills at the target price, so a limit on the wrong side of it can never fill.
     if (
       orderMode === "TRIGGER" &&
+      !trailing &&
       slippageSettings.mode === "PRICE_LIMIT" &&
       compareDecimal(slippageSettings.limitPrice.trim(), targetPrice) * (side === "BUY" ? 1 : -1) < 0
     ) {
@@ -141,6 +158,7 @@ export function OrderForm({
     targetPrice,
     slippageSettings,
     side,
+    trailing, trailingPercent, bracket, takeProfit, stopLoss,
   ]);
 
   const accountFeedback = balanceError
@@ -149,7 +167,7 @@ export function OrderForm({
       ? "주문 계좌 정보를 불러오는 중이에요"
       : !resolvedAccountId ? "주문할 계좌가 없어요" : null;
   const validationError = accountFeedback ?? inputError ?? (
-    effectiveAmountMode === "CREDIT" && compareDecimal(orderAmount, availableCredit) > 0
+    orderMode === "MARKET" && effectiveAmountMode === "CREDIT" && compareDecimal(orderAmount, availableCredit) > 0
       ? "Credit 잔액이 부족해요"
       : side === "SELL" && compareDecimal(orderQuantity, availableQuantity) > 0
         ? "보유 수량이 부족해요"
@@ -174,6 +192,7 @@ export function OrderForm({
   const quote = simulation.data;
 
   function submit() {
+    if (placeOrder.isPending || !tradeAccess.allowed) return;
     if (validationError) {
       toast.error(validationError);
       return;
@@ -190,8 +209,11 @@ export function OrderForm({
     };
     if (resolvedAccountId) payload.account_id = resolvedAccountId;
     if (orderMode === "TRIGGER") {
-      payload.trigger_condition = condition;
-      payload.trigger_price = targetPrice.trim();
+      Object.assign(payload, triggerPolicy);
+      payload.trigger_condition = trailing ? side === "SELL" ? "LTE" : "GTE" : condition;
+      if (trailing) payload.trailing_ppm = trailingDistance(trailingPercent)!;
+      else payload.trigger_price = targetPrice.trim();
+      if (bracket && side === "BUY") payload.bracket = { take_profit_price: takeProfit.trim(), stop_loss_price: stopLoss.trim(), ...triggerPolicy, ...(payload.slippage_ppm !== undefined ? { slippage_ppm: payload.slippage_ppm } : {}) };
       if (expiresAt) payload.expires_at = new Date(expiresAt).toISOString();
     }
     if (effectiveAmountMode === "CREDIT") payload.credit_amount = orderAmount.trim();
@@ -295,6 +317,8 @@ export function OrderForm({
 
           {orderMode === "TRIGGER" ? (
             <div className="space-y-3 rounded-xl bg-app-gray-50 p-3">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={trailing} onChange={(e) => { setTrailing(e.target.checked); if (e.target.checked) setSlippageMode("SLIPPAGE"); }} />가격을 따라가는 추적 주문</label>
+              {trailing ? <><OrderInput label="추적 거리 (%)" value={trailingPercent} onChange={setTrailingPercent} placeholder="0.0001~99.9999" /><p className="text-xs text-app-gray-500">{side === "SELL" ? "최고가에서 지정 비율만큼 내려가면 매도해요." : "최저가에서 지정 비율만큼 올라가면 매수해요."}</p></> : <>
               <Segmented<"GTE" | "LTE">
                 value={condition}
                 onChange={setCondition}
@@ -320,6 +344,7 @@ export function OrderForm({
                   <span className="text-[12px] font-semibold text-app-gray-400">Credit</span>
                 </div>
               </div>
+              </>}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-3 py-2.5">
                 <label htmlFor={`${fieldId}-expiry`} className="text-[13px] font-semibold text-app-gray-500">만료 (선택)</label>
                 <input
@@ -330,6 +355,8 @@ export function OrderForm({
                   className="numeric min-w-0 max-w-full bg-transparent text-right text-base md:text-[13px] text-app-gray-900 outline-none"
                 />
               </div>
+              <TriggerPolicyFields value={triggerPolicy} onChange={setTriggerPolicy} />
+              {side === "BUY" ? <div className="space-y-2 border-t border-app-gray-200 pt-2"><label className="flex gap-2 text-sm"><input type="checkbox" checked={bracket} onChange={(e) => setBracket(e.target.checked)} />매수 후 익절·손절 함께 등록 (Bracket)</label>{bracket ? <><OrderInput label="체결 후 익절가 (Credit)" value={takeProfit} onChange={setTakeProfit} /><OrderInput label="체결 후 손절가 (Credit)" value={stopLoss} onChange={setStopLoss} /><p className="text-xs text-app-gray-500">매수 체결마다 고정 가격의 OCO가 생성돼요. 위의 부분 체결·재시도·슬리피지 정책을 적용해요. 매수만 취소하면 생성된 익절·손절은 유지돼요.</p></> : null}</div> : null}
             </div>
           ) : null}
 
@@ -474,6 +501,7 @@ export function OrderForm({
                   onLimitPriceChange={setLimitPrice}
                   currentPrice={orderMode === "MARKET" ? spot : undefined}
                   trigger={orderMode === "TRIGGER"}
+                  trailing={orderMode === "TRIGGER" && trailing}
                 />
                 <div className="border-t border-app-gray-200 pt-2">
                   <TradePolicy />
@@ -487,6 +515,7 @@ export function OrderForm({
           ) : null}
 
           <div className="space-y-2">
+            {side === "SELL" ? <button type="button" disabled={!tradeAccess.allowed || !balanceReady || !trading || placeOrder.isPending} onClick={() => setExitOpen(true)} className="min-h-10 w-full rounded-xl bg-app-gray-100 text-sm font-semibold disabled:opacity-50">익절·손절 OCO 등록</button> : null}
             {tradeAccess.allowed ? null : <ScopeNotice reason={tradeAccess.reason} />}
             {feedback ? (
               <p role="status" aria-live="polite" className="text-center text-[13px] font-medium text-app-gray-500">{feedback}</p>
@@ -518,6 +547,7 @@ export function OrderForm({
           {result ? <OrderResultDialog order={result} /> : null}
         </DialogContent>
       </Dialog>
+      {exitOpen ? <ExitOrderDialog key={`${instrument.symbol}-${resolvedAccountId}`} open onOpenChange={setExitOpen} symbol={instrument.symbol} accountId={resolvedAccountId} maxQuantity={availableQuantity} /> : null}
     </>
   );
 }

@@ -17,6 +17,7 @@ export function SlippageFields({
   onLimitPriceChange,
   currentPrice,
   trigger = false,
+  trailing = false,
 }: {
   /** Direction of the fill: a buy takes a cap, a sell takes a floor. */
   side: TradeSide;
@@ -28,6 +29,7 @@ export function SlippageFields({
   currentPrice?: string;
   /** Trigger orders measure slippage from the target price, not the current one. */
   trigger?: boolean;
+  trailing?: boolean;
 }) {
   const { data: exchangeInfo } = useExchangeInfo();
   const trade = exchangeInfo?.trade;
@@ -42,14 +44,14 @@ export function SlippageFields({
     compareDecimal(limitPrice, currentPrice) * (side === "BUY" ? 1 : -1) < 0;
   return (
     <>
-      <Segmented<SlippageMode>
+      {trailing ? <p className="text-xs text-app-gray-500">추적 주문의 슬리피지는 움직이는 목표 가격을 기준으로 적용해요.</p> : <Segmented<SlippageMode>
         value={settings.mode}
         onChange={onModeChange}
         options={[
           { value: "SLIPPAGE", label: "슬리피지" },
           { value: "PRICE_LIMIT", label: side === "BUY" ? "상한가" : "하한가" },
         ]}
-      />
+      />}
       {settings.mode === "SLIPPAGE" ? (
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-0.5">

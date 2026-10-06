@@ -180,3 +180,18 @@ for (const [code, message] of [
     assert.equal(errorMessage(new ApiError(409, code, "server error")), message);
   });
 }
+
+
+test("icon revocation is presented with its moderation reason and refreshes request history", () => {
+  const notice = notification("AAA.M ICON_REVOKED: IMAGE_POLICY", "종목 아이콘 게시 중단");
+  const view = presentNotification(notice);
+  assert.equal(view.title, "종목 아이콘 게시가 중단됐어요");
+  assert.equal(view.symbol, "AAA.M");
+  assert.match(view.body, /IMAGE_POLICY/);
+  assert.equal(parseTradingNotification(notice)?.eventType, "ICON_REVOKED");
+  const client = new QueryClient();
+  client.setQueryData(["icon-requests", "AAA.M"], { pages: [] });
+  reconcileNotificationData(client, notice);
+  assert.equal(client.getQueryState(["icon-requests", "AAA.M"])?.isInvalidated, true);
+  client.clear();
+});

@@ -1,8 +1,8 @@
-const ORDER_QUERY_ROOTS = ["orders"] as const;
-const HOLD_QUERY_ROOTS = ["orders", "accounts", "portfolio", "nav"] as const;
-const ACTIVATION_QUERY_ROOTS = ["orders", "my-trades", "portfolio", "nav", "nav-history"] as const;
+const ORDER_QUERY_ROOTS = ["orders", "order-groups"] as const;
+const HOLD_QUERY_ROOTS = ["orders", "order-groups", "accounts", "portfolio", "nav"] as const;
+const ACTIVATION_QUERY_ROOTS = ["orders", "order-groups", "my-trades", "portfolio", "nav", "nav-history", "pnl", "pnl-history", "margin-positions", "margin-position"] as const;
 const ACTIVATION_NOTIFICATION_QUERY_ROOTS = [
-  "orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl",
+  "orders", "my-trades", "portfolio", "accounts", "nav", "nav-history", "realized-pnl", "pnl", "pnl-history", "order-groups", "margin-positions", "margin-position",
 ] as const;
 
 /** Trigger domain fields live directly in frame.data; missing fields never block a refresh. */

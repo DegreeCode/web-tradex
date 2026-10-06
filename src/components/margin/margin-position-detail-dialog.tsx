@@ -22,6 +22,7 @@ import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginCollateralDialog } from "./margin-collateral-dialog";
 import { MarginReductionDialog } from "./margin-reduction-dialog";
 import { MarginClosureDialog } from "./margin-closure-dialog";
+import { MarginExitOrders } from "./margin-exit-orders";
 import { MarginRiskBadge, MarginSideBadge, MarginStatusChip } from "./margin-status-chip";
 import { MarginReturn } from "./margin-return";
 import { marginRiskLevel, useMarginPosition, type MarginPosition } from "@/lib/margin";
@@ -259,6 +260,7 @@ export function MarginPositionDetailDialog({
             </div>
 
             {/* Action buttons (only when status is OPEN) */}
+            {isOpen ? <MarginExitOrders key={position.position_id} position={position} /> : null}
             {isOpen && !marginAccess.allowed ? <ScopeNotice reason={marginAccess.reason} /> : null}
             {isOpen && marginAccess.allowed ? (
               <div className="sticky -bottom-4 -mx-4 -mb-4 flex flex-wrap gap-2 border-t border-app-gray-100 bg-popover px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">

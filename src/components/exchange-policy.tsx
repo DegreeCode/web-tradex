@@ -77,3 +77,10 @@ export function MarginInterestPolicy() {
     </div>
   );
 }
+
+export function DelistLockupPolicy() {
+  const { data } = useExchangeInfo();
+  const ppm = data?.listing.delist_lockup_inclusion_ppm;
+  if (ppm === undefined) return null;
+  return <p className="text-xs leading-5 text-app-gray-500">상장폐지 정산 시 락업 수량의 {fmtPercentFromPPM(ppm, 4)}를 정산 대상에 포함해요.</p>;
+}

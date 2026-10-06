@@ -70,6 +70,7 @@ export const LIVE_TOAST_RULES: Record<string, LiveToastRule> = {
   DELISTED: { action: () => ({ label: "투자 보기", href: "/portfolio" }), slot: symbolSlot("delist"), long: true },
   MANAGER_FORCED_CHANGE: { action: symbolAction, long: true },
   ICON_REJECTED: { action: symbolAction, long: true },
+  ICON_REVOKED: { action: symbolAction, long: true },
   "transfer.updated": { action: () => ({ label: "송금 내역", href: "/transfers" }) },
   "inquiry.replied": { action: () => ({ label: "답변 보기", href: "/support" }) },
   AUTH_PASSKEY_DELETED: { action: () => SECURITY, long: true },

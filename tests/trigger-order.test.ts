@@ -315,3 +315,12 @@ test("cancel warnings cover both OCO legs and preserve bracket exits for ENTRY",
   assert.equal(triggerCancelWarning(undefined), null);
   assert.equal(triggerCancelWarning("FUTURE_ROLE"), null);
 });
+
+
+test("margin exit orders identify their fee policy and position termination", () => {
+  const display = rows({ margin_position_id: "mgn_test", margin_side: "SHORT", side: "BUY", hold_scope: "NONE", revision: 1, status: "PARTIALLY_FILLED", terminal_reason: "POSITION_EXHAUSTED" });
+  assert.equal(display.find((row) => row.key === "margin")?.value, "숏 포지션 매수 종료");
+  assert.equal(display.find((row) => row.key === "terminal-reason")?.value, "포지션 잔여 수량 없음");
+  assert.equal(triggerTerminalReasonLabel("MARGIN_POSITION_NOT_OPEN"), "포지션 종료 또는 거래 불가");
+  assert.equal(triggerTerminalReasonLabel("MARGIN_RISK_LIMIT"), "마진 위험 기준 초과");
+});

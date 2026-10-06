@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { OrderAmendDialog } from "@/components/order-amend-dialog";
+import { OrderGroupDialog } from "@/components/order-group-dialog";
+import { accountLabel } from "@/lib/accounts";
 import {
   EmptyState,
   ErrorBlock,
@@ -24,7 +27,7 @@ import {
   fmtRelative,
   isPositiveDecimal,
 } from "@/lib/format";
-import { useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
+import { useAccounts, useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
 import { useSessionAccess } from "@/components/session-access";
 import {
   hasTriggerOrderFields,
@@ -32,7 +35,7 @@ import {
   triggerGroupRoleLabel,
   triggerOrderDisplayRows,
 } from "@/lib/trigger-order";
-import type { Order, OrderStatus } from "@/lib/types";
+import type { Order } from "@/lib/types";
 
 type Tab = "ORDERS" | "TRADES";
 type Filter = "ALL" | "PENDING" | "DONE" | "CLOSED";
@@ -44,31 +47,32 @@ const FILTER_LABEL: Record<Filter, string> = {
   CLOSED: "종료",
 };
 
-const FILTERS: Record<Filter, (status: OrderStatus) => boolean> = {
-  ALL: () => true,
-  PENDING: (status) => status === "PENDING" || status === "ACTIVATED",
-  DONE: (status) => status === "FILLED" || status === "PARTIALLY_FILLED",
-  CLOSED: (status) =>
-    status === "CANCELED" || status === "EXPIRED" || status === "FAILED" || status === "REJECTED",
+const FILTERS: Record<Filter, string | undefined> = {
+  ALL: undefined,
+  PENDING: "PENDING,ACTIVATED",
+  DONE: "FILLED,PARTIALLY_FILLED",
+  CLOSED: "CANCELED,EXPIRED,FAILED,REJECTED",
 };
 
 export default function OrdersPage() {
   const [tab, setTab] = useState<Tab>("ORDERS");
   const [filter, setFilter] = useState<Filter>("ALL");
   const [pendingCancel, setPendingCancel] = useState<Order | null>(null);
-  const ordersQuery = useOrders(undefined, tab === "ORDERS");
+  const [accountId, setAccountId] = useState("");
+  const [amending, setAmending] = useState<Order | null>(null);
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const accounts = useAccounts();
+  const ordersQuery = useOrders(undefined, tab === "ORDERS", { account_id: accountId || undefined, status: FILTERS[filter] });
   const tradesQuery = useMyTrades(undefined, tab === "TRADES");
   const cancelOrder = useCancelOrder();
   const tradeAccess = useSessionAccess("TRADE");
+  const marginAccess = useSessionAccess("MARGIN");
 
   const orders = useMemo(
     () => ordersQuery.data?.pages.flatMap((page) => page.data) ?? [],
     [ordersQuery.data],
   );
-  const filteredOrders = useMemo(
-    () => orders.filter((order) => FILTERS[filter](order.status)),
-    [orders, filter],
-  );
+  const filteredOrders = orders;
   const trades = useMemo(
     () => tradesQuery.data?.pages.flatMap((page) => page.data) ?? [],
     [tradesQuery.data],
@@ -78,6 +82,7 @@ export default function OrdersPage() {
   const cancelWarning = pendingCancel ? triggerCancelWarning(pendingCancel.group_role) : null;
 
   function handleCancel(order: Order) {
+    if (cancelOrder.isPending || !(order.margin_position_id ? marginAccess : tradeAccess).allowed) return;
     cancelOrder.mutate(order.order_id, {
       onSuccess: () => {
         setPendingCancel((current) => current?.order_id === order.order_id ? null : current);
@@ -110,6 +115,7 @@ export default function OrdersPage() {
 
       {tab === "ORDERS" ? (
         <>
+          <label className="flex items-center gap-3 text-sm text-app-gray-500">주문 계좌<select aria-label="주문 계좌 필터" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="min-w-0 rounded-xl bg-card p-3"><option value="">전체 계좌</option>{accounts.data?.map((account) => <option key={account.account_id} value={account.account_id}>{accountLabel(account, accounts.data ?? [])}</option>)}</select></label>
           <div role="group" aria-label="주문 상태" className="flex gap-1.5 overflow-x-auto">
             {(Object.keys(FILTERS) as Filter[]).map((key) => (
               <button
@@ -134,11 +140,11 @@ export default function OrdersPage() {
           ) : filteredOrders.length === 0 ? (
             <>
               <EmptyState
-                title={filter === "ALL" ? "주문 내역이 없어요" : `불러온 내역 중 '${FILTER_LABEL[filter]}' 주문이 없어요`}
+                title={filter === "ALL" ? "주문 내역이 없어요" : `'${FILTER_LABEL[filter]}' 주문이 없어요`}
                 description={
                   filter === "ALL"
                     ? "마켓에서 첫 주문을 넣어보세요"
-                    : ordersQuery.hasNextPage ? "이전 주문을 더 불러와 확인해보세요" : undefined
+                    : undefined
                 }
               />
               <LoadMoreButton
@@ -151,6 +157,7 @@ export default function OrdersPage() {
           ) : (
             <div className="grid gap-2 xl:grid-cols-2">
               {filteredOrders.map((order) => {
+                const access = order.margin_position_id ? marginAccess : tradeAccess;
                 const triggerFields = hasTriggerOrderFields(order);
                 const triggerRows = triggerOrderDisplayRows(order, { compact: true });
                 const groupRole = order.order_type === "TRIGGER" ? triggerGroupRoleLabel(order.group_role) : null;
@@ -178,6 +185,7 @@ export default function OrdersPage() {
                             {groupRole}
                           </span>
                         ) : null}
+                        {order.margin_position_id ? <span className="rounded-md bg-app-blue-light px-1.5 py-0.5 text-[11px] font-semibold text-app-blue">마진 {order.margin_side === "SHORT" ? "숏" : "롱"} 종료</span> : null}
                       </div>
                       <OrderStatusChip status={order.status} />
                     </div>
@@ -252,17 +260,21 @@ export default function OrdersPage() {
                         {fmtRelative(order.created_at)}
                         {order.expires_at ? ` · ${fmtDeadline(order.expires_at)}` : ""}
                       </span>
+                      <div className="flex flex-wrap gap-2">
+                      {order.group_id ? <button type="button" onClick={() => setGroupId(order.group_id!)} className="min-h-9 rounded-lg bg-app-blue-light px-3 text-xs font-semibold text-app-blue">그룹 보기</button> : null}
+                      {order.status === "PENDING" && order.order_type === "TRIGGER" ? <button type="button" disabled={!access.allowed || cancelOrder.isPending} title={access.allowed ? undefined : access.reason} onClick={() => setAmending(order)} className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-xs font-semibold disabled:opacity-50">주문 정정</button> : null}
                       {order.status === "PENDING" ? (
                         <button
                           type="button"
                           onClick={() => requestCancel(order)}
-                          disabled={!tradeAccess.allowed || cancelingId === order.order_id}
-                          title={tradeAccess.allowed ? undefined : tradeAccess.reason}
+                          disabled={!access.allowed || cancelOrder.isPending}
+                          title={access.allowed ? undefined : access.reason}
                           className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                         >
                           {cancelingId === order.order_id ? "취소 중…" : "주문 취소"}
                         </button>
                       ) : null}
+                      </div>
                     </div>
                   </div>
                 );
@@ -331,11 +343,13 @@ export default function OrdersPage() {
         pendingLabel="취소 중…"
         pending={cancelOrder.isPending}
         onConfirm={() => {
-          if (pendingCancel && tradeAccess.allowed && !cancelOrder.isPending) {
+          if (pendingCancel && !cancelOrder.isPending) {
             handleCancel(pendingCancel);
           }
         }}
       />
+      {amending ? <OrderAmendDialog key={amending.order_id} order={amending} onClose={() => setAmending(null)} /> : null}
+      {groupId ? <OrderGroupDialog key={groupId} groupId={groupId} onClose={() => setGroupId(null)} onSelect={setGroupId} /> : null}
     </div>
   );
 }

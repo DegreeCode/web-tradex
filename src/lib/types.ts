@@ -160,7 +160,7 @@ export interface Order {
   remaining_credit?: string;
   held_credit?: string;
   held_quantity?: string;
-  hold_scope?: "ORDER" | "GROUP" | FutureOrderToken;
+  hold_scope?: "ORDER" | "GROUP" | "NONE" | FutureOrderToken;
   group_id?: string;
   group_role?: "ENTRY" | "TAKE_PROFIT" | "STOP_LOSS" | FutureOrderToken;
   parent_group_id?: string;
@@ -168,6 +168,11 @@ export interface Order {
   terminal_reason?: string;
   trailing_ppm?: number;
   trailing_watermark_price?: string;
+  margin_position_id?: string;
+  margin_side?: "LONG" | "SHORT";
+  reduce_only?: boolean;
+  fee_mode?: string;
+  warnings?: OrderWarning[];
   expires_at?: string;
   created_at: string;
 }
@@ -184,11 +189,73 @@ export interface OrderRequest {
   expires_at?: string;
   slippage_ppm?: number;
   slippage_reference_price?: string;
+  on_partial_fill?: "TERMINATE" | "KEEP";
+  on_slippage_exceeded?: "FAIL" | "RETRY";
+  trailing_ppm?: number;
+  margin_position_id?: string;
+  bracket?: BracketRequest;
 }
 
-export type OrderSimulationRequest = Omit<
+export interface OrderWarning {
+  code: string;
+  estimated_liquidation_price: string | null;
+  estimate_status: "AVAILABLE" | "UNAVAILABLE";
+  evaluated_at: string;
+}
+
+export interface TriggerPolicy {
+  slippage_ppm?: number;
+  on_partial_fill?: "TERMINATE" | "KEEP";
+  on_slippage_exceeded?: "FAIL" | "RETRY";
+}
+
+export interface BracketRequest extends TriggerPolicy {
+  take_profit_price: string;
+  stop_loss_price: string;
+}
+
+export interface OrderGroupRequest {
+  group_type: "OCO";
+  account_id?: string;
+  symbol: string;
+  margin_position_id?: string;
+  quantity: string;
+  expires_at?: string;
+  take_profit: TriggerPolicy & { trigger_price: string };
+  stop_loss: TriggerPolicy & ({ trigger_price: string } | { trailing_ppm: number });
+}
+
+export interface OrderGroup {
+  group_id: string;
+  group_type: "OCO" | "BRACKET";
+  state: "ACTIVE" | "CLAIMED" | "CLOSED";
+  account_id: string;
+  symbol: string;
+  revision: number;
+  created_at: string;
+  orders: Order[];
+  parent_group_id?: string;
+  source_trade_id?: string;
+  winner_order_id?: string;
+  terminal_reason?: string;
+  margin_position_id?: string;
+  margin_side?: "LONG" | "SHORT";
+  warnings?: OrderWarning[];
+}
+
+export interface OrderAmendment {
+  expected_revision?: number;
+  trigger_price?: string;
+  trailing_ppm?: number;
+  quantity?: string;
+  credit_amount?: string;
+  expires_at?: string | null;
+  slippage_ppm?: number;
+}
+
+export type OrderSimulationRequest = Pick<
   OrderRequest,
-  "order_type" | "trigger_condition" | "trigger_price" | "expires_at"
+  "account_id" | "symbol" | "side" | "credit_amount" | "quantity" | "slippage_ppm" | "slippage_reference_price"
 > & { order_type: "MARKET" };
 
 export interface OrderSimulation {

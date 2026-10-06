@@ -35,6 +35,7 @@ export interface ExchangeInfo {
     user_fee_credit: string;
     user_daily_limit: number;
     default_locked_supply_ppm?: number;
+    delist_lockup_inclusion_ppm?: number;
     min_locked_supply_ppm?: number;
     max_locked_supply_ppm?: number;
     issuance_max_price_dilution_ppm?: number;
