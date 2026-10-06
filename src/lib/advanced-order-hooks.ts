@@ -15,34 +15,11 @@ import type {
   OrderGroup,
   OrderGroupRequest,
 } from "./types";
-import type { PnLEntry, PnLFilters, PnLSummary, PnLHistory } from "./pnl";
+import type { PnLFilters } from "./pnl";
+import { pnlQueryOptions } from "./pnl-query";
 
-export function usePnLSummary(filters: PnLFilters) {
-  return useQuery({
-    queryKey: ["pnl", filters],
-    queryFn: ({ signal }) =>
-      apiData<PnLSummary>(`/api/v1/me/pnl${buildQuery({ ...filters })}`, {
-        signal,
-      }),
-    staleTime: 15_000,
-    retry: false,
-  });
-}
-export function usePnLHistory(filters: PnLFilters, enabled: boolean) {
-  return useInfiniteQuery({
-    queryKey: ["pnl-history", filters],
-    queryFn: ({ pageParam, signal }) =>
-      apiPage<PnLEntry>(
-        `/api/v1/me/pnl/history${buildQuery({ ...filters, limit: 20, cursor: pageParam })}`,
-        { signal },
-      ) as Promise<PnLHistory>,
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) =>
-      last.page.has_more ? last.page.next_cursor : null,
-    enabled,
-    staleTime: 15_000,
-    retry: false,
-  });
+export function usePnL(filters: PnLFilters) {
+  return useInfiniteQuery(pnlQueryOptions(filters));
 }
 export function useAmendOrder() {
   const client = useQueryClient();
