@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ApiError, errorMessage } from "@/lib/api";
 import { compareDecimal, fmtDateTime, fmtSigned, shortId } from "@/lib/format";
-import { usePnLHistory, usePnLSummary } from "@/lib/advanced-order-hooks";
+import { usePnL } from "@/lib/advanced-order-hooks";
 import { pnlSourceLabel, type PnLMarket } from "@/lib/pnl";
 import {
   EmptyState,
@@ -32,14 +32,10 @@ export function PnLPanel({
     market_type: market,
     as_of: asOf,
   };
-  const summary = usePnLSummary(filters);
-  // Every page uses the summary's exact cutoff, including microseconds from the server.
-  const history = usePnLHistory(
-    { ...filters, as_of: summary.data?.as_of },
-    Boolean(summary.data),
-  );
-  const rows = history.data?.pages.flatMap((page) => page.data) ?? [];
-  const error = summary.error ?? history.error;
+  const query = usePnL(filters);
+  const summary = query.data?.pages[0]?.summary;
+  const rows = query.data?.pages.flatMap((page) => page.data) ?? [];
+  const error = query.error ?? query.data?.pages[0]?.historyError;
   const availableFrom =
     error instanceof ApiError &&
     error.code === "PNL_HISTORY_UNAVAILABLE" &&
@@ -91,23 +87,23 @@ export function PnLPanel({
           조회
         </button>
       </form>
-      {summary.isLoading ? (
+      {query.isLoading ? (
         <SkeletonRows rows={2} />
-      ) : summary.data ? (
+      ) : summary ? (
         <div className="rounded-2xl bg-card p-4 shadow-card space-y-2">
           <p className="text-sm text-app-gray-500">
-            누적 실현 손익 · {summary.data.entry_count}건
+            누적 실현 손익 · {summary.entry_count}건
           </p>
           <p className="numeric break-all text-xl font-bold">
-            {fmtSigned(summary.data.realized_pnl, 16)} Credit
+            {fmtSigned(summary.realized_pnl, 2)} Credit
           </p>
           <p className="numeric break-all text-xs text-app-gray-500">
-            현물 {fmtSigned(summary.data.spot_realized_pnl, 16)} · 마진{" "}
-            {fmtSigned(summary.data.margin_realized_pnl, 16)}
+            현물 {fmtSigned(summary.spot_realized_pnl, 2)} · 마진{" "}
+            {fmtSigned(summary.margin_realized_pnl, 2)}
           </p>
           <p className="text-xs text-app-gray-400">
-            {fmtDateTime(summary.data.as_of)} 기준 · 전체 계좌 조회에는 삭제된
-            계좌도 포함돼요.
+            {fmtDateTime(summary.as_of)} 기준 · 전체 계좌 조회에는 삭제된 계좌도
+            포함돼요.
           </p>
         </div>
       ) : null}
@@ -119,8 +115,7 @@ export function PnLPanel({
               : errorMessage(error)
           }
           onRetry={() => {
-            void summary.refetch();
-            if (summary.data) void history.refetch();
+            void query.refetch({ cancelRefetch: false });
           }}
         />
       ) : null}
@@ -139,9 +134,7 @@ export function PnLPanel({
           </button>
         </div>
       ) : null}
-      {history.isLoading ? (
-        <SkeletonRows rows={2} />
-      ) : summary.data && !history.isError && rows.length === 0 ? (
+      {summary && !error && rows.length === 0 ? (
         <EmptyState title="실현 손익 내역이 없어요" />
       ) : null}
       <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
@@ -166,15 +159,15 @@ export function PnLPanel({
             <p
               className={`numeric break-all text-sm font-bold ${compareDecimal(row.realized_pnl, "0") >= 0 ? "text-app-red" : "text-app-blue"}`}
             >
-              {fmtSigned(row.realized_pnl, 16)}
+              {fmtSigned(row.realized_pnl, 2)}
             </p>
           </div>
         ))}
       </div>
       <LoadMoreButton
-        hasMore={history.hasNextPage}
-        loading={history.isFetchingNextPage}
-        onLoad={() => void history.fetchNextPage()}
+        hasMore={query.hasNextPage}
+        loading={query.isFetching}
+        onLoad={() => void query.fetchNextPage({ cancelRefetch: false })}
       />
     </section>
   );
