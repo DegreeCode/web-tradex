@@ -13,6 +13,8 @@ export interface ChartSettings {
   volumePaneRatio?: number;
   /** Defaults to true for existing browsers. */
   showAverageCost?: boolean;
+  /** Defaults to true; only active orders for the selected account are shown. */
+  showOrders?: boolean;
   /** Defaults to a linear price scale. */
   logarithmic?: boolean;
 }
@@ -35,6 +37,7 @@ export function sanitizeChartSettings(raw: unknown): ChartSettings {
   if (input.seriesType === "candle" || input.seriesType === "line") out.seriesType = input.seriesType;
   if (isVolumePaneRatio(input.volumePaneRatio)) out.volumePaneRatio = input.volumePaneRatio;
   if (typeof input.showAverageCost === "boolean") out.showAverageCost = input.showAverageCost;
+  if (typeof input.showOrders === "boolean") out.showOrders = input.showOrders;
   if (typeof input.logarithmic === "boolean") out.logarithmic = input.logarithmic;
   return out;
 }

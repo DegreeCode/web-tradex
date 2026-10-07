@@ -8,17 +8,22 @@ import { Switch } from "@/components/ui/switch";
 export function ChartSettingsButton({
   showAverageCost,
   onShowAverageCostChange,
+  showOrders,
+  onShowOrdersChange,
   logarithmic,
   onLogarithmicChange,
   disabled,
 }: {
   showAverageCost: boolean;
   onShowAverageCostChange: (show: boolean) => void;
+  showOrders: boolean;
+  onShowOrdersChange: (show: boolean) => void;
   logarithmic: boolean;
   onLogarithmicChange: (enabled: boolean) => void;
   disabled?: boolean;
 }) {
   const toggleId = useId();
+  const ordersId = useId();
   const logarithmicId = useId();
   return (
     <Popover.Root>
@@ -38,6 +43,10 @@ export function ChartSettingsButton({
               <div className="flex items-center justify-between gap-4">
                 <label htmlFor={toggleId} className="cursor-pointer text-[13px] font-semibold">평균단가 표시</label>
                 <Switch id={toggleId} aria-label="평균단가 표시" checked={showAverageCost} onCheckedChange={onShowAverageCostChange} />
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={ordersId} className="cursor-pointer text-[13px] font-semibold">예약 주문 표시</label>
+                <Switch id={ordersId} aria-label="예약 주문 표시" checked={showOrders} onCheckedChange={onShowOrdersChange} />
               </div>
               <div className="flex items-center justify-between gap-4">
                 <label htmlFor={logarithmicId} className="cursor-pointer text-[13px] font-semibold">로그 스케일</label>

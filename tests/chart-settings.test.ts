@@ -51,10 +51,10 @@ test("visibility, series mode, logarithmic scale and volume height survive reloa
   const storage = memoryStorage({ [GENERAL_KEY]: JSON.stringify({ slippagePercent: "2" }) });
   const original = await loadWith(t, storage, "original");
   assert.equal(original.calculateVolumePaneHeight(260), 73);
-  original.updateChartSettings({ showAverageCost: false, seriesType: "line", candleInterval: "5m", logarithmic: true });
+  original.updateChartSettings({ showAverageCost: false, showOrders: false, seriesType: "line", candleInterval: "5m", logarithmic: true });
   original.setVolumePaneRatio(109 / 260);
   const reloaded = await loadWith(t, storage, "reloaded");
-  assert.deepEqual(reloaded.readChartSettings(), { candleInterval: "5m", seriesType: "line", volumePaneRatio: 109 / 260, showAverageCost: false, logarithmic: true });
+  assert.deepEqual(reloaded.readChartSettings(), { candleInterval: "5m", seriesType: "line", volumePaneRatio: 109 / 260, showAverageCost: false, showOrders: false, logarithmic: true });
   assert.equal(reloaded.calculateVolumePaneHeight(260), 109);
   assert.equal(reloaded.calculateVolumePaneHeight(220), 92);
   assert.deepEqual(JSON.parse(storage.stored.get(GENERAL_KEY)!), { slippagePercent: "2" });
@@ -62,11 +62,12 @@ test("visibility, series mode, logarithmic scale and volume height survive reloa
   const linear = await loadWith(t, storage, "linear-reloaded");
   assert.equal(linear.readChartSettings().logarithmic, false);
   assert.equal(linear.readChartSettings().showAverageCost, false);
+  assert.equal(linear.readChartSettings().showOrders, false);
 });
 
 test("invalid and malformed settings safely fall back to defaults", async (t) => {
   const { sanitizeChartSettings } = await loadWith(t, memoryStorage(), "sanitize");
-  assert.deepEqual(sanitizeChartSettings({ candleInterval: "bad", seriesType: "bars", volumePaneRatio: 1, showAverageCost: "false", logarithmic: "true" }), {});
+  assert.deepEqual(sanitizeChartSettings({ candleInterval: "bad", seriesType: "bars", volumePaneRatio: 1, showAverageCost: "false", showOrders: "false", logarithmic: "true" }), {});
   assert.deepEqual(sanitizeChartSettings({ candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true, logarithmic: false }), { candleInterval: "1h", volumePaneRatio: 0.3, showAverageCost: true, logarithmic: false });
   for (const raw of ["junk", "[1]", "null", "2"]) {
     const chart = await loadWith(t, memoryStorage({ [KEY]: raw }), `malformed=${raw}`);

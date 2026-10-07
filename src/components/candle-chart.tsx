@@ -9,6 +9,7 @@ import {
 } from "@/components/lightweight-chart";
 import { decimalPrecision, toNumber } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
+import type { ChartOrderLine } from "@/lib/chart-orders";
 import type { Candle } from "@/lib/types";
 
 export function CandleChart({
@@ -19,6 +20,7 @@ export function CandleChart({
   hasOlder,
   loadingOlder,
   holding,
+  orders,
 }: {
   candles: Candle[];
   seriesType?: ChartSeriesType;
@@ -27,21 +29,25 @@ export function CandleChart({
   hasOlder?: boolean;
   loadingOlder?: boolean;
   holding?: ChartHolding;
+  orders?: ChartOrderLine[];
 }) {
   const pricePrecision = useMemo(
     () =>
-      candles.reduce(
-        (precision, candle) =>
-          Math.max(
-            precision,
-            decimalPrecision(candle.open),
-            decimalPrecision(candle.high),
-            decimalPrecision(candle.low),
-            decimalPrecision(candle.close),
-          ),
-        0,
+      Math.max(
+        ...(orders ?? []).map((order) => decimalPrecision(order.price)),
+        candles.reduce(
+          (precision, candle) =>
+            Math.max(
+              precision,
+              decimalPrecision(candle.open),
+              decimalPrecision(candle.high),
+              decimalPrecision(candle.low),
+              decimalPrecision(candle.close),
+            ),
+          0,
+        ),
       ),
-    [candles],
+    [candles, orders],
   );
   const data = useMemo<LightweightCandlePoint[]>(
     () =>
@@ -79,6 +85,7 @@ export function CandleChart({
       hasOlder={hasOlder}
       loadingOlder={loadingOlder}
       holding={holding}
+      orders={orders}
     />
   );
 }
