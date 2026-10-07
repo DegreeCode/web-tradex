@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback } from "react";
+import { Suspense, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarClock, Clock, OctagonAlert } from "lucide-react";
 import { cn } from "cn";
@@ -31,6 +31,7 @@ import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
 import { resolveAccountId } from "@/lib/accounts";
 import { buildChartHolding } from "@/lib/chart-holding";
+import { buildChartOrderLines } from "@/lib/chart-orders";
 import { updateChartSettings, useChartSettings } from "@/lib/chart-settings";
 import {
   changePercent,
@@ -51,6 +52,7 @@ import {
   useCandles,
   useInstrument,
   usePolledSymbolTicker,
+  useOrders,
   usePortfolio,
   useSymbolTradeStream,
   useSymbolTrades,
@@ -187,10 +189,13 @@ function SymbolDetail() {
   const intervalHydrated = chartSettings !== null;
   const chartSeriesType = chartSettings?.seriesType ?? "candle";
   const showAverageCost = chartSettings?.showAverageCost ?? true;
+  const showOrders = chartSettings?.showOrders ?? true;
   const settingsButton = (
     <ChartSettingsButton
       showAverageCost={showAverageCost}
       onShowAverageCostChange={(show) => updateChartSettings({ showAverageCost: show })}
+      showOrders={showOrders}
+      onShowOrdersChange={(show) => updateChartSettings({ showOrders: show })}
       logarithmic={chartSettings?.logarithmic ?? false}
       onLogarithmicChange={(enabled) => updateChartSettings({ logarithmic: enabled })}
       disabled={!intervalHydrated}
@@ -202,6 +207,23 @@ function SymbolDetail() {
   const accountList = status === "authenticated" ? accountsQuery.data ?? [] : [];
   const selectedAccountId = selectedAccount?.userId === user?.user_id ? selectedAccount?.accountId : undefined;
   const accountId = preferences !== null ? resolveAccountId(accountList, selectedAccountId) : "";
+  const ordersEnabled = status === "authenticated" && Boolean(canonicalSymbol) && Boolean(accountId) && showOrders;
+  const ordersQuery = useOrders(50, ordersEnabled, {
+    account_id: accountId || undefined,
+    status: "PENDING,ACTIVATED",
+  });
+  const { hasNextPage, isFetching, isError: ordersFailed, fetchNextPage } = ordersQuery;
+  useEffect(() => {
+    if (ordersEnabled && hasNextPage && !isFetching && !ordersFailed) {
+      void fetchNextPage({ cancelRefetch: false });
+    }
+  }, [ordersEnabled, hasNextPage, isFetching, ordersFailed, fetchNextPage]);
+  const chartOrders = useMemo(
+    () => ordersEnabled
+      ? buildChartOrderLines(ordersQuery.data?.pages.flatMap((page) => page.data) ?? [], accountId, canonicalSymbol ?? "")
+      : [],
+    [ordersEnabled, ordersQuery.data, accountId, canonicalSymbol],
+  );
   const portfolioQuery = usePortfolio(
     accountId || undefined,
     status === "authenticated" && Boolean(canonicalSymbol) && Boolean(accountId),
@@ -418,10 +440,19 @@ function SymbolDetail() {
                   hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
                   loadingOlder={candlesQuery.isLoadingOlder}
                   holding={chartHolding}
+                  orders={chartOrders}
                 />
               ) : (
-                <PriceChart trades={trades} holding={chartHolding} />
+                <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} />
               )}
+              {ordersEnabled && ordersQuery.isError ? (
+                <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-app-gray-500">
+                  <span>예약 주문을 불러오지 못했어요. {errorMessage(ordersQuery.error)}</span>
+                  <button type="button" onClick={() => void ordersQuery.refetch()} className="shrink-0 font-semibold text-app-blue">
+                    다시 시도
+                  </button>
+                </div>
+              ) : null}
               {candlesQuery.olderError ? (
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-app-gray-500">
                   <span>이전 캔들을 불러오지 못했어요. {errorMessage(candlesQuery.olderError)}</span>
