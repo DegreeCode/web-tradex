@@ -21,6 +21,7 @@ export function CandleChart({
   loadingOlder,
   holding,
   orders,
+  curvePrice,
 }: {
   candles: Candle[];
   seriesType?: ChartSeriesType;
@@ -30,10 +31,12 @@ export function CandleChart({
   loadingOlder?: boolean;
   holding?: ChartHolding;
   orders?: ChartOrderLine[];
+  curvePrice?: string;
 }) {
   const pricePrecision = useMemo(
     () =>
       Math.max(
+        decimalPrecision(curvePrice),
         ...(orders ?? []).map((order) => decimalPrecision(order.price)),
         candles.reduce(
           (precision, candle) =>
@@ -47,7 +50,7 @@ export function CandleChart({
           0,
         ),
       ),
-    [candles, orders],
+    [candles, orders, curvePrice],
   );
   const data = useMemo<LightweightCandlePoint[]>(
     () =>
@@ -86,6 +89,7 @@ export function CandleChart({
       loadingOlder={loadingOlder}
       holding={holding}
       orders={orders}
+      curvePrice={curvePrice}
     />
   );
 }

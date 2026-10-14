@@ -6,6 +6,8 @@ import { Settings } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
 export function ChartSettingsButton({
+  showCurvePrice,
+  onShowCurvePriceChange,
   showAverageCost,
   onShowAverageCostChange,
   showOrders,
@@ -14,6 +16,8 @@ export function ChartSettingsButton({
   onLogarithmicChange,
   disabled,
 }: {
+  showCurvePrice: boolean;
+  onShowCurvePriceChange: (show: boolean) => void;
   showAverageCost: boolean;
   onShowAverageCostChange: (show: boolean) => void;
   showOrders: boolean;
@@ -22,6 +26,7 @@ export function ChartSettingsButton({
   onLogarithmicChange: (enabled: boolean) => void;
   disabled?: boolean;
 }) {
+  const curvePriceId = useId();
   const toggleId = useId();
   const ordersId = useId();
   const logarithmicId = useId();
@@ -40,6 +45,10 @@ export function ChartSettingsButton({
           <Popover.Popup className="w-60 rounded-2xl border border-app-gray-100 bg-popover p-4 text-app-gray-900 shadow-lg outline-none">
             <Popover.Title className="mb-3 text-[14px] font-bold">차트 설정</Popover.Title>
             <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={curvePriceId} className="cursor-pointer text-[13px] font-semibold">현재가 표시</label>
+                <Switch id={curvePriceId} aria-label="현재가 표시" checked={showCurvePrice} onCheckedChange={onShowCurvePriceChange} />
+              </div>
               <div className="flex items-center justify-between gap-4">
                 <label htmlFor={toggleId} className="cursor-pointer text-[13px] font-semibold">평균단가 표시</label>
                 <Switch id={toggleId} aria-label="평균단가 표시" checked={showAverageCost} onCheckedChange={onShowAverageCostChange} />
