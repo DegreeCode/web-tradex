@@ -26,7 +26,9 @@ import {
 import {
   appendCandleHistoryWithGaps,
   applyTradeToCandlePage,
-  fillCandleGaps,
+  materializeCandlePage,
+  MAX_MATERIALIZED_CANDLE_BUCKETS,
+  replaceCandlePageData,
   mergeCandles,
   type CandlePage,
 } from "./candle-data";
@@ -35,6 +37,8 @@ import {
   candleRuntime,
   candleTradeRuntimes,
   rememberTradeSequence,
+  startCandleClock,
+  resumeCandleClocks,
   requestCandleRecovery,
   updateCachedCandleQueries,
   type CandleTradeRuntime,
@@ -854,27 +858,27 @@ export function useCandles(
               interval, limit, from, to, cursor,
             })}`,
           );
-          fetched = mergeCandles(fetched, page.data);
+          // Recovery can span many REST pages after a long hidden period;
+          // only the newest bounded window can survive materialization.
+          fetched = mergeCandles(fetched, page.data).slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS);
           cursor = from && page.page.has_more ? page.page.next_cursor ?? undefined : undefined;
         } while (cursor);
         // Keep the older-history cursor: this request only advances the newest end.
         const latest = queryClient.getQueryData<CandlePage>(queryKey);
-        const real = mergeCandles(latest?.data.filter((candle) => !candle.synthetic) ?? [], fetched);
-        let result: CandlePage = {
-          data: mergeCandles(
-            latest?.data.filter((candle) => from && Date.parse(candle.timestamp) < Date.parse(from)) ?? [],
-            mergeCandles(real, fillCandleGaps(real, interval, limit, to).data),
-          ),
+        let result = materializeCandlePage({
+          // Keep a synthetic seed if the last real trade has rolled out. It is
+          // only a price seed; `from` above still requires actual trade evidence.
+          data: mergeCandles(latest?.data ?? [], fetched),
           page: from && latest ? latest.page : page.page,
-          historyLoaded: latest?.historyLoaded || real.length > limit,
+          historyLoaded: latest?.historyLoaded,
           syncedThrough: to,
-        };
+        }, interval, to);
         // REST includes trades before `to`. Replay only the later WS events,
         // otherwise the open bucket's volume and trade count would be doubled.
         for (const trade of pending) {
           if (Date.parse(trade.timestamp) < Date.parse(to)) continue;
           const applied = applyTradeToCandlePage(result, interval, limit, trade);
-          if (applied.data) result = { ...result, data: applied.data };
+          if (applied.data) result = replaceCandlePageData(result, applied.data);
         }
         return result;
       } finally {
@@ -886,8 +890,8 @@ export function useCandles(
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[1] === symbol ? previousData : undefined,
     // Re-entering an interval or returning to the tab catches up the cached tail.
-    // There is no polling; trades keep an already mounted chart live. A guest
-    // loads candles once per visit and its polled ticker moves them after that.
+    // Trades and the local boundary clock keep mounted charts live. A guest
+    // loads candles once per visit and its polled ticker supplies later trades.
     staleTime: signedIn ? 0 : Infinity,
     ...(signedIn ? {} : { gcTime: 0 }),
     refetchInterval: false,
@@ -904,6 +908,11 @@ export function useCandles(
     if (runtime.pendingSequences.size === 0) return;
     requestCandleRecovery(queryClient, symbol, runtime);
   }, [enabled, query.dataUpdatedAt, query.isFetching, query.isSuccess, queryClient, symbol]);
+
+  useEffect(() => {
+    if (!symbol || !enabled) return;
+    return startCandleClock(queryClient, symbol, interval, limit, { respectRecovery: signedIn });
+  }, [enabled, interval, limit, queryClient, signedIn, symbol]);
 
   const older = useMutation({
     mutationKey: ["older-candles", symbol, interval, limit],
@@ -1437,6 +1446,7 @@ export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
       runtime.lastSequence = sequences.length > 0 ? Math.max(...sequences) : undefined;
       runtime.seenSequences.clear();
       runtime.pendingSequences.clear();
+      resumeCandleClocks(symbol);
       replaceSymbolTrades(queryClient, symbol, limit, snapshot);
       return;
     }

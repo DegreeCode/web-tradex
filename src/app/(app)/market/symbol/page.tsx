@@ -447,6 +447,7 @@ function SymbolDetail() {
               ) : candles.length > 0 ? (
                 <CandleChart
                   candles={candles}
+                  interval={interval}
                   seriesType={chartSeriesType}
                   onLoadOlder={candlesQuery.loadOlder}
                   hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}

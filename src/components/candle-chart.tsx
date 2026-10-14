@@ -10,10 +10,11 @@ import {
 import { decimalPrecision, toNumber } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import type { ChartOrderLine } from "@/lib/chart-orders";
-import type { Candle } from "@/lib/types";
+import type { Candle, CandleInterval } from "@/lib/types";
 
 export function CandleChart({
   candles,
+  interval,
   seriesType,
   height = 300,
   onLoadOlder,
@@ -24,6 +25,7 @@ export function CandleChart({
   curvePrice,
 }: {
   candles: Candle[];
+  interval?: CandleInterval;
   seriesType?: ChartSeriesType;
   height?: number;
   onLoadOlder?: () => void;
@@ -79,6 +81,7 @@ export function CandleChart({
   return (
     <LightweightCandleChart
       data={data}
+      interval={interval}
       height={height}
       seriesType={seriesType}
       pricePrecision={pricePrecision}
