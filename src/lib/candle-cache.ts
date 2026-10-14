@@ -6,6 +6,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import {
   advanceCandlePage, applyTradeToCandlePage, isCandleInterval,
+  CANDLE_CLOCK_GRACE_MS, candleClockTimestamp, compareTradeTimestamps, type BufferedCandleTrade,
   nextCandleBucketTimestamp, replaceCandlePageData, type CandlePage,
 } from "./candle-data";
 import type { Candle, CandleInterval, Page, PublicTrade } from "./types";
@@ -18,11 +19,14 @@ export interface CandleTradeRuntime {
   seenSequences: Set<number>;
   pendingSequences: Set<number>;
   recoveryInFlight: boolean;
+  recoveryFrom?: string;
+  latestTradeTimestamp?: string;
   awaitingSnapshotRecovery: boolean;
 }
 
 export const candleTradeRuntimes = new Map<string, CandleTradeRuntime>();
-export const candleFetchTrades = new Map<string, PublicTrade[]>();
+export type CandleFetchBuffer = BufferedCandleTrade[] & { syncedThrough?: string };
+export const candleFetchTrades = new Map<string, CandleFetchBuffer>();
 const candleClockListeners = new Map<string, Set<() => void>>();
 
 /** Recovery flags are outside Query state; wake clocks when that ownership ends. */
@@ -58,8 +62,12 @@ export function updateCachedCandleQueries(
   queryClient: QueryClient,
   symbol: string,
   trade: PublicTrade,
-  count = 1,
+  count?: number,
 ): { updated: boolean; needsRecovery: boolean } {
+  const runtime = candleTradeRuntimes.get(symbol);
+  if (count === undefined && runtime && (!runtime.latestTradeTimestamp || compareTradeTimestamps(trade.timestamp, runtime.latestTradeTimestamp) > 0)) {
+    runtime.latestTradeTimestamp = trade.timestamp;
+  }
   let updated = false;
   let needsRecovery = false;
   for (const [queryKey, unknownPage] of queryClient.getQueriesData<unknown>({
@@ -73,7 +81,7 @@ export function updateCachedCandleQueries(
     if (!query?.isActive()) continue;
     if (query.state.fetchStatus === "fetching") {
       const pending = candleFetchTrades.get(JSON.stringify(queryKey));
-      if (pending) pending.push(trade);
+      if (pending) pending.push(count === undefined ? trade : { ...trade, candleTradeCount: count });
       else needsRecovery = true;
       continue;
     }
@@ -85,10 +93,14 @@ export function updateCachedCandleQueries(
       continue;
     }
     const syncedThrough = (unknownPage as CandlePage).syncedThrough;
-    if (syncedThrough && Date.parse(trade.timestamp) < Date.parse(syncedThrough)) continue;
+    if (syncedThrough && compareTradeTimestamps(trade.timestamp, syncedThrough) < 0) continue;
     const result = applyTradeToCandlePage(unknownPage as Page<Candle>, interval, limit, trade, count);
     if (result.status === "recovery") {
       needsRecovery = true;
+      const runtime = candleRuntime(symbol);
+      if (!runtime.recoveryFrom || compareTradeTimestamps(trade.timestamp, runtime.recoveryFrom) < 0) {
+        runtime.recoveryFrom = trade.timestamp;
+      }
     } else if (result.data) {
       updated = true;
       const nextData = result.data;
@@ -99,6 +111,54 @@ export function updateCachedCandleQueries(
     }
   }
   return { updated, needsRecovery };
+}
+
+/** The initial WS snapshot can contain trades newer than the conservative
+ * bootstrap REST cutoff. Merge that tail, or recover if snapshot truncation
+ * makes its coverage unknowable. Reconnects already have a recovery owner. */
+export function reconcileCandleTradeSnapshot(
+  queryClient: QueryClient,
+  symbol: string,
+  trades: PublicTrade[],
+  snapshotLimit: number,
+  runtime: CandleTradeRuntime,
+): void {
+  const sorted = [...trades].sort((a, b) => a.sequence - b.sequence);
+  const latest = sorted.reduce<string | undefined>((latest, trade) =>
+    !latest || compareTradeTimestamps(trade.timestamp, latest) > 0 ? trade.timestamp : latest, undefined);
+  if (latest && (!runtime.latestTradeTimestamp || compareTradeTimestamps(latest, runtime.latestTradeTimestamp) > 0)) {
+    runtime.latestTradeTimestamp = latest;
+  }
+  const reconcileIdle = !runtime.snapshotReady || runtime.awaitingSnapshotRecovery;
+  let needsRecovery = false;
+  for (const [key, page] of queryClient.getQueriesData<CandlePage>({ queryKey: ["candles", symbol] })) {
+    const query = queryClient.getQueryCache().find({ queryKey: key, exact: true });
+    if (!query?.isActive() || !isCandleInterval(key[2])) continue;
+    const pending = candleFetchTrades.get(JSON.stringify(key));
+    if (pending) {
+      pending.push(...sorted);
+      // A truncated snapshot may omit the beginning of the REST replay tail.
+      // Record uncertainty for the existing post-fetch recovery effect.
+      if (sorted.length >= snapshotLimit && (!pending.syncedThrough ||
+        compareTradeTimestamps(sorted[0].timestamp, pending.syncedThrough) > 0)) {
+        runtime.pendingSequences.add(sorted[0].sequence);
+      }
+      continue;
+    }
+    if (!reconcileIdle || !page?.syncedThrough || !sorted.length) continue;
+    if (sorted.length >= snapshotLimit && compareTradeTimestamps(sorted[0].timestamp, page.syncedThrough) > 0) {
+      needsRecovery = true;
+      continue;
+    }
+    let next = page;
+    for (const trade of sorted) {
+      const applied = applyTradeToCandlePage(next, key[2], Number(key[3]), trade);
+      if (!applied.data) { needsRecovery = true; break; }
+      next = replaceCandlePageData(next, applied.data);
+    }
+    if (next !== page) queryClient.setQueryData(key, next);
+  }
+  if (needsRecovery) requestCandleRecovery(queryClient, symbol, runtime);
 }
 
 export function requestCandleRecovery(
@@ -119,8 +179,14 @@ export function requestCandleRecovery(
     .catch(() => undefined)
     .finally(() => {
       runtime.recoveryInFlight = false;
-      runtime.pendingSequences.clear();
-      resumeCandleClocks(symbol);
+      // A truncated WS snapshot received during this request can expose a
+      // missing replay prefix. Its observed server time bounds the next
+      // ordinary recovery; do not silently clear that new uncertainty.
+      if (runtime.pendingSequences.size && runtime.snapshotReady && !runtime.awaitingSnapshotRecovery) {
+        requestCandleRecovery(queryClient, symbol, runtime);
+      } else {
+        resumeCandleClocks(symbol);
+      }
     });
 }
 
@@ -180,7 +246,7 @@ export function startCandleClock(
     if (!busy) {
       updating = true;
       try {
-        const next = advanceCandlePage(page, interval, new Date(now).toISOString());
+        const next = advanceCandlePage(page, interval, candleClockTimestamp(now));
         if (next !== page) queryClient.setQueryData(queryKey, next);
       } finally {
         updating = false;
@@ -190,11 +256,11 @@ export function startCandleClock(
     // change it. Calendar intervals use APP timezone, not a fixed day length.
     const latest = (query.state.data as CandlePage).data[0];
     const boundary = nextCandleBucketTimestamp(
-      new Date(Math.max(now, Date.parse(latest.timestamp))).toISOString(), interval,
+      new Date(Math.max(now - CANDLE_CLOCK_GRACE_MS, Date.parse(latest.timestamp))).toISOString(), interval,
     );
     if (!boundary) return;
     // Browsers overflow delays above ~24.8 days (monthly/yearly buckets).
-    const delay = Math.min(2_147_483_647, Math.max(1, Date.parse(boundary) - now));
+    const delay = Math.min(2_147_483_647, Math.max(1, Date.parse(boundary) + CANDLE_CLOCK_GRACE_MS - now));
     cancelTimer = clock.schedule(refresh, delay);
   };
   const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
