@@ -78,6 +78,10 @@ interface ZonedDateParts {
   second: number;
 }
 
+// Seoul has had no offset changes since 1988. Preserve the Intl fallback for
+// older dates, but avoid timezone formatting for every modern market bucket.
+const SEOUL_OFFSET_MS = 9 * 60 * 60_000;
+const SEOUL_FIXED_SINCE = Date.UTC(1989, 0, 1);
 const candleTimeFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: CANDLE_APP_TIMEZONE,
   year: "numeric",
@@ -90,6 +94,7 @@ const candleTimeFormatter = new Intl.DateTimeFormat("en-US", {
 });
 
 function zonedParts(date: Date): ZonedDateParts {
+  if (date.getTime() >= SEOUL_FIXED_SINCE) return localPartsAtUtcMillis(date.getTime() + SEOUL_OFFSET_MS);
   const values: Partial<ZonedDateParts> = {};
   for (const part of candleTimeFormatter.formatToParts(date)) {
     if (part.type !== "literal") values[part.type as keyof ZonedDateParts] = Number(part.value);
@@ -118,6 +123,7 @@ function localPartsAtUtcMillis(localMillis: number): ZonedDateParts {
 
 function localPartsToInstant(parts: ZonedDateParts): number {
   const target = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  if (target >= SEOUL_FIXED_SINCE + SEOUL_OFFSET_MS) return target - SEOUL_OFFSET_MS;
   let instant = target;
   // Solve the timezone offset from the target local fields instead of relying
   // on the browser's local timezone. A second pass handles DST transitions.
@@ -140,9 +146,9 @@ function localMillisToTimestamp(localMillis: number): string {
   return new Date(localPartsToInstant(localPartsAtUtcMillis(localMillis))).toISOString();
 }
 
-// Fetch/history normalization re-buckets cached timestamps, and each bucket
-// costs an Intl.formatToParts call. Memoize those recurring timestamps in a
-// bounded cache; ordinary live updates only compute the new tail.
+// Fetch/history normalization reuses bucket boundaries. Keep a bounded memo,
+// particularly for the historical timezone fallback; live updates compute only
+// the new tail and full materialization walks a numeric cursor.
 const MAX_MEMOIZED_BUCKETS = 10_000;
 const bucketMemo = new Map<string, string | null>();
 
@@ -172,6 +178,11 @@ function previousCandleBucketTimestamp(timestamp: string, interval: CandleInterv
 function computeCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
   const instant = parseTime(timestamp);
   if (!Number.isFinite(instant)) return null;
+  const fixed = CANDLE_FIXED_INTERVAL_MS[interval];
+  if (fixed && instant >= SEOUL_FIXED_SINCE) {
+    return new Date(Math.floor((instant + SEOUL_OFFSET_MS - CANDLE_ORIGIN_LOCAL_MS) / fixed) * fixed +
+      CANDLE_ORIGIN_LOCAL_MS - SEOUL_OFFSET_MS).toISOString();
+  }
   const local = zonedParts(new Date(instant));
   const localMillis = Date.UTC(
     local.year,
@@ -205,6 +216,8 @@ function computeCandleBucketTimestamp(timestamp: string, interval: CandleInterva
 function computePreviousCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
   const instant = parseTime(timestamp);
   if (!Number.isFinite(instant)) return null;
+  const step = CANDLE_FIXED_INTERVAL_MS[interval] ?? (interval === "1d" ? 86_400_000 : interval === "1w" ? 604_800_000 : undefined);
+  if (step && instant - step >= SEOUL_FIXED_SINCE) return new Date(instant - step).toISOString();
   const local = zonedParts(new Date(instant));
   const localMillis = Date.UTC(
     local.year,
@@ -227,6 +240,8 @@ function computePreviousCandleBucketTimestamp(timestamp: string, interval: Candl
 export function nextCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
   const bucket = candleBucketTimestamp(timestamp, interval);
   if (!bucket) return null;
+  const step = CANDLE_FIXED_INTERVAL_MS[interval] ?? (interval === "1d" ? 86_400_000 : interval === "1w" ? 604_800_000 : undefined);
+  if (step && parseTime(bucket) >= SEOUL_FIXED_SINCE) return new Date(parseTime(bucket) + step).toISOString();
   const local = zonedParts(new Date(bucket));
   const millis = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second);
   const fixed = CANDLE_FIXED_INTERVAL_MS[interval];
@@ -261,6 +276,15 @@ function isMaterializedData(data: Candle[], interval: CandleInterval): boolean {
       : parseTime(previousCandleBucketTimestamp(data[index - 1].timestamp, interval) ?? "");
     if (parseTime(data[index].timestamp) !== expected) return false;
   }
+  // Structural sharing (or an older cached page) can supply a contiguous array
+  // whose flats are stale. Contiguity alone is not proof of valid price data.
+  for (let index = data.length - 1; index >= 0; index -= 1) {
+    const candle = data[index];
+    if (!candle.synthetic) continue;
+    const close = data[index + 1]?.close ?? candle.close;
+    if (candle.open !== close || candle.high !== close || candle.low !== close || candle.close !== close ||
+      candle.volume_shares !== "0" || candle.volume_credit !== "0" || candle.trade_count !== 0) return false;
+  }
   rememberMaterializedData(data, interval);
   return true;
 }
@@ -284,71 +308,57 @@ export function fillCandleGaps(
   limit: number,
   throughTimestamp?: string,
 ): FilledCandleData {
-  const byTimestamp = new Map<string, Candle>();
+  const byTimestamp = new Map<number, Candle>();
+  // A materialized cache may contain thousands of flats. Only its endpoints
+  // matter: the carry-in seed and the displayed horizon. Interior flats contain
+  // no evidence and will be rebuilt, so do not bucket/sort/memoize all of them.
+  let oldestSynthetic: Candle | undefined;
+  let newestSynthetic: Candle | undefined;
+  const observations: Candle[] = [];
   for (const candle of candles) {
+    if (!candle.synthetic) { observations.push(candle); continue; }
+    const time = parseTime(candle.timestamp);
+    if (!Number.isFinite(time)) continue;
+    if (!oldestSynthetic || time < parseTime(oldestSynthetic.timestamp)) oldestSynthetic = candle;
+    if (!newestSynthetic || time > parseTime(newestSynthetic.timestamp)) newestSynthetic = candle;
+  }
+  if (oldestSynthetic) observations.push(oldestSynthetic);
+  if (newestSynthetic && newestSynthetic !== oldestSynthetic) observations.push(newestSynthetic);
+  for (const candle of observations) {
     const bucket = candleBucketTimestamp(candle.timestamp, interval);
-    if (bucket && (!candle.synthetic || !byTimestamp.has(bucket))) {
-      byTimestamp.set(bucket, { ...candle, interval, timestamp: bucket });
+    if (!bucket) continue;
+    const time = parseTime(bucket);
+    if (!candle.synthetic || !byTimestamp.has(time)) {
+      byTimestamp.set(time, candle.timestamp === bucket && candle.interval === interval
+        ? candle : { ...candle, interval, timestamp: bucket });
     }
   }
-  const sorted = [...byTimestamp.values()]
-    .map((candle) => ({ candle, time: parseTime(candle.timestamp) }))
-    .sort((left, right) => left.time - right.time)
-    .map(({ candle }) => candle);
+  const sorted = [...byTimestamp].sort(([left], [right]) => left - right);
   const safeLimit = Math.max(0, Math.min(MAX_MATERIALIZED_CANDLE_BUCKETS, Math.floor(limit)));
-  if (sorted.length === 0 || safeLimit === 0) return { data: [], capped: limit > safeLimit };
+  if (!sorted.length || !safeLimit) return { data: [], capped: limit > safeLimit };
 
-  // The REST page is newest-first and may contain very sparse buckets. Walk
-  // backwards from the newest real/current bucket so a large old gap cannot
-  // consume the entire synthetic budget before the chart's visible window is
-  // reached. A synthetic bucket's close comes from the nearest earlier real
-  // bucket, which is the previous chronological close by definition.
-  // Synthetic observations are not price evidence. Keep only the oldest as a
-  // seed if its real predecessor has rolled out of the bounded window; rebuild
-  // the rest so a late trade also corrects the flat candles that follow it.
-  const seeds = sorted.filter((candle, index) => !candle.synthetic || index === 0);
-  const seedTimes = seeds.map((candle) => parseTime(candle.timestamp));
-  const latest = sorted[sorted.length - 1];
-  const requestedBucket = throughTimestamp
-    ? candleBucketTimestamp(throughTimestamp, interval)
-    : null;
-  const latestTime = parseTime(latest.timestamp);
-  const requestedTime = requestedBucket ? parseTime(requestedBucket) : Number.NEGATIVE_INFINITY;
-  let cursor = requestedTime > latestTime ? requestedBucket : latest.timestamp;
+  // Retain only the oldest synthetic as a carry-in when its real predecessor
+  // has rolled out. Any earlier real history supersedes that carry-in.
+  const seeds = sorted.filter(([, candle], index) => !candle.synthetic || index === 0);
+  let seedIndex = seeds.length - 1;
+  const requestedBucket = throughTimestamp ? candleBucketTimestamp(throughTimestamp, interval) : null;
+  let cursor = Math.max(sorted[sorted.length - 1][0], requestedBucket ? parseTime(requestedBucket) : -Infinity);
   const descending: Candle[] = [];
-
-  const previousSeed = (timestamp: string): Candle | undefined => {
-    const time = parseTime(timestamp);
-    let low = 0;
-    let high = seedTimes.length - 1;
-    let index = -1;
-    while (low <= high) {
-      const middle = Math.floor((low + high) / 2);
-      if (seedTimes[middle] < time) {
-        index = middle;
-        low = middle + 1;
-      } else {
-        high = middle - 1;
-      }
-    }
-    return index >= 0 ? seeds[index] : undefined;
-  };
-
-  while (cursor && descending.length < safeLimit) {
-    const real = byTimestamp.get(cursor);
-    if (real && (!real.synthetic || real === sorted[0])) {
-      descending.push(real);
-    } else {
-      const previous = previousSeed(cursor);
-      if (!previous) break;
-      descending.push(flatCandle(previous, interval, cursor));
-    }
-    cursor = previousCandleBucketTimestamp(cursor, interval);
+  const step = CANDLE_FIXED_INTERVAL_MS[interval] ?? (interval === "1d" ? 86_400_000 : interval === "1w" ? 604_800_000 : undefined);
+  while (Number.isFinite(cursor) && descending.length < safeLimit) {
+    while (seedIndex >= 0 && seeds[seedIndex][0] > cursor) seedIndex--;
+    if (seedIndex < 0) break;
+    const [seedTime, seed] = seeds[seedIndex];
+    descending.push(seedTime === cursor && !seed.synthetic ? seed : flatCandle(seed, interval, new Date(cursor).toISOString()));
+    // Walk a numeric cursor once. Avoid 5,000 Intl calls, memo entries, parses
+    // and binary searches on every sparse initial fetch or refetch.
+    cursor = step && cursor - step >= SEOUL_FIXED_SINCE
+      ? cursor - step
+      : parseTime(previousCandleBucketTimestamp(new Date(cursor).toISOString(), interval) ?? "");
   }
-
   return {
     data: rememberMaterializedData(descending, interval),
-    capped: Boolean(cursor && parseTime(cursor) >= parseTime(sorted[0].timestamp)),
+    capped: cursor >= sorted[0][0],
   };
 }
 
@@ -410,6 +420,97 @@ export function isCandleInterval(value: unknown): value is CandleInterval {
   return typeof value === "string" && CANDLE_INTERVALS.includes(value as CandleInterval);
 }
 
+// Three seconds covers the supported ±2s client skew with one second of grace.
+// This is a conservative horizon, not a claim that the client is synchronized.
+export const CANDLE_CLOCK_GRACE_MS = 3_000;
+export function candleClockTimestamp(now: number): string {
+  return new Date(now - CANDLE_CLOCK_GRACE_MS).toISOString();
+}
+
+export type BufferedCandleTrade = PublicTrade & { candleTradeCount?: number };
+
+type TradeOrder = Pick<PublicTrade, "timestamp" | "sequence"> & { aggregate?: boolean };
+type OrderedCandle = Candle & { tradeOrder?: { first?: TradeOrder; last: TradeOrder; latestTimestamp?: string } };
+
+/** REST accepts nanoseconds; Date.parse alone loses ordering within a millisecond. */
+export function compareTradeTimestamps(left: string, right: string): number {
+  const millis = parseTime(left) - parseTime(right);
+  if (millis) return millis;
+  const fraction = (value: string) => (value.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0").slice(0, 9);
+  return fraction(left).localeCompare(fraction(right));
+}
+function compareTradeOrder(left: TradeOrder, right: TradeOrder): number {
+  // The backend uses first/last(price, sequence), not timestamp ordering.
+  // Guest ticker counts reset daily, so their approximate observations use time.
+  return left.aggregate || right.aggregate
+    ? compareTradeTimestamps(left.timestamp, right.timestamp) || left.sequence - right.sequence
+    : left.sequence - right.sequence || compareTradeTimestamps(left.timestamp, right.timestamp);
+}
+function orderOf(trade: PublicTrade, aggregate = false): TradeOrder {
+  return { timestamp: trade.timestamp, sequence: trade.sequence, ...(aggregate ? { aggregate: true } : {}) };
+}
+
+/** Include every already-applied WS trade in the snapshot, even if the client
+ * clock is behind. One nanosecond makes the known timestamp inclusive via `to`.
+ * Never use a future client timestamp as a REST synchronization watermark. */
+export function candleSnapshotTo(page: CandlePage | undefined, now: number, observedTimestamp?: string): string {
+  let to = candleClockTimestamp(now);
+  if (page?.syncedThrough && compareTradeTimestamps(page.syncedThrough, to) > 0) to = page.syncedThrough;
+  const observed = (page?.data ?? []).map(candle => (candle as OrderedCandle).tradeOrder?.latestTimestamp ?? (candle as OrderedCandle).tradeOrder?.last.timestamp);
+  observed.push(observedTimestamp);
+  for (const last of observed) {
+    if (!last || compareTradeTimestamps(last, to) < 0) continue;
+    const millis = parseTime(last);
+    const nanos = Number((last.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0").slice(3, 9)) + 1;
+    to = new Date(millis + Math.floor(nanos / 1_000_000)).toISOString().replace(
+      /Z$/, `${String(nanos % 1_000_000).padStart(6, "0")}Z`,
+    );
+  }
+  return to;
+}
+
+/** Recovery must include the ambiguous bucket, not just the newest real one. */
+export function candleSnapshotFrom(page: CandlePage | undefined, interval: CandleInterval, recoveryFrom?: string): string | undefined {
+  const latest = page?.data.find(candle => !candle.synthetic)?.timestamp;
+  // A late WS event buffered during this fetch may predate the newest real
+  // bucket. Fetch every bucket not already covered by the previous snapshot.
+  const synced = page?.syncedThrough ? candleBucketTimestamp(page.syncedThrough, interval) : undefined;
+  const start = latest && synced && compareTradeTimestamps(synced, latest) < 0 ? synced : latest;
+  const recovery = recoveryFrom ? candleBucketTimestamp(recoveryFrom, interval) : undefined;
+  return recovery && (!start || compareTradeTimestamps(recovery, start) < 0) ? recovery : start;
+}
+
+/** A single reconciliation path for REST and its buffered, exclusive-to replay. */
+export function reconcileCandleSnapshot(
+  current: CandlePage | undefined,
+  fetched: Page<Candle>,
+  interval: CandleInterval,
+  to: string,
+  pending: BufferedCandleTrade[],
+  from?: string,
+  throughTimestamp?: string,
+): CandlePage {
+  let result = materializeCandlePage({
+    data: mergeCandles(current?.data ?? [], fetched.data),
+    page: from && current ? current.page : fetched.page,
+    historyLoaded: current?.historyLoaded,
+    syncedThrough: to,
+  }, interval, throughTimestamp);
+  const replayed = new Set<number>();
+  for (const trade of [...pending].sort((a, b) => compareTradeOrder(
+    orderOf(a, a.candleTradeCount !== undefined), orderOf(b, b.candleTradeCount !== undefined),
+  ))) {
+    if (compareTradeTimestamps(trade.timestamp, to) < 0 || replayed.has(trade.sequence)) continue;
+    replayed.add(trade.sequence);
+    const applied = applyTradeToCandlePage(result, interval, MAX_MATERIALIZED_CANDLE_BUCKETS, trade, trade.candleTradeCount);
+    // Do not silently acknowledge a replay we could not represent. The normal
+    // query error/recovery path retains the previous cache on failure.
+    if (!applied.data) throw new Error("Candle snapshot could not replay a buffered trade");
+    result = replaceCandlePageData(result, applied.data);
+  }
+  return result;
+}
+
 /**
  * `count` lets one entry stand for several trades (a guest's polled ticker delta).
  * The REST limit stays in the call signature; materialized pages use the total
@@ -420,8 +521,13 @@ export function applyTradeToCandlePage(
   interval: CandleInterval,
   _limit: number,
   trade: PublicTrade,
-  count = 1,
+  count?: number,
 ): { status: "updated" | "recovery"; data?: Candle[] } {
+  const tradeCount = count ?? 1;
+  const order = orderOf(trade, count !== undefined);
+  if (page.syncedThrough && compareTradeTimestamps(trade.timestamp, page.syncedThrough) < 0) {
+    return { status: "updated", data: page.data };
+  }
   const timestamp = candleBucketTimestamp(trade.timestamp, interval);
   if (!timestamp || !trade.price || !trade.quantity || !trade.credit) return { status: "recovery" };
   const contiguous = isMaterializedData(page.data, interval);
@@ -438,11 +544,12 @@ export function applyTradeToCandlePage(
     data[0] = {
       symbol: trade.symbol, interval, timestamp,
       open: trade.price, high: trade.price, low: trade.price, close: trade.price,
-      volume_shares: trade.quantity, volume_credit: trade.credit, trade_count: count,
-    };
+      volume_shares: trade.quantity, volume_credit: trade.credit, trade_count: tradeCount,
+      tradeOrder: { first: order, last: order, latestTimestamp: trade.timestamp },
+    } as OrderedCandle;
     return { status: "updated", data: rememberMaterializedData(data, interval) };
   }
-  const data = [...page.data];
+  const data: OrderedCandle[] = [...page.data];
   const existingIndex = contiguous && tradeTime === latestTime ? 0 : data.findIndex(
     (candle) => candleBucketTimestamp(candle.timestamp, interval) === timestamp,
   );
@@ -451,7 +558,10 @@ export function applyTradeToCandlePage(
     existingIndex >= 0 &&
     !data[existingIndex].synthetic &&
     Number.isFinite(latestTime) &&
-    tradeTime < latestTime
+    tradeTime < latestTime &&
+    !data[existingIndex].tradeOrder &&
+    !page.syncedThrough &&
+    data.some((candle) => !candle.synthetic && parseTime(candle.timestamp) > tradeTime)
   ) {
     return { status: "recovery" };
   }
@@ -467,17 +577,30 @@ export function applyTradeToCandlePage(
           close: trade.price,
           volume_shares: trade.quantity,
           volume_credit: trade.credit,
-          trade_count: count,
+          trade_count: tradeCount,
           synthetic: false,
+          tradeOrder: { first: order, last: order, latestTimestamp: trade.timestamp },
         }
       : {
           ...existing,
           high: compareDecimal(existing.high, trade.price) >= 0 ? existing.high : trade.price,
           low: compareDecimal(existing.low, trade.price) <= 0 ? existing.low : trade.price,
-          close: trade.price,
+          open: existing.tradeOrder?.first && compareTradeOrder(order, existing.tradeOrder.first) < 0
+            ? trade.price : existing.open,
+          close: !existing.tradeOrder || compareTradeOrder(order, existing.tradeOrder.last) > 0
+            ? trade.price : existing.close,
+          tradeOrder: {
+            latestTimestamp: existing.tradeOrder?.latestTimestamp &&
+              compareTradeTimestamps(existing.tradeOrder.latestTimestamp, trade.timestamp) > 0
+              ? existing.tradeOrder.latestTimestamp : trade.timestamp,
+            first: existing.tradeOrder?.first && compareTradeOrder(order, existing.tradeOrder.first) < 0
+              ? order : existing.tradeOrder?.first,
+            last: !existing.tradeOrder || compareTradeOrder(order, existing.tradeOrder.last) > 0
+              ? order : existing.tradeOrder.last,
+          },
           volume_shares: addDecimal(existing.volume_shares, trade.quantity),
           volume_credit: addDecimal(existing.volume_credit, trade.credit),
-          trade_count: existing.trade_count + count,
+          trade_count: existing.trade_count + tradeCount,
         };
   } else {
     data.push({
@@ -490,10 +613,16 @@ export function applyTradeToCandlePage(
       close: trade.price,
       volume_shares: trade.quantity,
       volume_credit: trade.credit,
-      trade_count: count,
+      trade_count: tradeCount,
+      tradeOrder: { first: order, last: order, latestTimestamp: trade.timestamp },
     });
   }
-  if (contiguous && existingIndex === 0) {
+  if (contiguous && existingIndex >= 0) {
+    // Only synthetic successors inherit this close. A newer real candle starts
+    // a separate price chain and must never be touched by this correction.
+    for (let index = existingIndex - 1; index >= 0 && data[index].synthetic; index -= 1) {
+      data[index] = flatCandle(data[existingIndex], interval, data[index].timestamp);
+    }
     return { status: "updated", data: rememberMaterializedData(data, interval) };
   }
   // Historical synthetic replacements also correct following dots; sparse or

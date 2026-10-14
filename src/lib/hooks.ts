@@ -25,10 +25,11 @@ import {
 } from "./api";
 import {
   appendCandleHistoryWithGaps,
-  applyTradeToCandlePage,
-  materializeCandlePage,
+  candleClockTimestamp,
+  candleSnapshotFrom,
+  candleSnapshotTo,
+  reconcileCandleSnapshot,
   MAX_MATERIALIZED_CANDLE_BUCKETS,
-  replaceCandlePageData,
   mergeCandles,
   type CandlePage,
 } from "./candle-data";
@@ -39,9 +40,11 @@ import {
   rememberTradeSequence,
   startCandleClock,
   resumeCandleClocks,
+  reconcileCandleTradeSnapshot,
   requestCandleRecovery,
   updateCachedCandleQueries,
   type CandleTradeRuntime,
+  type CandleFetchBuffer,
 } from "./candle-cache";
 import { addDecimal, compareDecimal, isPositiveDecimal } from "./format";
 import { currentDisclosures } from "./disclosure-cache";
@@ -843,9 +846,12 @@ export function useCandles(
     queryFn: async () => {
       const current = queryClient.getQueryData<CandlePage>(queryKey);
       // Synthetic clock ticks are not evidence that we received real candles.
-      const from = current?.data.find((candle) => !candle.synthetic)?.timestamp;
-      const to = new Date().toISOString();
-      const pending: PublicTrade[] = [];
+      const runtime = signedIn && symbol ? candleTradeRuntimes.get(symbol) : undefined;
+      const recoveryFrom = runtime?.recoveryFrom;
+      const from = candleSnapshotFrom(current, interval, recoveryFrom);
+      const to = candleSnapshotTo(current, Date.now(), runtime?.latestTradeTimestamp);
+      const pending: CandleFetchBuffer = [];
+      pending.syncedThrough = to;
       const fetchKey = JSON.stringify(queryKey);
       candleFetchTrades.set(fetchKey, pending);
       try {
@@ -862,24 +868,12 @@ export function useCandles(
           // only the newest bounded window can survive materialization.
           fetched = mergeCandles(fetched, page.data).slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS);
           cursor = from && page.page.has_more ? page.page.next_cursor ?? undefined : undefined;
-        } while (cursor);
+        } while (cursor && fetched.length < MAX_MATERIALIZED_CANDLE_BUCKETS);
         // Keep the older-history cursor: this request only advances the newest end.
         const latest = queryClient.getQueryData<CandlePage>(queryKey);
-        let result = materializeCandlePage({
-          // Keep a synthetic seed if the last real trade has rolled out. It is
-          // only a price seed; `from` above still requires actual trade evidence.
-          data: mergeCandles(latest?.data ?? [], fetched),
-          page: from && latest ? latest.page : page.page,
-          historyLoaded: latest?.historyLoaded,
-          syncedThrough: to,
-        }, interval, to);
-        // REST includes trades before `to`. Replay only the later WS events,
-        // otherwise the open bucket's volume and trade count would be doubled.
-        for (const trade of pending) {
-          if (Date.parse(trade.timestamp) < Date.parse(to)) continue;
-          const applied = applyTradeToCandlePage(result, interval, limit, trade);
-          if (applied.data) result = replaceCandlePageData(result, applied.data);
-        }
+        const result = reconcileCandleSnapshot(latest, { ...page, data: fetched }, interval,
+          to, pending, from, candleClockTimestamp(Date.now()));
+        if (runtime && runtime.recoveryFrom === recoveryFrom) runtime.recoveryFrom = undefined;
         return result;
       } finally {
         if (candleFetchTrades.get(fetchKey) === pending) candleFetchTrades.delete(fetchKey);
@@ -1441,11 +1435,12 @@ export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
       const sequences = snapshot
         .map((trade) => trade.sequence)
         .filter((sequence): sequence is number => Number.isSafeInteger(sequence));
-      runtime.snapshotReady = true;
-      runtime.awaitingSnapshotRecovery = false;
       runtime.lastSequence = sequences.length > 0 ? Math.max(...sequences) : undefined;
       runtime.seenSequences.clear();
       runtime.pendingSequences.clear();
+      reconcileCandleTradeSnapshot(queryClient, symbol, snapshot, limit, runtime);
+      runtime.snapshotReady = true;
+      runtime.awaitingSnapshotRecovery = false;
       resumeCandleClocks(symbol);
       replaceSymbolTrades(queryClient, symbol, limit, snapshot);
       return;

@@ -229,3 +229,10 @@ test("incremental paths normalize sparse inputs instead of preserving holes", ()
   const advanced = advanceCandlePage(current, "1m", candle(4).timestamp);
   assert.deepEqual(advanced.data.map((c) => Date.parse(c.timestamp) / 60_000), [4, 3, 2, 1, 0]);
 });
+
+test("contiguous cached flats with a stale close are normalized before clock advancement", () => {
+  const stale = page([candle(3, "999", true), candle(2, "999", true), candle(1, "20")]);
+  const next = advanceCandlePage(stale, "1m", candle(4).timestamp);
+  assert.deepEqual(next.data.map(c => c.close), ["20", "20", "20", "20"]);
+  assert.equal(next.data.at(-1)?.volume_shares, stale.data.at(-1)?.volume_shares);
+});

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { advanceCandlePage, nextCandleBucketTimestamp, MAX_MATERIALIZED_CANDLE_BUCKETS, type CandlePage } from "../src/lib/candle-data";
+import { advanceCandlePage, nextCandleBucketTimestamp, MAX_MATERIALIZED_CANDLE_BUCKETS, CANDLE_CLOCK_GRACE_MS, type CandlePage } from "../src/lib/candle-data";
 import {
   candleFetchTrades, candleRuntime, candleTradeRuntimes, startCandleClock, resumeCandleClocks, requestCandleRecovery,
   updateCachedCandleQueries, type CandleClockEnvironment,
@@ -107,7 +107,7 @@ test("mounted guest clock schedules boundaries, pauses hidden, catches up and cl
   const h = setup();
   try {
     assert.ok(h.clock.timer);
-    assert.equal(h.clock.timer.at - h.clock.time, 750);
+    assert.equal(h.clock.timer.at - h.clock.time, 750 + CANDLE_CLOCK_GRACE_MS);
     h.clock.tick();
     assert.equal(h.data().data.length, 2);
     h.clock.hide(true);
@@ -115,7 +115,7 @@ test("mounted guest clock schedules boundaries, pauses hidden, catches up and cl
     h.clock.time += (MAX_MATERIALIZED_CANDLE_BUCKETS + 1) * 1_000;
     h.clock.hide(false);
     assert.equal(h.data().data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
-    assert.equal(h.data().data[0].timestamp, new Date(h.clock.time).toISOString());
+    assert.equal(h.data().data[0].timestamp, new Date(h.clock.time - CANDLE_CLOCK_GRACE_MS).toISOString());
     assert.equal(h.data().page.has_more, false);
     assert.equal(h.fetches(), 0);
   } finally { h.cleanup(); }
@@ -146,7 +146,7 @@ test("clock waits for fetch ownership and preserves buffered WS replay", async (
     h.clock.tick();
     assert.equal(h.data(), original);
     const trade = { symbol: "CLOCK.M", side: "BUY" as const, price: "20", quantity: "1", credit: "20",
-      fee: "0", timestamp: new Date(h.clock.time).toISOString(), sequence: 1 };
+      fee: "0", timestamp: new Date(h.clock.time - CANDLE_CLOCK_GRACE_MS).toISOString(), sequence: 1 };
     updateCachedCandleQueries(h.client, "CLOCK.M", trade);
     assert.deepEqual(pending, [trade]);
     candleFetchTrades.delete(JSON.stringify(h.key));
@@ -188,7 +188,7 @@ test("clock respects recovery, snapshot and pending sequence guards", () => {
 test("a future bucket schedules only after it can change", () => {
   const h = setup(page("2026-10-14T01:00:00.000Z"));
   try {
-    assert.equal(h.clock.timer?.at, Date.parse("2026-10-14T01:00:01.000Z"));
+    assert.equal(h.clock.timer?.at, Date.parse("2026-10-14T01:00:01.000Z") + CANDLE_CLOCK_GRACE_MS);
     assert.equal(h.data().data.length, 1);
   } finally { h.cleanup(); }
 });
@@ -229,3 +229,21 @@ test("REST recovery completion wakes the clock after releasing its runtime flag"
     assert.equal(fetches, 1, "only the existing recovery request ran");
   } finally { h.cleanup(); }
 });
+
+for (const offset of [-2000, 0, 2000]) {
+  test(`clock never draws ahead of server with client offset ${offset}ms`, () => {
+    const h = setup();
+    try {
+      for (let step = 0; step < 40; step++) {
+        const serverNow = Date.parse("2026-10-14T00:00:00Z") + step * 250;
+        h.clock.hide(true);
+        h.clock.time = serverNow + offset;
+        h.clock.hide(false);
+        for (const candle of h.data().data) {
+          if (candle.synthetic) assert.ok(Date.parse(candle.timestamp) <= serverNow, `step=${step} offset=${offset}`);
+        }
+      }
+      assert.equal(h.fetches(), 0);
+    } finally { h.cleanup(); }
+  });
+}
