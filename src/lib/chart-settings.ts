@@ -12,6 +12,8 @@ export interface ChartSettings {
   /** Volume pane height divided by chart height. */
   volumePaneRatio?: number;
   /** Defaults to true for existing browsers. */
+  showCurvePrice?: boolean;
+  /** Defaults to true for existing browsers. */
   showAverageCost?: boolean;
   /** Defaults to true; only active orders for the selected account are shown. */
   showOrders?: boolean;
@@ -36,6 +38,7 @@ export function sanitizeChartSettings(raw: unknown): ChartSettings {
   if (isCandleInterval(input.candleInterval)) out.candleInterval = input.candleInterval;
   if (input.seriesType === "candle" || input.seriesType === "line") out.seriesType = input.seriesType;
   if (isVolumePaneRatio(input.volumePaneRatio)) out.volumePaneRatio = input.volumePaneRatio;
+  if (typeof input.showCurvePrice === "boolean") out.showCurvePrice = input.showCurvePrice;
   if (typeof input.showAverageCost === "boolean") out.showAverageCost = input.showAverageCost;
   if (typeof input.showOrders === "boolean") out.showOrders = input.showOrders;
   if (typeof input.logarithmic === "boolean") out.logarithmic = input.logarithmic;

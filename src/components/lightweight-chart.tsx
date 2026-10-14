@@ -31,6 +31,7 @@ import { calculateVolumePaneHeight, setVolumePaneRatio, useChartSettings } from 
 const UP_COLOR = "#f04452";
 const DOWN_COLOR = "#3182f6";
 const HOLDING_COLOR = "#f59e0b";
+const CURVE_PRICE_COLOR = "#8b5cf6";
 const EMPTY_ORDER_LINES: ChartOrderLine[] = [];
 const CHART_THEMES = {
   light: { grid: "#f2f4f6", text: "#8b95a1", crosshair: "#c9ced4", crosshairLabel: "#4b5563" },
@@ -82,6 +83,45 @@ interface LineChartProps {
   ariaLabel: string;
   holding?: ChartHolding;
   orders?: ChartOrderLine[];
+  curvePrice?: string;
+}
+
+function useCurvePriceLine(
+  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  hasData: boolean,
+  height: number,
+  curvePrice: string | undefined,
+  seriesType?: ChartSeriesType,
+) {
+  const lineRef = useRef<{
+    series: ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time>;
+    line: IPriceLine;
+  } | null>(null);
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) {
+      lineRef.current = null;
+      return;
+    }
+    // A chart recreation discards the previous series and its price lines.
+    const previous = lineRef.current?.series === series ? lineRef.current : null;
+    const price = Number(curvePrice);
+    if (curvePrice === undefined || !Number.isFinite(price) || price <= 0) {
+      if (previous) series.removePriceLine(previous.line);
+      lineRef.current = null;
+      return;
+    }
+    const options = {
+      price,
+      color: CURVE_PRICE_COLOR,
+      lineWidth: 1 as const,
+      lineStyle: LineStyle.Solid,
+      axisLabelVisible: true,
+      title: "현재가",
+    };
+    if (previous) previous.line.applyOptions(options);
+    else lineRef.current = { series, line: series.createPriceLine(options) };
+  }, [seriesRef, hasData, height, curvePrice, seriesType]);
 }
 
 function useHoldingPriceLine(
@@ -171,6 +211,10 @@ function ChartOrderLegend({ orders }: { orders: ChartOrderLine[] }) {
 
 function chartOrdersDescription(orders: ChartOrderLine[]): string {
   return orders.map((order) => `. ${order.label} ${fmtPrice(order.price)}`).join("");
+}
+
+function chartCurvePriceDescription(curvePrice?: string): string {
+  return curvePrice === undefined ? "" : `. 현재가 ${fmtPrice(curvePrice)}`;
 }
 
 function ChartHoldingLegend({ holding }: { holding?: ChartHolding }) {
@@ -454,6 +498,7 @@ export function LightweightLineChart({
   ariaLabel,
   holding,
   orders = EMPTY_ORDER_LINES,
+  curvePrice,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -539,6 +584,7 @@ export function LightweightLineChart({
   useChartPriceScale(seriesRef, hasData, height);
   useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined);
   useOrderPriceLines(seriesRef, hasData, height, orders);
+  useCurvePriceLine(seriesRef, hasData, height, curvePrice);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -571,7 +617,7 @@ export function LightweightLineChart({
       className="relative w-full overflow-hidden rounded-xl"
       style={{ height, touchAction: "pan-y" }}
       role="img"
-      aria-label={`${ariaLabel}. ${valueLabel} ${rawDecimal(active.valueText, active.value, valueFormatter)}${chartHoldingDescription(holding)}${chartOrdersDescription(orders)}`}
+      aria-label={`${ariaLabel}. ${valueLabel} ${rawDecimal(active.valueText, active.value, valueFormatter)}${chartHoldingDescription(holding)}${chartOrdersDescription(orders)}${chartCurvePriceDescription(curvePrice)}`}
     >
       <div
         className="pointer-events-none absolute top-2 left-2.5 z-10 text-[10px] leading-4 sm:text-[11px]"
@@ -601,6 +647,7 @@ interface CandleChartProps {
   loadingOlder?: boolean;
   holding?: ChartHolding;
   orders?: ChartOrderLine[];
+  curvePrice?: string;
 }
 
 export function LightweightCandleChart({
@@ -615,6 +662,7 @@ export function LightweightCandleChart({
   loadingOlder,
   holding,
   orders = EMPTY_ORDER_LINES,
+  curvePrice,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -709,6 +757,7 @@ export function LightweightCandleChart({
   useChartPriceScale(seriesRef, hasData, height, seriesType);
   useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined, seriesType);
   useOrderPriceLines(seriesRef, hasData, height, orders, seriesType);
+  useCurvePriceLine(seriesRef, hasData, height, curvePrice, seriesType);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -783,7 +832,7 @@ export function LightweightCandleChart({
       className="relative w-full overflow-hidden rounded-xl"
       style={{ height, touchAction: "pan-y" }}
       role="img"
-      aria-label={`${ariaLabel}. 종가 ${rawDecimal(active.closeText, active.close, fmtPrice)}${chartHoldingDescription(holding)}${chartOrdersDescription(orders)}`}
+      aria-label={`${ariaLabel}. 종가 ${rawDecimal(active.closeText, active.close, fmtPrice)}${chartHoldingDescription(holding)}${chartOrdersDescription(orders)}${chartCurvePriceDescription(curvePrice)}`}
     >
       {loadingOlder ? (
         <span role="status" className="pointer-events-none absolute bottom-8 left-3 z-10 rounded-md bg-card/90 px-2 py-1 text-[11px] text-app-gray-500">

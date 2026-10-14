@@ -44,6 +44,7 @@ import {
   fmtPrice,
   fmtQuantity,
   fmtTime,
+  isPositiveDecimal,
   toNumber,
 } from "@/lib/format";
 import {
@@ -188,10 +189,13 @@ function SymbolDetail() {
   const updateInterval = (next: CandleInterval) => updateChartSettings({ candleInterval: next });
   const intervalHydrated = chartSettings !== null;
   const chartSeriesType = chartSettings?.seriesType ?? "candle";
+  const showCurvePrice = chartSettings?.showCurvePrice ?? true;
   const showAverageCost = chartSettings?.showAverageCost ?? true;
   const showOrders = chartSettings?.showOrders ?? true;
   const settingsButton = (
     <ChartSettingsButton
+      showCurvePrice={showCurvePrice}
+      onShowCurvePriceChange={(show) => updateChartSettings({ showCurvePrice: show })}
       showAverageCost={showAverageCost}
       onShowAverageCostChange={(show) => updateChartSettings({ showAverageCost: show })}
       showOrders={showOrders}
@@ -300,6 +304,8 @@ function SymbolDetail() {
   }
 
   const instrument = instrumentQuery.data;
+  const curvePrice = showCurvePrice && isPositiveDecimal(instrument.curve_spot_price) && toNumber(instrument.curve_spot_price) > 0
+    ? instrument.curve_spot_price : undefined;
   const holding = status === "authenticated" ? buildChartHolding(
     findPosition(portfolioQuery.data, instrument.symbol),
     instrument.curve_spot_price,
@@ -441,9 +447,10 @@ function SymbolDetail() {
                   loadingOlder={candlesQuery.isLoadingOlder}
                   holding={chartHolding}
                   orders={chartOrders}
+                  curvePrice={curvePrice}
                 />
               ) : (
-                <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} />
+                <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} curvePrice={curvePrice} />
               )}
               {ordersEnabled && ordersQuery.isError ? (
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-app-gray-500">

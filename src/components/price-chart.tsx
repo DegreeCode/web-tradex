@@ -23,11 +23,13 @@ export function PriceChart({
   height = 300,
   holding,
   orders,
+  curvePrice,
 }: {
   trades: PublicTrade[];
   height?: number;
   holding?: ChartHolding;
   orders?: ChartOrderLine[];
+  curvePrice?: string;
 }) {
   const chartData = useMemo<{ points: LightweightLinePoint[]; volume: LightweightVolumePoint[]; pricePrecision: number }>(() => {
     const bySecond = new Map<number, { point: LightweightLinePoint; volume: string }>();
@@ -89,12 +91,13 @@ export function PriceChart({
       color={color}
       valueLabel="최근 체결"
       valueFormatter={fmtPrice}
-      pricePrecision={Math.max(chartData.pricePrecision, ...(orders ?? []).map((order) => decimalPrecision(order.price)))}
+      pricePrecision={Math.max(chartData.pricePrecision, decimalPrecision(curvePrice), ...(orders ?? []).map((order) => decimalPrecision(order.price)))}
       volume={chartData.volume}
       emptyMessage={points.length === 0 ? "체결 데이터가 아직 없어요" : "차트를 그릴 체결이 더 필요해요"}
       ariaLabel="최근 체결 가격 차트"
       holding={holding}
       orders={orders}
+      curvePrice={curvePrice}
     />
   );
 }
