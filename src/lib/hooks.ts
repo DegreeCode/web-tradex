@@ -169,7 +169,7 @@ export function useMarketState() {
 }
 
 /** A guest never opens a socket, so its streams stay closed and REST stands in. */
-function useSocketStatus(kind: WsKind): WsStatus {
+export function useSocketStatus(kind: WsKind): WsStatus {
   const signedIn = useSignedIn();
   const socket = signedIn ? getSocket(kind) : null;
   const subscribe = useCallback(

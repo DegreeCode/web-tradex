@@ -13,6 +13,9 @@ export interface ListingEvaluationCriteria {
 
 export interface ExchangeInfo {
   settings_version: string;
+  market?: {
+    candle_intervals: string[];
+  };
   trade: {
     fee_ppm: number;
     default_slippage_ppm: number;
@@ -67,13 +70,13 @@ export interface ExchangeInfo {
   };
 }
 
-export function useExchangeInfo(poll = false) {
-  // Only signed-in screens act on these settings, so a guest never asks.
+export function useExchangeInfo(poll = false, { allowGuest = false } = {}) {
+  // Public chart settings also apply to guests; other screens wait for sign-in.
   const signedIn = useSignedIn();
   return useQuery({
     queryKey: ["exchange-info"],
     queryFn: () => apiData<ExchangeInfo>("/api/v1/exchange/info"),
-    enabled: signedIn,
+    enabled: signedIn || allowGuest,
     // Settings change rarely; focus/reconnect refetch only once this is stale.
     staleTime: 60_000,
     // Only the app shell owns the timer; form observers share its response.
