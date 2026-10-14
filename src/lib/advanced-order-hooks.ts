@@ -17,9 +17,29 @@ import type {
 } from "./types";
 import type { PnLFilters } from "./pnl";
 import { pnlQueryOptions } from "./pnl-query";
+import { useSocketStatus } from "./hooks";
 
 export function usePnL(filters: PnLFilters) {
   return useInfiniteQuery(pnlQueryOptions(filters));
+}
+export function useOrder(orderId: string, initial?: Order) {
+  const privateStatus = useSocketStatus("private");
+  return useQuery({
+    queryKey: ["orders", "detail", orderId],
+    queryFn: ({ signal }) =>
+      apiData<Order>(`/api/v1/orders/${orderId}`, { signal }),
+    initialData: initial,
+    refetchOnMount: "always",
+    staleTime: 10_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === "ACTIVATED") return 2_000;
+      // Events handle live changes; this also catches silent trigger expiry.
+      if (status === "PENDING")
+        return privateStatus === "open" ? 60_000 : 15_000;
+      return false;
+    },
+  });
 }
 export function useAmendOrder() {
   const client = useQueryClient();

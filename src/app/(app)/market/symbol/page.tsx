@@ -30,9 +30,11 @@ import { ResponsiveOrderForm } from "@/components/responsive-order-form";
 import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
 import { resolveAccountId } from "@/lib/accounts";
+import { CANDLE_INTERVAL_LABELS, pickCandleInterval, resolveCandleIntervals } from "@/lib/candle-intervals";
 import { buildChartHolding } from "@/lib/chart-holding";
 import { buildChartOrderLines } from "@/lib/chart-orders";
 import { updateChartSettings, useChartSettings } from "@/lib/chart-settings";
+import { useExchangeInfo } from "@/lib/exchange-info";
 import {
   changePercent,
   compareDecimal,
@@ -62,15 +64,6 @@ import { hasDistinctLastTrade, isAtCurveCeiling } from "@/lib/instruments";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import type { CandleInterval, Instrument } from "@/lib/types";
 
-const INTERVALS: { value: CandleInterval; label: string }[] = [
-  { value: "1m", label: "1분" },
-  { value: "5m", label: "5분" },
-  { value: "15m", label: "15분" },
-  { value: "1h", label: "1시간" },
-  { value: "4h", label: "4시간" },
-  { value: "1d", label: "1일" },
-];
-
 const DEFAULT_CANDLE_INTERVAL: CandleInterval = "1h";
 
 interface StatItem {
@@ -80,31 +73,35 @@ interface StatItem {
 }
 
 function IntervalPicker({
+  intervals,
   interval,
   onChange,
   children,
   settings,
 }: {
-  interval: CandleInterval;
+  intervals: readonly CandleInterval[];
+  interval: CandleInterval | undefined;
   onChange: (interval: CandleInterval) => void;
   children?: React.ReactNode;
   settings?: React.ReactNode;
 }) {
   return (
     <div role="group" aria-label="차트 기간" className="mt-3 flex items-center gap-1">
-      <div className="flex min-w-0 gap-1 overflow-x-auto">
-        {INTERVALS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value)}
-            aria-pressed={interval === option.value}
-            className="min-h-8 shrink-0 rounded-lg px-2.5 text-[12px] font-semibold text-app-gray-500 hover:bg-app-gray-100 aria-pressed:bg-app-gray-900 aria-pressed:text-app-gray-50"
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      {intervals.length > 0 ? (
+        <div className="flex min-w-0 gap-1 overflow-x-auto">
+          {intervals.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onChange(option)}
+              aria-pressed={interval === option}
+              className="min-h-8 shrink-0 rounded-lg px-2.5 text-[12px] font-semibold text-app-gray-500 hover:bg-app-gray-100 aria-pressed:bg-app-gray-900 aria-pressed:text-app-gray-50"
+            >
+              {CANDLE_INTERVAL_LABELS[option]}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {children}
       {settings}
     </div>
@@ -182,12 +179,18 @@ function SymbolDetail() {
   const onAccountChange = useCallback((accountId: string) => {
     if (user) updatePreferences({ selectedAccount: { userId: user.user_id, accountId } });
   }, [user]);
-  // A guest gets the chart and ticker only: no trades or disclosures requests.
+  // A guest gets the chart, ticker and public settings: no trades or disclosures requests.
   const guest = status === "anonymous";
   const chartSettings = useChartSettings();
-  const interval = chartSettings?.candleInterval ?? DEFAULT_CANDLE_INTERVAL;
+  const exchangeQuery = useExchangeInfo(false, { allowGuest: true });
+  const intervals = resolveCandleIntervals(exchangeQuery.data);
+  const interval = pickCandleInterval(chartSettings?.candleInterval, intervals, DEFAULT_CANDLE_INTERVAL);
+  // A failed attempt exposes the fallback immediately, even while the shared
+  // query retries. Cached settings remain usable during background refetches.
+  const exchangeInfoReady = exchangeQuery.data !== undefined || exchangeQuery.isFetched || exchangeQuery.failureCount > 0;
   const updateInterval = (next: CandleInterval) => updateChartSettings({ candleInterval: next });
   const intervalHydrated = chartSettings !== null;
+  const candlesEnabled = intervalHydrated && exchangeInfoReady && interval !== undefined;
   const chartSeriesType = chartSettings?.seriesType ?? "candle";
   const showCurvePrice = chartSettings?.showCurvePrice ?? true;
   const showAverageCost = chartSettings?.showAverageCost ?? true;
@@ -233,7 +236,7 @@ function SymbolDetail() {
     status === "authenticated" && Boolean(canonicalSymbol) && Boolean(accountId),
   );
   const tradesQuery = useSymbolTrades(canonicalSymbol, 150);
-  const candlesQuery = useCandles(canonicalSymbol, interval, 200, intervalHydrated);
+  const candlesQuery = useCandles(canonicalSymbol, interval ?? DEFAULT_CANDLE_INTERVAL, 200, candlesEnabled);
 
   useSymbolTradeStream(intervalHydrated ? canonicalSymbol : undefined, 150);
   usePolledSymbolTicker(canonicalSymbol);
@@ -271,7 +274,7 @@ function SymbolDetail() {
             <Surface>
               <p className="text-[13px] font-semibold text-app-gray-500">현재가</p>
               <p className="my-2 text-[30px] font-extrabold text-app-gray-300">—</p>
-              <IntervalPicker interval={interval} onChange={updateInterval} settings={settingsButton} />
+              <IntervalPicker intervals={intervals} interval={interval} onChange={updateInterval} settings={settingsButton} />
               <div className="mt-2">
                 {failed ? (
                   <ErrorBlock message={errorMessage(instrumentQuery.error)} onRetry={() => void instrumentQuery.refetch()} />
@@ -312,7 +315,7 @@ function SymbolDetail() {
   ) : undefined;
   const chartHolding = holding ? { ...holding, showAverageCost } : undefined;
   const trades = tradesQuery.data?.data ?? [];
-  const candles = candlesQuery.data?.data ?? [];
+  const candles = interval === undefined ? [] : candlesQuery.data?.data ?? [];
   // Same rule as the line view's color: the loaded period's latest close
   // against its earliest open. The chart sorts candles by time, so do too.
   let first = candles[0];
@@ -420,7 +423,7 @@ function SymbolDetail() {
               </div>
             </div>
 
-            <IntervalPicker interval={interval} onChange={updateInterval} settings={settingsButton}>
+            <IntervalPicker intervals={intervals} interval={interval} onChange={updateInterval} settings={settingsButton}>
               <button
                 type="button"
                 onClick={() => updateChartSettings({ seriesType: chartSeriesType === "candle" ? "line" : "candle" })}
@@ -433,10 +436,13 @@ function SymbolDetail() {
             </IntervalPicker>
 
             <div className="mt-2">
-              {candlesQuery.isError && candles.length === 0 ? (
+              {!intervalHydrated || !exchangeInfoReady ? (
+                <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
+              ) : interval === undefined ? (
+                <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} curvePrice={curvePrice} />
+              ) : candlesQuery.isError && candles.length === 0 ? (
                 <ErrorBlock message={errorMessage(candlesQuery.error)} onRetry={() => void candlesQuery.refetch()} />
-              ) : !intervalHydrated ||
-              (candles.length === 0 && (candlesQuery.isLoading || candlesQuery.isPending)) ? (
+              ) : candles.length === 0 && (candlesQuery.isLoading || candlesQuery.isPending) ? (
                 <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
               ) : candles.length > 0 ? (
                 <CandleChart

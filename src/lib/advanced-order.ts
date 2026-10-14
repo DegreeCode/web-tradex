@@ -1,5 +1,6 @@
 import {
   compareDecimal,
+  fmtDecimal,
   isDecimalInput,
   isPositiveDecimal,
   ppmFromPercent,
@@ -165,4 +166,86 @@ export function buildOrderAmendment(
     body.expires_at = date.toISOString();
   }
   return body;
+}
+
+export interface AmendFormValues {
+  amount: string;
+  price: string;
+  trailingPercent: string;
+  slippage: string;
+}
+
+export function orderAmendValues(order: Order): AmendFormValues {
+  const creditMode =
+    !order.margin_position_id && order.requested_credit !== undefined;
+  return {
+    amount: creditMode
+      ? (order.remaining_credit ?? order.requested_credit ?? "")
+      : (order.remaining_quantity ?? order.requested_quantity ?? ""),
+    price: order.trigger_price ?? "",
+    trailingPercent:
+      order.trailing_ppm !== undefined ? String(order.trailing_ppm / 10_000) : "",
+    slippage:
+      order.slippage_ppm !== undefined ? String(order.slippage_ppm / 10_000) : "",
+  };
+}
+
+/** Compare with the previous baseline, then adopt live intent without losing edits. */
+export function rebaseAmendForm(
+  base: Order,
+  live: Order,
+  values: AmendFormValues,
+) {
+  const before = orderAmendValues(base);
+  const after = orderAmendValues(live);
+  const edited = {
+    amount: values.amount !== before.amount,
+    price: values.price !== before.price,
+    trailingPercent: values.trailingPercent !== before.trailingPercent,
+    slippage: values.slippage !== before.slippage,
+  };
+  const next = { ...values };
+  const changes: string[] = [];
+  let keptInput = false;
+  const creditMode =
+    !live.margin_position_id && live.requested_credit !== undefined;
+  const amountUnit = creditMode ? " Credit" : "주";
+  const labels: Record<keyof AmendFormValues, string> = {
+    amount: creditMode ? "잔여 금액이" : "잔여 수량이",
+    price: "목표 가격이",
+    trailingPercent: "추적 거리가",
+    slippage: "슬리피지가",
+  };
+  function display(field: keyof AmendFormValues, value: string) {
+    if (!value) return "미설정";
+    const unit =
+      field === "amount" ? amountUnit : field === "price" ? " Credit" : "%";
+    return `${fmtDecimal(value, creditMode && field === "amount" ? 16 : 8)}${unit}`;
+  }
+  for (const field of Object.keys(before) as (keyof AmendFormValues)[]) {
+    if (!edited[field]) next[field] = after[field];
+    if (before[field] === after[field]) continue;
+    // A trailing trigger moves with the market, independently of revision.
+    if (field === "price" && live.trailing_ppm !== undefined) continue;
+    changes.push(
+      `${labels[field]} ${display(field, before[field])} → ${display(field, after[field])}`,
+    );
+    keptInput ||= edited[field];
+  }
+  const partialFill =
+    before.amount !== after.amount &&
+    compareDecimal(live.filled_quantity, base.filled_quantity) > 0;
+  const summary = changes.length
+    ? `${partialFill ? "방금 일부 체결돼 " : ""}${changes.join(", ")}로 바뀌었어요.`
+    : base.revision !== live.revision && base.status === live.status
+      ? "주문이 바뀌어 최신 정보로 맞췄어요."
+      : "";
+  return {
+    base: live,
+    values: next,
+    amountEdited: edited.amount,
+    notice: summary
+      ? `${summary}${keptInput ? " 입력한 값은 그대로 뒀어요. 확인 후 정정해주세요." : ""}`
+      : "",
+  };
 }
