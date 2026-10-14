@@ -25,8 +25,10 @@ import { useTheme } from "next-themes";
 import { fmtCompactQuantity, fmtPrice, fmtSigned } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import type { ChartOrderLine } from "@/lib/chart-orders";
+import { formatChartTime } from "@/lib/chart-time";
 import { canIncrementallyUpdate } from "@/lib/chart-updates";
 import { calculateVolumePaneHeight, setVolumePaneRatio, useChartSettings } from "@/lib/chart-settings";
+import type { CandleInterval } from "@/lib/types";
 
 const UP_COLOR = "#f04452";
 const DOWN_COLOR = "#3182f6";
@@ -37,7 +39,6 @@ const CHART_THEMES = {
   light: { grid: "#f2f4f6", text: "#8b95a1", crosshair: "#c9ced4", crosshairLabel: "#4b5563" },
   dark: { grid: "#262a31", text: "#858e99", crosshair: "#5d6570", crosshairLabel: "#3e444d" },
 };
-const APP_TIMEZONE = "Asia/Seoul";
 const DEFAULT_PRICE_PRECISION = 8;
 const VOLUME_PRECISION = 8;
 
@@ -115,7 +116,7 @@ function useCurvePriceLine(
       price,
       color: CURVE_PRICE_COLOR,
       lineWidth: 1 as const,
-      lineStyle: LineStyle.Solid,
+      lineStyle: LineStyle.Dashed,
       axisLabelVisible: true,
       title: "현재가",
     };
@@ -237,24 +238,6 @@ function chartHoldingDescription(holding?: ChartHolding): string {
   if (!holding || holding.showAverageCost === false) return "";
   const percent = holding.returnPercent;
   return `. 평단가 ${fmtPrice(holding.averagePrice)}. 평가수익률 ${percent === null ? "없음" : `${fmtSigned(percent, 2)}%`}`;
-}
-
-function formatChartTime(time: Time): string {
-  const millis =
-    typeof time === "number"
-      ? Number(time) * 1_000
-      : typeof time === "string"
-        ? Date.parse(time)
-        : Date.UTC(time.year, time.month - 1, time.day);
-  if (!Number.isFinite(millis)) return "-";
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: APP_TIMEZONE,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(millis));
 }
 
 function sameLinePoint(left: LightweightLinePoint | undefined, right: LightweightLinePoint): boolean {
@@ -446,7 +429,7 @@ function chartOptions(height: number) {
     timeScale: {
       borderVisible: false,
       timeVisible: true,
-      secondsVisible: false,
+      secondsVisible: true,
       rightOffset: 2,
       barSpacing: 8,
     },
@@ -637,6 +620,7 @@ export type ChartSeriesType = "candle" | "line";
 
 interface CandleChartProps {
   data: LightweightCandlePoint[];
+  interval?: CandleInterval;
   height: number;
   seriesType?: ChartSeriesType;
   pricePrecision?: number;
@@ -652,6 +636,7 @@ interface CandleChartProps {
 
 export function LightweightCandleChart({
   data,
+  interval,
   height,
   seriesType = "candle",
   pricePrecision,
@@ -753,6 +738,11 @@ export function LightweightCandleChart({
       previousVolumeRef.current = [];
     };
   }, [hasData, height, seriesType]);
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      localization: { timeFormatter: (time: Time) => formatChartTime(time, interval) },
+    });
+  }, [hasData, height, interval, seriesType]);
   useChartTheme(chartRef, hasData, height, seriesType);
   useChartPriceScale(seriesRef, hasData, height, seriesType);
   useHoldingPriceLine(seriesRef, hasData, height, holding?.showAverageCost !== false ? holding?.averagePrice : undefined, seriesType);

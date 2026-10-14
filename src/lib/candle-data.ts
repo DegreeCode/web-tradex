@@ -64,9 +64,10 @@ const CANDLE_INTERVALS: readonly CandleInterval[] = [
   "1y",
 ];
 const CANDLE_ORIGIN_LOCAL_MS = Date.UTC(2000, 0, 1);
-// Never walk an unbounded no-trade period. The API limits candle pages to 500,
-// so the chart only materializes the bounded, most-recent window it can show.
-const MAX_SYNTHETIC_CANDLE_BUCKETS = 500;
+// Bound memory and sparse-gap catch-up while allowing useful scrollback (about
+// 3.5 days at 1m). This total window is independent of the REST limit of at most
+// 500 rows per request: older pages keep extending it until this cap is reached.
+export const MAX_MATERIALIZED_CANDLE_BUCKETS = 5_000;
 
 interface ZonedDateParts {
   year: number;
@@ -139,9 +140,9 @@ function localMillisToTimestamp(localMillis: number): string {
   return new Date(localPartsToInstant(localPartsAtUtcMillis(localMillis))).toISOString();
 }
 
-// Every live trade re-buckets the whole cached page, and each bucket costs an
-// Intl.formatToParts call. The same timestamps recur trade after trade, so the
-// results are memoized in a bounded cache that is simply dropped when full.
+// Fetch/history normalization re-buckets cached timestamps, and each bucket
+// costs an Intl.formatToParts call. Memoize those recurring timestamps in a
+// bounded cache; ordinary live updates only compute the new tail.
 const MAX_MEMOIZED_BUCKETS = 10_000;
 const bucketMemo = new Map<string, string | null>();
 
@@ -222,6 +223,56 @@ function computePreviousCandleBucketTimestamp(timestamp: string, interval: Candl
   return null;
 }
 
+/** Next boundary in APP timezone, including variable-length calendar buckets. */
+export function nextCandleBucketTimestamp(timestamp: string, interval: CandleInterval): string | null {
+  const bucket = candleBucketTimestamp(timestamp, interval);
+  if (!bucket) return null;
+  const local = zonedParts(new Date(bucket));
+  const millis = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second);
+  const fixed = CANDLE_FIXED_INTERVAL_MS[interval];
+  if (fixed) return localMillisToTimestamp(millis + fixed);
+  if (interval === "1d") return localMillisToTimestamp(Date.UTC(local.year, local.month - 1, local.day + 1));
+  if (interval === "1w") return localMillisToTimestamp(Date.UTC(local.year, local.month - 1, local.day + 7));
+  if (interval === "1M") return localMillisToTimestamp(Date.UTC(local.year, local.month, 1));
+  if (interval === "1y") return localMillisToTimestamp(Date.UTC(local.year + 1, 0, 1));
+  return null;
+}
+
+// Cache validity by immutable array identity, not by page metadata: Query's
+// structural sharing can replace arrays, in which case we validate them again.
+const materializedIntervals = new WeakMap<Candle[], CandleInterval>();
+
+function rememberMaterializedData(data: Candle[], interval: CandleInterval): Candle[] {
+  materializedIntervals.set(data, interval);
+  return data;
+}
+
+function isMaterializedData(data: Candle[], interval: CandleInterval): boolean {
+  if (materializedIntervals.get(data) === interval) return true;
+  if (data.length === 0 || data.length > MAX_MATERIALIZED_CANDLE_BUCKETS) return false;
+  const newest = candleBucketTimestamp(data[0].timestamp, interval);
+  if (!newest || parseTime(newest) !== parseTime(data[0].timestamp)) return false;
+  const fixed = CANDLE_FIXED_INTERVAL_MS[interval];
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index].interval !== interval) return false;
+    if (index === 0) continue;
+    const expected = fixed
+      ? parseTime(data[index - 1].timestamp) - fixed
+      : parseTime(previousCandleBucketTimestamp(data[index - 1].timestamp, interval) ?? "");
+    if (parseTime(data[index].timestamp) !== expected) return false;
+  }
+  rememberMaterializedData(data, interval);
+  return true;
+}
+
+function flatCandle(previous: Candle, interval: CandleInterval, timestamp: string): Candle {
+  return {
+    symbol: previous.symbol, interval, timestamp,
+    open: previous.close, high: previous.close, low: previous.close, close: previous.close,
+    volume_shares: "0", volume_credit: "0", trade_count: 0, synthetic: true,
+  };
+}
+
 interface FilledCandleData {
   data: Candle[];
   capped: boolean;
@@ -236,13 +287,15 @@ export function fillCandleGaps(
   const byTimestamp = new Map<string, Candle>();
   for (const candle of candles) {
     const bucket = candleBucketTimestamp(candle.timestamp, interval);
-    if (bucket) byTimestamp.set(bucket, { ...candle, interval, timestamp: bucket });
+    if (bucket && (!candle.synthetic || !byTimestamp.has(bucket))) {
+      byTimestamp.set(bucket, { ...candle, interval, timestamp: bucket });
+    }
   }
   const sorted = [...byTimestamp.values()]
     .map((candle) => ({ candle, time: parseTime(candle.timestamp) }))
     .sort((left, right) => left.time - right.time)
     .map(({ candle }) => candle);
-  const safeLimit = Math.max(0, Math.min(MAX_SYNTHETIC_CANDLE_BUCKETS, Math.floor(limit)));
+  const safeLimit = Math.max(0, Math.min(MAX_MATERIALIZED_CANDLE_BUCKETS, Math.floor(limit)));
   if (sorted.length === 0 || safeLimit === 0) return { data: [], capped: limit > safeLimit };
 
   // The REST page is newest-first and may contain very sparse buckets. Walk
@@ -250,109 +303,147 @@ export function fillCandleGaps(
   // consume the entire synthetic budget before the chart's visible window is
   // reached. A synthetic bucket's close comes from the nearest earlier real
   // bucket, which is the previous chronological close by definition.
-  const realTimes = sorted.map((candle) => parseTime(candle.timestamp));
-  const latestReal = sorted[sorted.length - 1];
+  // Synthetic observations are not price evidence. Keep only the oldest as a
+  // seed if its real predecessor has rolled out of the bounded window; rebuild
+  // the rest so a late trade also corrects the flat candles that follow it.
+  const seeds = sorted.filter((candle, index) => !candle.synthetic || index === 0);
+  const seedTimes = seeds.map((candle) => parseTime(candle.timestamp));
+  const latest = sorted[sorted.length - 1];
   const requestedBucket = throughTimestamp
     ? candleBucketTimestamp(throughTimestamp, interval)
     : null;
-  const latestRealTime = parseTime(latestReal.timestamp);
+  const latestTime = parseTime(latest.timestamp);
   const requestedTime = requestedBucket ? parseTime(requestedBucket) : Number.NEGATIVE_INFINITY;
-  let cursor = requestedTime > latestRealTime ? requestedBucket : latestReal.timestamp;
+  let cursor = requestedTime > latestTime ? requestedBucket : latest.timestamp;
   const descending: Candle[] = [];
 
-  const previousReal = (timestamp: string): Candle | undefined => {
+  const previousSeed = (timestamp: string): Candle | undefined => {
     const time = parseTime(timestamp);
     let low = 0;
-    let high = realTimes.length - 1;
+    let high = seedTimes.length - 1;
     let index = -1;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
-      if (realTimes[middle] < time) {
+      if (seedTimes[middle] < time) {
         index = middle;
         low = middle + 1;
       } else {
         high = middle - 1;
       }
     }
-    return index >= 0 ? sorted[index] : undefined;
+    return index >= 0 ? seeds[index] : undefined;
   };
 
   while (cursor && descending.length < safeLimit) {
     const real = byTimestamp.get(cursor);
-    if (real) {
+    if (real && (!real.synthetic || real === sorted[0])) {
       descending.push(real);
     } else {
-      const previous = previousReal(cursor);
+      const previous = previousSeed(cursor);
       if (!previous) break;
-      descending.push({
-        symbol: previous.symbol,
-        interval,
-        timestamp: cursor,
-        open: previous.close,
-        high: previous.close,
-        low: previous.close,
-        close: previous.close,
-        volume_shares: "0",
-        volume_credit: "0",
-        trade_count: 0,
-        synthetic: true,
-      });
+      descending.push(flatCandle(previous, interval, cursor));
     }
     cursor = previousCandleBucketTimestamp(cursor, interval);
   }
 
   return {
-    data: descending,
-    // Valid API limits are <=500, so stopping at safeLimit is intentional
-    // pagination/window behavior rather than a recovery condition.
-    capped: limit > safeLimit,
+    data: rememberMaterializedData(descending, interval),
+    capped: Boolean(cursor && parseTime(cursor) >= parseTime(sorted[0].timestamp)),
   };
 }
 
-/** Fill the newly loaded history and its seam without rebuilding newer candles. */
+/** A page is always one contiguous newest window, never real rows plus holes. */
+export function materializeCandlePage(
+  page: CandlePage,
+  interval: CandleInterval,
+  throughTimestamp?: string,
+): CandlePage {
+  const filled = fillCandleGaps(page.data, interval, MAX_MATERIALIZED_CANDLE_BUCKETS, throughTimestamp);
+  return replaceCandlePageData(page, filled.data);
+}
+
+export function replaceCandlePageData(page: CandlePage, data: Candle[]): CandlePage {
+  return {
+    ...page,
+    data,
+    // At capacity, extending history would immediately discard what was loaded.
+    // Retire the REST cursor instead of skipping omitted buckets silently.
+    page: data.length >= MAX_MATERIALIZED_CANDLE_BUCKETS
+      ? { ...page.page, has_more: false, next_cursor: null }
+      : page.page,
+  };
+}
+
+/** Fill history and its seam in one bounded walk from the newest bucket. */
 export function appendCandleHistoryWithGaps(
   current: CandlePage,
   older: Page<Candle>,
   interval: CandleInterval,
 ): CandlePage {
-  const merged = appendCandleHistory(current, older);
-  if (older.data.length === 0) return merged;
-  const boundary = current.data[current.data.length - 1];
-  const history = boundary
-    ? merged.data.filter((candle) => parseTime(candle.timestamp) <= parseTime(boundary.timestamp))
-    : merged.data;
-  const fillers: Candle[] = [];
-  for (let index = 0; index + 1 < history.length; index += 1) {
-    // Keep the existing per-gap safety bound for sparse second-level history.
-    // Each adjacent pair seeds from the earlier close, including page seams.
-    fillers.push(...fillCandleGaps(
-      [history[index + 1], history[index]], interval, MAX_SYNTHETIC_CANDLE_BUCKETS,
-    ).data);
+  return materializeCandlePage(appendCandleHistory(current, older), interval);
+}
+
+/** Clock-only changes preserve REST synchronization and never invent a seed. */
+export function advanceCandlePage(
+  page: CandlePage,
+  interval: CandleInterval,
+  now: string,
+): CandlePage {
+  const latest = page.data[0];
+  const bucket = candleBucketTimestamp(now, interval);
+  if (!latest || !bucket || parseTime(bucket) <= parseTime(latest.timestamp)) return page;
+  if (!isMaterializedData(page.data, interval)) return materializeCandlePage(page, interval, now);
+  // Walk only the new tail. A long hidden period still does at most one window
+  // of work, starting from now rather than iterating every elapsed bucket.
+  const appended: Candle[] = [];
+  let cursor: string | null = bucket;
+  while (cursor && parseTime(cursor) > parseTime(latest.timestamp) &&
+    appended.length < MAX_MATERIALIZED_CANDLE_BUCKETS) {
+    appended.push(flatCandle(latest, interval, cursor));
+    cursor = previousCandleBucketTimestamp(cursor, interval);
   }
-  return { ...merged, data: mergeCandles(fillers, merged.data) };
+  const data = appended.concat(page.data.slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS - appended.length));
+  return replaceCandlePageData(page, rememberMaterializedData(data, interval));
 }
 
 export function isCandleInterval(value: unknown): value is CandleInterval {
   return typeof value === "string" && CANDLE_INTERVALS.includes(value as CandleInterval);
 }
 
-/** `count` lets one entry stand for several trades (a guest's polled ticker delta). */
+/**
+ * `count` lets one entry stand for several trades (a guest's polled ticker delta).
+ * The REST limit stays in the call signature; materialized pages use the total
+ * bucket cap so clock ticks and trades retain the same contiguous window.
+ */
 export function applyTradeToCandlePage(
   page: CandlePage,
   interval: CandleInterval,
-  limit: number,
+  _limit: number,
   trade: PublicTrade,
   count = 1,
 ): { status: "updated" | "recovery"; data?: Candle[] } {
   const timestamp = candleBucketTimestamp(trade.timestamp, interval);
   if (!timestamp || !trade.price || !trade.quantity || !trade.credit) return { status: "recovery" };
-  const data = [...page.data];
+  const contiguous = isMaterializedData(page.data, interval);
   const tradeTime = parseTime(timestamp);
-  const latestTime = data.reduce((latest, candle) => {
+  const latestTime = contiguous ? parseTime(page.data[0].timestamp) : page.data.reduce((latest, candle) => {
     const value = parseTime(candle.timestamp);
     return Number.isFinite(value) && value > latest ? value : latest;
   }, Number.NEGATIVE_INFINITY);
-  const existingIndex = data.findIndex(
+  // A trade in a new bucket only needs the missing tail plus its real candle.
+  // The rest of the immutable window can retain its objects and timestamps.
+  if (contiguous && tradeTime > latestTime) {
+    const advanced = advanceCandlePage(page, interval, timestamp);
+    const data = advanced.data.slice();
+    data[0] = {
+      symbol: trade.symbol, interval, timestamp,
+      open: trade.price, high: trade.price, low: trade.price, close: trade.price,
+      volume_shares: trade.quantity, volume_credit: trade.credit, trade_count: count,
+    };
+    return { status: "updated", data: rememberMaterializedData(data, interval) };
+  }
+  const data = [...page.data];
+  const existingIndex = contiguous && tradeTime === latestTime ? 0 : data.findIndex(
     (candle) => candleBucketTimestamp(candle.timestamp, interval) === timestamp,
   );
   if (existingIndex < 0 && Number.isFinite(latestTime) && tradeTime < latestTime) return { status: "recovery" };
@@ -402,10 +493,10 @@ export function applyTradeToCandlePage(
       trade_count: count,
     });
   }
-  const filled = fillCandleGaps(data, interval, limit);
-  if (filled.capped) return { status: "recovery" };
-  const retained = page.historyLoaded
-    ? data
-    : mergeCandles([], data.filter((candle) => !candle.synthetic)).slice(0, limit);
-  return { status: "updated", data: mergeCandles(retained, filled.data) };
+  if (contiguous && existingIndex === 0) {
+    return { status: "updated", data: rememberMaterializedData(data, interval) };
+  }
+  // Historical synthetic replacements also correct following dots; sparse or
+  // unordered inputs likewise take the full normalization path.
+  return { status: "updated", data: materializeCandlePage({ ...page, data }, interval).data };
 }
