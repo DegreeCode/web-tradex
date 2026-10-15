@@ -1,25 +1,10 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { blockedStorage, memoryStorage } from "./storage-fakes";
 
 const preferenceUrl = new URL("../src/lib/preferences.ts", import.meta.url);
 const KEY = "tradex:preferences:v1";
 type PreferencesModule = typeof import("../src/lib/preferences");
-
-function memoryStorage(initial: Record<string, string> = {}) {
-  const stored = new Map(Object.entries(initial));
-  return {
-    stored,
-    getItem: (key: string) => stored.get(key) ?? null,
-    setItem: (key: string, value: string) => void stored.set(key, String(value)),
-    removeItem: (key: string) => void stored.delete(key),
-  };
-}
-
-const blockedStorage = {
-  getItem: () => { throw new Error("Storage disabled"); },
-  setItem: () => { throw new Error("Storage disabled"); },
-  removeItem: () => { throw new Error("Storage disabled"); },
-};
 
 /** Loads a fresh module instance against the given storage. */
 async function loadWith(t: TestContext, localStorage: object, tag: string): Promise<PreferencesModule> {
@@ -94,4 +79,32 @@ test("preferences stay in memory when localStorage is blocked", async (t) => {
   assert.equal(preference.readPreferences().slippagePercent, "2");
   preference.updatePreferences({ selectedAccount: { userId: "u", accountId: "a" } });
   assert.deepEqual(preference.readPreferences().selectedAccount, { userId: "u", accountId: "a" });
+});
+
+test("a write preserves newer preferences from another tab without mounted subscribers", async (t) => {
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ liveNotificationPopup: true }) });
+  const preference = await loadWith(t, storage, "cross-tab-write");
+  preference.readPreferences();
+  storage.setItem(KEY, JSON.stringify({ liveNotificationPopup: false, slippagePercent: "0.5" }));
+
+  preference.updatePreferences({ tradeExecutionPopup: false });
+
+  assert.deepEqual(JSON.parse(storage.stored.get(KEY)!), {
+    liveNotificationPopup: false,
+    slippagePercent: "0.5",
+    tradeExecutionPopup: false,
+  });
+});
+
+test("readable storage that rejects writes keeps all unsaved preference changes", async (t) => {
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ liveNotificationPopup: true }) });
+  storage.setItem = () => { throw new Error("Quota exceeded"); };
+  const preference = await loadWith(t, storage, "quota-exceeded");
+
+  preference.updatePreferences({ tradeExecutionPopup: false });
+  preference.updatePreferences({ slippagePercent: "0.75" });
+
+  assert.equal(preference.shouldShowTradeExecutionPopup(), false);
+  assert.equal(preference.readPreferences().slippagePercent, "0.75");
+  assert.equal(preference.shouldShowLiveNotificationPopup(), true);
 });

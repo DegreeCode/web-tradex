@@ -29,6 +29,7 @@ import {
   scaleDecimal,
 } from "@/lib/format";
 import { Collapse } from "@/components/primitives";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
@@ -55,6 +56,7 @@ export function MarginReductionDialog({
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
   const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
   const reduceMutation = useReduceMarginPosition(position?.position_id ?? "");
+  const access = useSessionAccess("MARGIN");
 
   if (!position) return null;
 
@@ -67,7 +69,7 @@ export function MarginReductionDialog({
   // Exiting a Long sells and exiting a Short buys back.
   const exitSide = position.side === "LONG" ? "SELL" : "BUY";
   const referencePrice = liveReferencePrice(slippageSettings, curvePrice);
-  const isValid = !errorText && !belowMaintenance;
+  const isValid = open && access.allowed && position.status === "OPEN" && !errorText && !belowMaintenance;
   const payload = isValid && !slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
     ? { quantity: quantity.trim(), ...slippageRequestFields(slippageSettings) }
     : null;
@@ -76,7 +78,7 @@ export function MarginReductionDialog({
     e.preventDefault();
     const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
-    if (!payload || !position) return;
+    if (!payload || !position || reduceMutation.isPending) return;
     noteSelfAction("TRADE_EXECUTED", position.symbol);
     try {
       const result = await reduceMutation.mutateAsync(
@@ -103,7 +105,7 @@ export function MarginReductionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !reduceMutation.isPending && onOpenChange(next)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>포지션 부분 정산</DialogTitle>
@@ -113,6 +115,7 @@ export function MarginReductionDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {!access.allowed ? <ScopeNotice reason={access.reason} /> : null}
           {belowMaintenance ? (
             <div role="alert" className="flex items-start gap-2.5 rounded-xl bg-app-red-light p-3 text-[12px] text-app-red">
               <AlertTriangle className="size-4 shrink-0 mt-0.5" />
@@ -224,6 +227,7 @@ export function MarginReductionDialog({
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={reduceMutation.isPending}
               onClick={() => onOpenChange(false)}
               className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >
@@ -231,7 +235,7 @@ export function MarginReductionDialog({
             </button>
             <button
               type="submit"
-              disabled={!isValid || reduceMutation.isPending}
+              disabled={!payload || reduceMutation.isPending}
               className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {reduceMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}

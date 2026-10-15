@@ -5,12 +5,20 @@ import { PORT_TIMEOUT_MS, SocketHub, TICKET_TIMEOUT_MS } from "../src/lib/ws-hub
 import { WS_PROTOCOL_VERSION, type HubMessage } from "../src/lib/ws-protocol";
 import { FakePort, FakeTransport, type TabPort } from "./ws-fakes";
 
-function setup() {
+function setup(onRetain?: (transport: FakeTransport) => void) {
   let now = 0;
   const transports: FakeTransport[] = [];
   const hub = new SocketHub({
     createSocket: (kind, hooks) => {
       const transport = new FakeTransport(kind, hooks);
+      if (onRetain) {
+        const retain = transport.retain.bind(transport);
+        transport.retain = () => {
+          const release = retain();
+          onRetain(transport);
+          return release;
+        };
+      }
       transports.push(transport);
       return transport;
     },
@@ -114,6 +122,53 @@ test("a visible tab holding the stream issues the ticket and private frames reac
   assert.equal(framesOf(hidden.take()).length, 1);
   assert.equal(framesOf(visible.take()).length, 1);
   assert.equal(framesOf(watcher.take()).length, 0);
+});
+
+test("the first holder can issue a ticket synchronously during retain", async () => {
+  let ticket: Promise<string> | undefined;
+  const { tab } = setup((socket) => { ticket = socket.hooks.fetchTicket!(); });
+  const holder = tab();
+  holder.deliver({ op: "retain" });
+  const [request] = holder.take();
+  assert.equal(request?.type, "ticket-request");
+  holder.deliver({ op: "ticket-result", id: (request as { id: number }).id, ticket: "first-ticket" });
+  assert.equal(await ticket, "first-ticket");
+});
+
+test("a released holder's pending ticket moves immediately to another holder", async () => {
+  const { privateSocket, tab } = setup();
+  const first = tab();
+  const backup = tab(false);
+  first.deliver({ op: "retain" });
+  backup.deliver({ op: "retain" });
+  const ticket = privateSocket().hooks.fetchTicket!();
+  const [stale] = first.take();
+  first.deliver({ op: "release" });
+  first.deliver({ op: "ticket-result", id: (stale as { id: number }).id, ticket: "released-ticket" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const [request] = backup.take();
+  assert.equal(request?.type, "ticket-request");
+  backup.deliver({ op: "ticket-result", id: (request as { id: number }).id, ticket: "backup-ticket" });
+  assert.equal(await ticket, "backup-ticket");
+});
+
+test("resetting a private connection cancels tickets from the previous session", async () => {
+  const { privateSocket, tab } = setup();
+  const holder = tab();
+  holder.deliver({ op: "retain" });
+  const pending = privateSocket().hooks.fetchTicket!();
+  const rejected = assert.rejects(pending, (error) => error instanceof ApiError && error.code === "NETWORK_ERROR");
+  const [stale] = holder.take();
+  holder.deliver({ op: "reset-private" });
+  holder.deliver({ op: "ticket-result", id: (stale as { id: number }).id, ticket: "old-session" });
+  await rejected;
+  assert.equal(holder.take().some((message) => message.type === "ticket-request"), false);
+
+  const current = privateSocket().hooks.fetchTicket!();
+  const [request] = holder.take();
+  assert.equal(request?.type, "ticket-request");
+  holder.deliver({ op: "ticket-result", id: (request as { id: number }).id, ticket: "new-session" });
+  assert.equal(await current, "new-session");
 });
 
 test("an unanswered ticket request moves to the next tab and a refusal keeps its code", async (t) => {

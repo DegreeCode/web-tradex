@@ -17,6 +17,7 @@ import {
   apiData,
   apiPage,
   buildQuery,
+  clearIdempotencyKeys,
   csrfToken,
   deleteData,
   patchIdempotentData,
@@ -72,7 +73,9 @@ import {
 } from "./market-cache";
 import {
   isNotification,
+  loadNotificationPage,
   markNotificationsReadInCaches,
+  notificationIdsInCaches,
   notificationFromPrivateFrame,
   updateNotificationCaches,
 } from "./notification-cache";
@@ -105,7 +108,6 @@ import type {
   InquiryDetail,
   InquiryMessage,
   Instrument,
-  InstrumentState,
   Issuance,
   IssuancePreview,
   ListingRequest,
@@ -150,15 +152,15 @@ const POLLED_TICKER_LIMIT = 200;
  * The CSRF cookie is issued and cleared together with the session cookie, so
  * without it there is no session to ask about and a guest never calls /me.
  */
-export function fetchMe(): Promise<User | null> {
+export function fetchMe(signal?: AbortSignal): Promise<User | null> {
   if (!csrfToken()) return Promise.resolve(null);
-  return apiData<User>("/api/v1/me");
+  return apiData<User>("/api/v1/me", { signal });
 }
 
 export function useMe() {
   return useQuery({
     queryKey: ["me"],
-    queryFn: fetchMe,
+    queryFn: ({ signal }) => fetchMe(signal),
     retry: false,
     staleTime: 60_000,
   });
@@ -168,7 +170,7 @@ export function useMarketState() {
   const publicStatus = useSocketStatus("public");
   return useQuery({
     queryKey: ["market-state"],
-    queryFn: () => apiData<MarketState>("/api/v1/market"),
+    queryFn: ({ signal }) => apiData<MarketState>("/api/v1/market", { signal }),
     initialData: readMarketStateCache,
     refetchInterval: publicStatus === "open" ? false : 15_000,
     staleTime: 10_000,
@@ -230,10 +232,11 @@ export function useTickerOrder(sort: TickerSort) {
   const signedIn = useSignedIn();
   return useQuery({
     queryKey: ["ticker-order", sort, signedIn ? "live" : "polled"],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!signedIn) {
         const page = await apiPage<Ticker>(
           `/api/v1/market/tickers${buildQuery({ sort, limit: POLLED_TICKER_LIMIT })}`,
+          { signal },
         );
         applyTickers(queryClient, page.data);
         return [...new Set(page.data.map((ticker) => ticker.symbol))].slice(0, TICKER_ORDER_LIMIT);
@@ -244,6 +247,7 @@ export function useTickerOrder(sort: TickerSort) {
           simple: "true",
           limit: TICKER_ORDER_LIMIT,
         })}`,
+        { signal },
       );
       return [...new Set(page.data)].slice(0, TICKER_ORDER_LIMIT);
     },
@@ -287,9 +291,10 @@ export function useSymbolTrades(symbol: string | undefined, limit = 150) {
   const publicStatus = useSocketStatus("public");
   return useQuery({
     queryKey: ["symbol-trades", symbol, limit],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiPage<PublicTrade>(
         `/api/v1/market/symbols/${encodeURIComponent(symbol ?? "")}/trades${buildQuery({ limit })}`,
+        { signal },
       ),
     enabled: Boolean(symbol) && signedIn,
     refetchInterval: publicStatus === "open" ? false : 5_000,
@@ -346,8 +351,8 @@ export function usePolledSymbolTicker(symbol: string | undefined) {
   const previous = useRef<Ticker | null>(null);
   const { data: ticker } = useQuery({
     queryKey: ["ticker", symbol],
-    queryFn: async () => {
-      const row = await apiData<Ticker>(`/api/v1/market/tickers/${encodeURIComponent(symbol ?? "")}`);
+    queryFn: async ({ signal }) => {
+      const row = await apiData<Ticker>(`/api/v1/market/tickers/${encodeURIComponent(symbol ?? "")}`, { signal });
       applyTickers(queryClient, [row]);
       return row;
     },
@@ -377,8 +382,8 @@ export function useOrders(limit = PAGE_SIZE, enabled = true, filters: { account_
   const staleTime = usePrivateStaleTime();
   return useInfiniteQuery({
     queryKey: ["orders", limit, filters],
-    queryFn: ({ pageParam }) =>
-      apiPage<Order>(`/api/v1/orders${buildQuery({ ...filters, limit, cursor: pageParam })}`),
+    queryFn: ({ pageParam, signal }) =>
+      apiPage<Order>(`/api/v1/orders${buildQuery({ ...filters, limit, cursor: pageParam })}`, { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     // Fills arrive over the private socket; a slow poll only catches silent
@@ -400,8 +405,8 @@ export function useMyTrades(limit = PAGE_SIZE, enabled = true) {
   const staleTime = usePrivateStaleTime();
   return useInfiniteQuery({
     queryKey: ["my-trades", limit],
-    queryFn: ({ pageParam }) =>
-      apiPage<Trade>(`/api/v1/me/trades${buildQuery({ limit, cursor: pageParam })}`),
+    queryFn: ({ pageParam, signal }) =>
+      apiPage<Trade>(`/api/v1/me/trades${buildQuery({ limit, cursor: pageParam })}`, { signal }),
     staleTime,
     enabled,
     initialPageParam: null as string | null,
@@ -413,7 +418,7 @@ export function useAccounts(enabled = true) {
   const staleTime = usePrivateStaleTime();
   return useQuery({
     queryKey: ["accounts"],
-    queryFn: () => apiData<Account[]>("/api/v1/me/accounts"),
+    queryFn: ({ signal }) => apiData<Account[]>("/api/v1/me/accounts", { signal }),
     staleTime,
     enabled,
   });
@@ -424,9 +429,10 @@ export function usePortfolio(accountId?: string, enabled = true) {
   return useQuery({
     staleTime,
     queryKey: ["portfolio", accountId ?? "primary"],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiData<Portfolio>(
-        accountId ? `/api/v1/me/accounts/${accountId}/portfolio` : "/api/v1/me/portfolio",
+        accountId ? `/api/v1/me/accounts/${encodeURIComponent(accountId)}/portfolio` : "/api/v1/me/portfolio",
+        { signal },
       ),
     enabled,
   });
@@ -448,7 +454,7 @@ export function useAllPortfolios() {
   const results = useQueries({
     queries: accountIds.map((accountId) => ({
       queryKey: ["portfolio", accountId],
-      queryFn: () => apiData<Portfolio>(`/api/v1/me/accounts/${accountId}/portfolio`),
+      queryFn: ({ signal }) => apiData<Portfolio>(`/api/v1/me/accounts/${encodeURIComponent(accountId)}/portfolio`, { signal }),
       staleTime,
     })),
     combine: combinePortfolios,
@@ -470,7 +476,7 @@ export function useAllPortfolios() {
 export function useSessions() {
   return useQuery({
     queryKey: ["sessions"],
-    queryFn: () => apiData<SessionList>("/api/v1/me/sessions?limit=50"),
+    queryFn: ({ signal }) => apiData<SessionList>("/api/v1/me/sessions?limit=50", { signal }),
     staleTime: 15_000,
   });
 }
@@ -478,7 +484,7 @@ export function useSessions() {
 export function usePasskeys(enabled = true) {
   return useQuery({
     queryKey: ["passkeys"],
-    queryFn: () => apiData<Passkey[]>("/api/v1/me/passkeys"),
+    queryFn: ({ signal }) => apiData<Passkey[]>("/api/v1/me/passkeys", { signal }),
     enabled,
     staleTime: 15_000,
   });
@@ -488,8 +494,8 @@ export function useTransfers(scope: "mine" | "approval" = "mine", limit = 50) {
   const privateStatus = useSocketStatus("private");
   return useInfiniteQuery({
     queryKey: ["transfers", scope, limit],
-    queryFn: ({ pageParam }) =>
-      apiPage<Transfer>(`/api/v1/transfers${buildQuery({ scope, limit, cursor: pageParam })}`),
+    queryFn: ({ pageParam, signal }) =>
+      apiPage<Transfer>(`/api/v1/transfers${buildQuery({ scope, limit, cursor: pageParam })}`, { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     refetchInterval: privateStatus === "open" ? false : 30_000,
@@ -501,7 +507,7 @@ export function useTransferDetails(transfers: Transfer[]): UseQueryResult<Transf
   return useQueries({
     queries: transfers.map((transfer) => ({
       queryKey: ["transfer", transfer.transfer_id],
-      queryFn: () => apiData<Transfer>(`/api/v1/transfers/${transfer.transfer_id}`),
+      queryFn: ({ signal }) => apiData<Transfer>(`/api/v1/transfers/${encodeURIComponent(transfer.transfer_id)}`, { signal }),
       // Settled transfers no longer change; only pending ones need refreshing.
       staleTime: transfer.status === "PENDING" ? 15_000 : Infinity,
     })),
@@ -511,9 +517,10 @@ export function useTransferDetails(transfers: Transfer[]): UseQueryResult<Transf
 export function useIssuancePreview(symbol: string | undefined, deposit: string) {
   return useQuery({
     queryKey: ["issuance-preview", symbol, deposit],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiData<IssuancePreview>(
         `/api/v1/symbols/${encodeURIComponent(symbol ?? "")}/issuance-preview${buildQuery({ deposit_credit: deposit })}`,
+        { signal },
       ),
     enabled: Boolean(symbol) && deposit.length > 0 && isPositiveDecimal(deposit),
     staleTime: 30_000,
@@ -524,9 +531,10 @@ export function useIssuancePreview(symbol: string | undefined, deposit: string) 
 export function useManagerRequests(symbol: string | undefined) {
   return useQuery({
     queryKey: ["manager-requests", symbol],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiPage<ManagerRequest>(
         `/api/v1/symbols/${encodeURIComponent(symbol ?? "")}/manager-transfer-requests${buildQuery({ limit: 50 })}`,
+        { signal },
       ),
     enabled: Boolean(symbol),
     staleTime: 15_000,
@@ -695,9 +703,18 @@ export function useRotateRecoveryKeys() {
 export async function clearSessionCache(queryClient: QueryClient): Promise<void> {
   const notMe = (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== "me";
   closeSocket("private");
+  clearIdempotencyKeys();
   await queryClient.cancelQueries({ predicate: notMe });
   queryClient.removeQueries({ predicate: notMe });
   queryClient.getMutationCache().clear();
+}
+
+/** Reset existing observers when the browser switches directly to another account. */
+export function resetSessionCache(queryClient: QueryClient): Promise<void> {
+  closeSocket("private");
+  clearIdempotencyKeys();
+  queryClient.getMutationCache().clear();
+  return queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== "me" });
 }
 
 export function useLogout() {
@@ -802,7 +819,7 @@ export function useNav() {
   const privateStatus = useSocketStatus("private");
   return useQuery({
     queryKey: ["nav"],
-    queryFn: () => apiData<Nav>("/api/v1/me/nav"),
+    queryFn: ({ signal }) => apiData<Nav>("/api/v1/me/nav", { signal }),
     refetchInterval: privateStatus === "open" ? false : 30_000,
     staleTime: privateStaleTime(privateStatus),
   });
@@ -811,8 +828,8 @@ export function useNav() {
 function useNavHistoryQuery(range: NavRange, path: string, scope: string, enabled = true) {
   return useInfiniteQuery({
     queryKey: ["nav-history", scope, range],
-    queryFn: ({ pageParam }) =>
-      apiPage<NavPoint>(`${path}${buildQuery({ range, limit: 500, cursor: pageParam })}`),
+    queryFn: ({ pageParam, signal }) =>
+      apiPage<NavPoint>(`${path}${buildQuery({ range, limit: 500, cursor: pageParam })}`, { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     enabled,
@@ -995,35 +1012,38 @@ export function useDisclosures(options: { symbol?: string; type?: string; limit?
 }
 
 export function useNotifications(options: { unread?: boolean; limit?: number } = {}) {
+  const queryClient = useQueryClient();
   const { unread = false, limit = 30 } = options;
   return useInfiniteQuery({
     queryKey: ["notifications", "list", unread ? "unread" : "all", limit],
-    queryFn: ({ pageParam }) =>
-      apiPage<Notification>(
+    queryFn: ({ pageParam, signal, queryKey }) =>
+      loadNotificationPage(queryClient,
         `/api/v1/notifications${buildQuery({
           sort: "pinned",
           unread: unread ? "true" : undefined,
           limit,
           cursor: pageParam,
         })}`,
+        { unreadOnly: unread, cursor: pageParam, signal, queryKey },
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     staleTime: Infinity,
-    refetchOnMount: false,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
 }
 
 export function useUnreadNotifications(enabled = true) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["notifications", "unread"],
-    queryFn: () =>
-      apiPage<Notification>(`/api/v1/notifications${buildQuery({ sort: "pinned", unread: "true", limit: 50 })}`),
+    queryFn: ({ signal }) =>
+      loadNotificationPage(queryClient, `/api/v1/notifications${buildQuery({ sort: "pinned", unread: "true", limit: 50 })}`, { unreadOnly: true, signal }),
     enabled,
     staleTime: Infinity,
-    refetchOnMount: false,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -1058,7 +1078,13 @@ export function useMarkAllNotificationsRead() {
   return useMutation({
     mutationFn: () =>
       apiData<{ read_count: number }>("/api/v1/notifications/read-all", { method: "POST", timeoutMs: 65_000 }),
-    onSuccess: () => markNotificationsReadInCaches(queryClient, "all"),
+    onMutate: () => notificationIdsInCaches(queryClient),
+    onSuccess: (_result, _variables, ids) => {
+      // Rows arriving during this request may have been created after the
+      // server's cutoff. Preserve them until an authoritative refresh agrees.
+      markNotificationsReadInCaches(queryClient, ids ?? new Set());
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
   });
 }
 
@@ -1066,8 +1092,8 @@ export function useInquiries(limit = 30) {
   const privateStatus = useSocketStatus("private");
   return useInfiniteQuery({
     queryKey: ["inquiries", limit],
-    queryFn: ({ pageParam }) =>
-      apiPage<Inquiry>(`/api/v1/inquiries${buildQuery({ limit, cursor: pageParam })}`),
+    queryFn: ({ pageParam, signal }) =>
+      apiPage<Inquiry>(`/api/v1/inquiries${buildQuery({ limit, cursor: pageParam })}`, { signal }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page.has_more ? last.page.next_cursor : null),
     refetchInterval: privateStatus === "open" ? false : 60_000,
@@ -1078,7 +1104,7 @@ export function useInquiries(limit = 30) {
 export function useInquiry(ticket: string | null) {
   return useQuery({
     queryKey: ["inquiry", ticket],
-    queryFn: () => apiData<InquiryDetail>(`/api/v1/inquiries/${ticket}`),
+    queryFn: ({ signal }) => apiData<InquiryDetail>(`/api/v1/inquiries/${encodeURIComponent(ticket ?? "")}`, { signal }),
     enabled: Boolean(ticket),
   });
 }
@@ -1228,19 +1254,25 @@ export function useMarketStateStream(enabled = true) {
   useChannelFrames("public", enabled ? "market_state" : null, (frame) => {
     const raw = frame.data as Record<string, unknown> | undefined;
     if (!raw) return;
-    if (typeof raw.symbol === "string" && typeof raw.state === "string") {
+    if (typeof raw.symbol === "string") {
+      if (raw.state !== "TRADING" && raw.state !== "HALTED" && raw.state !== "DELIST_PENDING" && raw.state !== "DELISTED") return;
       applySymbolTradingState(
         queryClient,
         raw.symbol,
-        raw.state as InstrumentState,
+        raw.state,
         typeof raw.reason === "string" ? raw.reason : null,
         typeof raw.halted_at === "string" ? raw.halted_at : null,
         typeof raw.halted_until === "string" ? raw.halted_until : null,
+        typeof raw.updated_at === "string" ? raw.updated_at : typeof raw.changed_at === "string" ? raw.changed_at : null,
+        undefined,
+        typeof raw.version === "string" || typeof raw.version === "number" ? raw.version : undefined,
       );
       void refreshSymbolMetadata(queryClient, raw.symbol);
       return;
     }
-    const marketState = raw as unknown as MarketState;
+    if (!isMarketState(raw)) return;
+    const marketState = raw;
+    noteMarketStateTime(marketState);
     queryClient.setQueryData(["market-state"], marketState);
     writeMarketStateCache(marketState);
   }, () => void queryClient.invalidateQueries({ queryKey: ["market-state"] }));

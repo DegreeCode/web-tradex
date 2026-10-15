@@ -1,20 +1,11 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { blockedStorage, memoryStorage } from "./storage-fakes";
 
 const moduleUrl = new URL("../src/lib/chart-settings.ts", import.meta.url);
 const KEY = "tradex:chart-settings:v1";
 const GENERAL_KEY = "tradex:preferences:v1";
 type SettingsModule = typeof import("../src/lib/chart-settings");
-
-function memoryStorage(initial: Record<string, string> = {}) {
-  const stored = new Map(Object.entries(initial));
-  return {
-    stored,
-    getItem: (key: string) => stored.get(key) ?? null,
-    setItem: (key: string, value: string) => void stored.set(key, String(value)),
-    removeItem: (key: string) => void stored.delete(key),
-  };
-}
 
 async function loadWith(t: TestContext, localStorage: object, tag: string): Promise<SettingsModule> {
   (globalThis as { window?: unknown }).window = { localStorage };
@@ -82,11 +73,6 @@ test("invalid and malformed settings safely fall back to defaults", async (t) =>
 });
 
 test("chart controls work in memory when browser storage is blocked", async (t) => {
-  const blockedStorage = {
-    getItem: () => { throw new Error("Storage disabled"); },
-    setItem: () => { throw new Error("Storage disabled"); },
-    removeItem: () => { throw new Error("Storage disabled"); },
-  };
   const chart = await loadWith(t, blockedStorage, "blocked");
   chart.updateChartSettings({ showCurvePrice: false, showAverageCost: false, seriesType: "line", logarithmic: true });
   chart.setVolumePaneRatio(0.5);

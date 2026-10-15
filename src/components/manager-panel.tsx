@@ -204,6 +204,7 @@ function IssuanceSection({ instrument }: { instrument: Instrument }) {
   const issuance = useCreateIssuance(instrument.symbol);
 
   function submit() {
+    if (issuance.isPending) return;
     if (!isDecimalInput(deposit, 16) || !isPositiveDecimal(deposit)) {
       toast.error("발행 금액을 입력해주세요");
       return;
@@ -297,6 +298,7 @@ function MetadataSection({ instrument }: { instrument: Instrument }) {
   const update = useUpdateMetadata(instrument.symbol);
 
   function submit() {
+    if (update.isPending) return;
     if (!name.trim()) {
       toast.error("종목 이름을 입력해주세요");
       return;
@@ -374,6 +376,7 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
   const rows = requests.data?.data ?? [];
 
   function submit() {
+    if (createRequest.isPending) return;
     if (!target.trim()) {
       toast.error("이전받을 사용자 ID를 입력해주세요");
       return;
@@ -439,7 +442,9 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
                   {request.target_user_id}
                 </span>
                 <span className="text-[11px] font-semibold text-app-gray-500">
-                  {MANAGER_REQUEST_STATUS[request.status] ?? request.status}
+                  {Object.hasOwn(MANAGER_REQUEST_STATUS, request.status)
+                    ? MANAGER_REQUEST_STATUS[request.status]
+                    : request.status}
                 </span>
               </div>
               {request.status === "PENDING" && request.target_user_id === userId ? (
@@ -447,6 +452,7 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
                   <Button
                     type="button"
                     size="sm"
+                    disabled={respond.isPending}
                     onClick={() =>
                       respond.mutate(
                         { requestId: request.request_id, decision: "ACCEPT" },
@@ -464,6 +470,7 @@ function TransferSection({ instrument, userId }: { instrument: Instrument; userI
                     type="button"
                     size="sm"
                     variant="outline"
+                    disabled={respond.isPending}
                     onClick={() =>
                       respond.mutate(
                         { requestId: request.request_id, decision: "REJECT" },

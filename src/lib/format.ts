@@ -1,4 +1,23 @@
 const formatters = new Map<number, Intl.NumberFormat>();
+const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const dateTimeFormatter = new Intl.DateTimeFormat("ko-KR", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
 
 function formatter(maxFrac: number): Intl.NumberFormat {
   const cached = formatters.get(maxFrac);
@@ -106,40 +125,22 @@ export function ppmFromPercent(percent: string): number {
 }
 
 export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+  return formatDate(iso, dateFormatter);
 }
 
 export function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
+  return formatDate(iso, dateTimeFormatter);
 }
 
 export function fmtTime(iso: string | null | undefined): string {
+  return formatDate(iso, timeFormatter);
+}
+
+function formatDate(iso: string | null | undefined, dateFormat: Intl.DateTimeFormat): string {
   if (!iso) return "-";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
+  return dateFormat.format(date);
 }
 
 export function fmtRelative(iso: string | null | undefined): string {

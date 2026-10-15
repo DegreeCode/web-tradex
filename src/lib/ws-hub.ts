@@ -32,6 +32,7 @@ export const TICKET_TIMEOUT_MS = 10_000;
 interface TabState {
   port: HubPort;
   channels: Set<string>;
+  privateHeld: boolean;
   release: (() => void) | null;
   visible: boolean;
   lastSeen: number;
@@ -53,6 +54,7 @@ interface PendingTicket {
  */
 export class SocketHub {
   private readonly tabs = new Map<HubPort, TabState>();
+  private readonly subscribers = new Map<string, Set<TabState>>();
   private readonly createSocket: SocketHubOptions["createSocket"];
   private readonly now: () => number;
   private readonly publicSocket: HubSocket;
@@ -64,6 +66,7 @@ export class SocketHub {
   private readonly live = new Set<string>();
   private readonly pendingTickets = new Map<number, PendingTicket>();
   private nextTicketId = 1;
+  private privateGeneration = 0;
 
   constructor(options: SocketHubOptions) {
     this.createSocket = options.createSocket;
@@ -88,7 +91,7 @@ export class SocketHub {
   /** Forgets tabs that stopped sending heartbeats; a later message makes them resync. */
   sweep(): void {
     const cutoff = this.now() - PORT_TIMEOUT_MS;
-    for (const tab of [...this.tabs.values()]) {
+    for (const tab of this.tabs.values()) {
       if (tab.lastSeen < cutoff) this.drop(tab);
     }
   }
@@ -117,11 +120,14 @@ export class SocketHub {
         this.leave(tab, message.channel);
         break;
       case "retain":
-        tab.release ??= this.privateSocket.retain();
+        if (!tab.privateHeld) {
+          // retain() may synchronously ask a tab to issue its first ticket.
+          tab.privateHeld = true;
+          tab.release = this.privateSocket.retain();
+        }
         break;
       case "release":
-        tab.release?.();
-        tab.release = null;
+        this.releasePrivate(tab);
         break;
       case "reset-private":
         this.resetPrivate();
@@ -150,7 +156,7 @@ export class SocketHub {
     // A tab re-introducing itself on the same port starts over.
     const existing = this.tabs.get(port);
     if (existing) this.drop(existing);
-    this.tabs.set(port, { port, channels: new Set(), release: null, visible, lastSeen: this.now() });
+    this.tabs.set(port, { port, channels: new Set(), privateHeld: false, release: null, visible, lastSeen: this.now() });
     this.post(port, {
       type: "welcome",
       status: { public: this.publicSocket.getStatus(), private: this.privateSocket.getStatus() },
@@ -159,7 +165,13 @@ export class SocketHub {
 
   private join(tab: TabState, channel: string): void {
     if (tab.channels.has(channel)) return;
-    const shared = this.subscriberCount(channel) > 0;
+    let subscribers = this.subscribers.get(channel);
+    const shared = subscribers !== undefined;
+    if (!subscribers) {
+      subscribers = new Set();
+      this.subscribers.set(channel, subscribers);
+    }
+    subscribers.add(tab);
     tab.channels.add(channel);
     this.publicSocket.subscribe(channel);
     if (!shared) return;
@@ -177,31 +189,35 @@ export class SocketHub {
 
   private leave(tab: TabState, channel: string): void {
     if (!tab.channels.delete(channel)) return;
+    const subscribers = this.subscribers.get(channel);
+    subscribers?.delete(tab);
+    if (subscribers?.size === 0) this.subscribers.delete(channel);
     this.publicSocket.unsubscribe(channel);
-    if (this.subscriberCount(channel) === 0) {
+    if (!this.subscribers.has(channel)) {
       this.snapshots.delete(channel);
       this.live.delete(channel);
     }
   }
 
   private drop(tab: TabState): void {
-    for (const channel of [...tab.channels]) this.leave(tab, channel);
+    for (const channel of tab.channels) this.leave(tab, channel);
+    this.releasePrivate(tab);
+    this.tabs.delete(tab.port);
+  }
+
+  private releasePrivate(tab: TabState): void {
+    tab.privateHeld = false;
     tab.release?.();
     tab.release = null;
-    this.tabs.delete(tab.port);
     for (const [id, pending] of this.pendingTickets) {
       if (pending.tab === tab) this.settleTicket(id, tab, null);
     }
   }
 
-  private subscriberCount(channel: string): number {
-    let count = 0;
-    for (const tab of this.tabs.values()) if (tab.channels.has(channel)) count += 1;
-    return count;
-  }
-
   private routePublic(frame: WsFrame): void {
     const stream = frame.stream;
+    const subscribers = stream ? this.subscribers.get(stream) : this.tabs.values();
+    if (!subscribers) return;
     if (stream && frame.type === "snapshot") {
       this.live.add(stream);
       if (canFoldSnapshot(stream)) this.snapshots.set(stream, frame);
@@ -209,9 +225,7 @@ export class SocketHub {
       const snapshot = this.snapshots.get(stream);
       if (snapshot) this.snapshots.set(stream, foldSnapshot(snapshot, frame));
     }
-    for (const tab of this.tabs.values()) {
-      if (!stream || tab.channels.has(stream)) this.post(tab.port, { type: "frame", kind: "public", frame });
-    }
+    for (const tab of subscribers) this.post(tab.port, { type: "frame", kind: "public", frame });
   }
 
   private forgetSnapshots(): void {
@@ -220,13 +234,14 @@ export class SocketHub {
   }
 
   private openPrivate(): [HubSocket, () => void] {
+    const generation = this.privateGeneration;
     const socket = this.createSocket("private", {
-      fetchTicket: () => this.requestTicket(),
+      fetchTicket: () => this.requestTicket(generation),
       onAuthFailure: () => this.broadcast({ type: "session-expired" }),
     });
     const offFrame = socket.onFrame((frame) => {
       for (const tab of this.tabs.values()) {
-        if (tab.release) this.post(tab.port, { type: "frame", kind: "private", frame });
+        if (tab.privateHeld) this.post(tab.port, { type: "frame", kind: "private", frame });
       }
     });
     const offStatus = socket.onStatus((status) => this.broadcast({ type: "status", kind: "private", status }));
@@ -243,34 +258,38 @@ export class SocketHub {
    * by the old ticket. Tabs still holding the stream reconnect with a new one.
    */
   private resetPrivate(): void {
+    this.privateGeneration += 1;
+    for (const [id, pending] of this.pendingTickets) this.settleTicket(id, pending.tab, null);
     this.privateSocket.close();
     this.unwirePrivate();
     [this.privateSocket, this.unwirePrivate] = this.openPrivate();
     this.broadcast({ type: "status", kind: "private", status: this.privateSocket.getStatus() });
     for (const tab of this.tabs.values()) {
-      if (tab.release) tab.release = this.privateSocket.retain();
+      if (tab.privateHeld) tab.release = this.privateSocket.retain();
     }
   }
 
   /** A worker can't read the CSRF cookie, so a tab holding the stream issues the ticket. */
-  private async requestTicket(): Promise<string> {
+  private async requestTicket(generation: number): Promise<string> {
     const asked = new Set<TabState>();
-    for (;;) {
+    while (generation === this.privateGeneration) {
       const tab = this.ticketCandidate(asked);
       if (!tab) throw new ApiError(0, "NETWORK_ERROR", "네트워크에 연결하지 못했어요");
       asked.add(tab);
       const result = await this.askTicket(tab);
+      if (generation !== this.privateGeneration) break;
       if (!result) continue;
       if ("ticket" in result) return result.ticket;
       const { status, code, message, details } = result.error;
       throw new ApiError(status, code, message, "", details);
     }
+    throw new ApiError(0, "NETWORK_ERROR", "네트워크에 연결하지 못했어요");
   }
 
   private ticketCandidate(asked: Set<TabState>): TabState | null {
     let best: TabState | null = null;
     for (const tab of this.tabs.values()) {
-      if (!tab.release || asked.has(tab)) continue;
+      if (!tab.privateHeld || asked.has(tab)) continue;
       if (!best || (tab.visible && !best.visible) || (tab.visible === best.visible && tab.lastSeen > best.lastSeen)) {
         best = tab;
       }

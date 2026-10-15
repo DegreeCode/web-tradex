@@ -485,12 +485,16 @@ export function isEnumToken(value: string): boolean {
   );
 }
 
+export function notificationEventConfig(event: string | undefined): NotificationEventConfig | undefined {
+  return event && Object.hasOwn(EVENT_CONFIG, event) ? EVENT_CONFIG[event] : undefined;
+}
+
 export function parseNotificationBody(body: string): ParsedNotificationBody {
   const trimmed = body.trim();
   // "TRIGGER_FAILED: INSUFFICIENT_CREDIT" has no symbol; without this the
   // general pattern below reads the event as the symbol and the reason as the event.
   const unscoped = /^(?<event>[A-Za-z][A-Za-z0-9_.-]*)\s*:\s*(?<reason>.+)$/.exec(trimmed);
-  if (unscoped?.groups?.event && EVENT_CONFIG[unscoped.groups.event]) {
+  if (unscoped?.groups?.event && notificationEventConfig(unscoped.groups.event)) {
     return { eventKey: unscoped.groups.event, reason: unscoped.groups.reason.trim() };
   }
   const batch = /^(?<symbol>[^\s:]+):\s*(?<count>\d+)\s+trade\(s\)\s+executed$/i.exec(
@@ -508,7 +512,7 @@ export function parseNotificationBody(body: string): ParsedNotificationBody {
     trimmed,
   );
   const eventKey = event?.groups?.event;
-  if (!eventKey || (!EVENT_CONFIG[eventKey] && !isEnumToken(eventKey))) return {};
+  if (!eventKey || (!notificationEventConfig(eventKey) && !isEnumToken(eventKey))) return {};
   return {
     eventKey,
     symbol: event.groups?.symbol,
@@ -519,14 +523,14 @@ export function parseNotificationBody(body: string): ParsedNotificationBody {
 export function eventKeyFromTitle(title: string): string | undefined {
   const normalized = title.trim().toLowerCase().replace(/\s+/g, " ");
   return (
-    TITLE_EVENT_KEYS[normalized] ??
+    (Object.hasOwn(TITLE_EVENT_KEYS, normalized) ? TITLE_EVENT_KEYS[normalized] : undefined) ??
     Object.entries(EVENT_CONFIG).find(([, config]) => config.title.toLowerCase() === normalized)?.[0]
   );
 }
 
 /** Returns a readable reason, or null for an unknown code users can't act on. */
 export function localizeReason(reason: string): string | null {
-  if (REASON_LABELS[reason]) return REASON_LABELS[reason];
+  if (Object.hasOwn(REASON_LABELS, reason)) return REASON_LABELS[reason];
   return isEnumToken(reason) ? null : reason;
 }
 
@@ -538,8 +542,8 @@ export function isOcoPeerExecutedReason(reason: string | undefined): boolean {
 export function presentNotification(notification: Notification): NotificationPresentation {
   const parsed = parseNotificationBody(notification.body);
   const titleEventKey = eventKeyFromTitle(notification.title);
-  const eventKey = parsed.eventKey && EVENT_CONFIG[parsed.eventKey] ? parsed.eventKey : titleEventKey;
-  const config = eventKey ? EVENT_CONFIG[eventKey] : undefined;
+  const eventKey = notificationEventConfig(parsed.eventKey) ? parsed.eventKey : titleEventKey;
+  const config = notificationEventConfig(eventKey);
 
   if (config) {
     const symbol = parsed.symbol;

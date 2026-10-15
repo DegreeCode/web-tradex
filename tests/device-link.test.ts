@@ -43,6 +43,8 @@ test("rate limiting widens the interval for good and honours Retry-After", () =>
   assert.deepEqual(pollFailure(limited, 5_000), { kind: "retry", intervalMs: 10_000, delayMs: 12_000 });
   const bare = new ApiError(429, "RATE_LIMITED", "");
   assert.deepEqual(pollFailure(bare, 58_000), { kind: "retry", intervalMs: 60_000, delayMs: 60_000 });
+  const longCooldown = new ApiError(429, "RATE_LIMITED", "", "", undefined, 120_000);
+  assert.deepEqual(pollFailure(longCooldown, 5_000), { kind: "retry", intervalMs: 10_000, delayMs: 120_000 });
 });
 
 test("transient failures retry without changing the interval", () => {

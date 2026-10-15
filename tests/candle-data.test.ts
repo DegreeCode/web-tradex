@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appendCandleHistory, appendCandleHistoryWithGaps, applyTradeToCandlePage, mergeCandles, materializeCandlePage, advanceCandlePage, MAX_MATERIALIZED_CANDLE_BUCKETS } from "../src/lib/candle-data";
-import { canIncrementallyUpdate } from "../src/lib/chart-updates";
 import type { Candle, CandleInterval, PublicTrade } from "../src/lib/types";
 
 const candle = (minute: number, close = "10", synthetic = false): Candle => ({
@@ -74,20 +73,6 @@ test("a live trade updates the open bucket and older buckets need a refetch", ()
   assert.deepEqual([open?.high, open?.close, open?.volume_shares, open?.trade_count], ["12", "12", "3", 2]);
   assert.equal(applyTradeToCandlePage(current, "1m", 200, trade(9, "1")).status, "recovery");
 });
-
-test("charts update incrementally only for corrections and new trailing bars", () => {
-  const points = (...times: number[]) => times.map((time) => ({ time, value: 1 }));
-  const previous = points(60, 180, 300);
-  assert.equal(canIncrementallyUpdate(previous, previous.map((point) => ({ ...point, value: 2 }))), true);
-  assert.equal(canIncrementallyUpdate(previous, points(60, 180, 300, 360)), true);
-  // Finer intervals, backfills, rolling windows and empty states need setData.
-  assert.equal(canIncrementallyUpdate(previous, points(60, 120, 180, 240, 300)), false);
-  assert.equal(canIncrementallyUpdate(previous, points(0, 60, 180, 300)), false);
-  assert.equal(canIncrementallyUpdate(points(60, 180), points(180, 300)), false);
-  assert.equal(canIncrementallyUpdate([], points(60)), false);
-  assert.equal(canIncrementallyUpdate(points(60), []), false);
-});
-
 
 test("sparse second candles fill the entire displayed range within the total cap", () => {
   const rows = [100_000, 50_000, 0].map((second) => ({

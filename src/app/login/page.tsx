@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronRight, KeyRound, MonitorSmartphone } from "lucide-react";
 import { toast } from "sonner";
@@ -41,6 +41,7 @@ const ADVANCED_TITLES: Record<AdvancedMethod, { title: string; description: stri
 
 function LoginScreen() {
   const router = useRouter();
+  const params = useSearchParams();
   const { status, refresh } = useAuth();
   const [busy, setBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -54,9 +55,8 @@ function LoginScreen() {
   const reconnectAttempted = useRef(false);
   const signOut = useLogout().mutate;
 
-  const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
-  const next = safeRedirectPath(params?.get("next"));
-  const reconnectRequested = params?.get("reconnect") === "1";
+  const next = safeRedirectPath(params.get("next"));
+  const reconnectRequested = params.get("reconnect") === "1";
 
   useEffect(() => {
     if (status === "authenticated") router.replace(next);
@@ -89,6 +89,7 @@ function LoginScreen() {
   }
 
   async function handleLogin() {
+    if (busy || recovering || status === "loading") return;
     if (!supportsPasskeys()) {
       toast.error("이 브라우저에서는 패스키를 사용할 수 없어요");
       return;
@@ -117,6 +118,7 @@ function LoginScreen() {
 
   async function handleRecovery(event: React.FormEvent) {
     event.preventDefault();
+    if (busy || recovering || status === "loading") return;
     if (!username.trim() || !recoveryKey.trim()) {
       toast.error("아이디와 복구키를 입력해주세요");
       return;
@@ -127,6 +129,7 @@ function LoginScreen() {
         username: username.trim(),
         recovery_key: recoveryKey.trim(),
       });
+      setRecoveryKey("");
       toast.success("복구 모드로 전환했어요. 새 패스키를 등록해주세요");
       refresh();
       router.replace("/recover");
@@ -177,6 +180,7 @@ function LoginScreen() {
           <button
             type="button"
             onClick={openAdvanced}
+            disabled={busy || recovering || status === "loading"}
             className="mt-3 min-h-11 w-full rounded-xl py-2 text-[13px] font-semibold text-app-gray-500 hover:bg-app-gray-50 hover:text-app-gray-700"
           >
             고급 로그인
@@ -254,6 +258,7 @@ function LoginScreen() {
                 <Label htmlFor="recovery-key">복구키</Label>
                 <Input
                   id="recovery-key"
+                  type="password"
                   value={recoveryKey}
                   onChange={(event) => setRecoveryKey(event.target.value)}
                   placeholder="rck_..."

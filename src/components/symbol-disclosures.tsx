@@ -157,6 +157,10 @@ const FALLBACK_DISCLOSURE: DisclosurePresentation = {
   tone: "gray",
 };
 
+function ownValue<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 const DISCLOSURE_TONE_CLASS: Record<DisclosureTone, { icon: string; badge: string }> = {
   blue: { icon: "bg-app-blue-light text-app-blue", badge: "bg-app-blue-light text-app-blue-dark" },
   green: { icon: "bg-app-green-light text-app-green", badge: "bg-app-green-light text-app-green" },
@@ -271,7 +275,7 @@ function disclosureDetails(disclosure: Disclosure): DisclosureDetail[] {
       break;
     case "SYMBOL_HALTED":
     case "SYMBOL_RESUMED":
-      addDisclosureDetail(details, "상태", STATE_LABEL[payloadText(payload, "state") ?? ""] ?? "상태 변경");
+      addDisclosureDetail(details, "상태", ownValue(STATE_LABEL, payloadText(payload, "state") ?? "") ?? "상태 변경");
       addText("사유", "reason");
       addDate("예정 시각", "halted_until");
       break;
@@ -294,13 +298,13 @@ function disclosureDetails(disclosure: Disclosure): DisclosureDetail[] {
       break;
     case "GLOBAL_MARKET_HALTED":
     case "GLOBAL_MARKET_RESUMED":
-      addDisclosureDetail(details, "상태", STATE_LABEL[payloadText(payload, "state") ?? ""] ?? "시장 상태 변경");
+      addDisclosureDetail(details, "상태", ownValue(STATE_LABEL, payloadText(payload, "state") ?? "") ?? "시장 상태 변경");
       addText("사유", "reason");
       addDate("변경 시각", "changed_at");
       addDate("예정 시각", "halted_until");
       break;
     case "OWNER_TRADE":
-      addDisclosureDetail(details, "거래", SIDE_LABEL[payloadText(payload, "side") ?? ""] ?? "거래");
+      addDisclosureDetail(details, "거래", ownValue(SIDE_LABEL, payloadText(payload, "side") ?? "") ?? "거래");
       addQuantity("수량", "quantity");
       addPrice("가격", "price");
       addCredit("거래 금액", "credit");
@@ -309,7 +313,7 @@ function disclosureDetails(disclosure: Disclosure): DisclosureDetail[] {
       addDate("체결 시각", "completed_at");
       break;
     case "OWNER_STOCK_TRANSFER":
-      addDisclosureDetail(details, "이동", DIRECTION_LABEL[payloadText(payload, "direction") ?? ""] ?? "주식 이동");
+      addDisclosureDetail(details, "이동", ownValue(DIRECTION_LABEL, payloadText(payload, "direction") ?? "") ?? "주식 이동");
       addQuantity("수량", "quantity");
       addCredit("이동 금액", "credit");
       addCredit("수수료", "fee");
@@ -352,7 +356,7 @@ export function SymbolDisclosures({ symbol }: { symbol: string }) {
       ) : (
         <div className="space-y-2">
           {disclosures.map((disclosure) => {
-            const presentation = DISCLOSURE_PRESENTATION[disclosure.type] ?? FALLBACK_DISCLOSURE;
+            const presentation = ownValue(DISCLOSURE_PRESENTATION, disclosure.type) ?? FALLBACK_DISCLOSURE;
             const tone = DISCLOSURE_TONE_CLASS[presentation.tone];
             const Icon = presentation.icon;
             const summary = disclosureSummary(disclosure);
@@ -404,7 +408,7 @@ export function SymbolDisclosures({ symbol }: { symbol: string }) {
       }}
     >
       {selectedDisclosure ? (() => {
-        const presentation = DISCLOSURE_PRESENTATION[selectedDisclosure.type] ?? FALLBACK_DISCLOSURE;
+        const presentation = ownValue(DISCLOSURE_PRESENTATION, selectedDisclosure.type) ?? FALLBACK_DISCLOSURE;
         const tone = DISCLOSURE_TONE_CLASS[presentation.tone];
         const Icon = presentation.icon;
         const details = disclosureDetails(selectedDisclosure);

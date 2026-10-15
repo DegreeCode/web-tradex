@@ -46,7 +46,17 @@ let symbolMetadataBootstrapPromise: Promise<SymbolMetadataCache> | null = null;
 let symbolMetadataInitialValidationDone = false;
 let symbolMetadataSyncPromise: Promise<SymbolMetadataCache> | null = null;
 
-export async function fetchAllPages<T>(path: string): Promise<T[]> {
+export function compareVersion(a: string | undefined, b: string | undefined): number {
+  if (!a || !b || a === b) return 0;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) {
+    const first = BigInt(a);
+    const second = BigInt(b);
+    return first > second ? 1 : first < second ? -1 : 0;
+  }
+  return a.localeCompare(b);
+}
+
+export async function fetchAllPages<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   const collected: T[] = [];
   let cursor: string | null = null;
   const seenCursors = new Set<string>();
@@ -54,6 +64,7 @@ export async function fetchAllPages<T>(path: string): Promise<T[]> {
     const paginationQuery = buildQuery({ limit: MARKET_PAGE_SIZE, cursor });
     const page: Page<T> = await apiPage<T>(
       `${path}${paginationQuery ? (path.includes("?") ? `&${paginationQuery.slice(1)}` : paginationQuery) : ""}`,
+      { signal },
     );
     collected.push(...page.data);
     if (!page.page.has_more || !page.page.next_cursor) break;
@@ -221,17 +232,35 @@ function waitForSymbolMetadataCache(maxWaitMs: number): Promise<SymbolMetadataCa
   return new Promise((resolve) => {
     const deadline = Date.now() + maxWaitMs;
     let timer: number | undefined;
+    let finished = false;
 
     const finish = (cache: SymbolMetadataCache | null) => {
+      if (finished) return;
+      finished = true;
       if (timer !== undefined) window.clearTimeout(timer);
       window.removeEventListener("storage", onStorage);
       resolve(cache);
     };
 
     const check = () => {
+      if (finished) return;
+      // Storage events can arrive between checks; keep exactly one timer.
+      if (timer !== undefined) window.clearTimeout(timer);
       const cache = readSymbolMetadataCache();
       if (cache || Date.now() >= deadline) {
         finish(cache);
+        return;
+      }
+      try {
+        const lock = parseSymbolBootstrapLock(window.localStorage.getItem(SYMBOL_METADATA_LOCK_KEY));
+        // The owner may have failed or closed its lock early. Retry ownership
+        // immediately instead of blocking this tab for the full lock lifetime.
+        if (!lock || lock.expires_at <= Date.now()) {
+          finish(null);
+          return;
+        }
+      } catch {
+        finish(null);
         return;
       }
       timer = window.setTimeout(check, 250);
@@ -272,6 +301,9 @@ async function bootstrapSymbolMetadata(): Promise<SymbolMetadataCache> {
   const baseline = await apiData<SymbolChanges>("/api/v1/market/symbols/changes");
   if (!isSymbolChanges(baseline)) throw new Error("Invalid symbol changes baseline");
   const symbols = await fetchAllPages<MarketSymbol>("/api/v1/market/symbols");
+  if (!symbols.every(isMarketSymbol) || new Set(symbols.map((symbol) => symbol.symbol)).size !== symbols.length) {
+    throw new Error("Invalid symbol metadata list");
+  }
   const cache: SymbolMetadataCache = {
     schema_version: SYMBOL_METADATA_SCHEMA_VERSION,
     symbols,
@@ -314,7 +346,7 @@ export function ensureSymbolMetadataCache(): Promise<SymbolMetadataCache> {
 
 async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<SymbolMetadataCache> {
   const initialCursor = cache.next_since_version;
-  const changesBySymbol = new Map<string, boolean>();
+  const changesBySymbol = new Map<string, SymbolChange>();
   const seenCursors = new Set<string>([initialCursor]);
   let cursor = initialCursor;
   while (true) {
@@ -325,7 +357,7 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
       })}`,
     );
     if (!isSymbolChanges(page)) throw new Error("Invalid symbol changes response");
-    for (const item of page.changes) changesBySymbol.set(item.symbol, item.deleted);
+    for (const item of page.changes) changesBySymbol.set(item.symbol, item);
     const nextCursor = page.next_since_version;
     if (!page.has_more) {
       cursor = nextCursor;
@@ -337,7 +369,7 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
   }
 
   const changed = [...changesBySymbol]
-    .filter(([, deleted]) => !deleted)
+    .filter(([, change]) => !change.deleted)
     .map(([symbol]) => symbol);
   const metadata: MarketSymbol[] = [];
   for (let index = 0; index < changed.length; index += SYMBOL_BATCH_LIMIT) {
@@ -351,11 +383,30 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
     metadata.push(...batch);
   }
 
-  const nextSymbols = new Map(cache.symbols.map((symbol) => [symbol.symbol, symbol]));
-  for (const [symbol, isDeleted] of changesBySymbol) {
-    if (isDeleted) nextSymbols.delete(symbol);
+  // A listing response, trading event or another tab may have updated metadata
+  // while the changes/batch requests were in flight. Keep those newer rows.
+  const latest = readSymbolMetadataCache() ?? cache;
+  // Another complete sync already advanced the watermark. Adopting its result
+  // lets the next cadence resume there without ever moving the cursor back.
+  if (latest.next_since_version !== cache.next_since_version) return latest;
+  const nextSymbols = new Map(latest.symbols.map((symbol) => [symbol.symbol, symbol]));
+  for (const [symbol, change] of changesBySymbol) {
+    const current = nextSymbols.get(symbol);
+    if (change.deleted && (!current || compareVersion(current.version, change.version) <= 0)) {
+      nextSymbols.delete(symbol);
+    }
   }
-  for (const symbolData of metadata) nextSymbols.set(symbolData.symbol, symbolData);
+  for (const symbolData of metadata) {
+    const current = nextSymbols.get(symbolData.symbol);
+    if (current) {
+      const versionOrder = compareVersion(current.version, symbolData.version);
+      const currentTime = Date.parse(current.updated_at);
+      const fetchedTime = Date.parse(symbolData.updated_at);
+      if (versionOrder > 0 || (versionOrder === 0 && Number.isFinite(currentTime) &&
+        (!Number.isFinite(fetchedTime) || currentTime > fetchedTime))) continue;
+    }
+    nextSymbols.set(symbolData.symbol, symbolData);
+  }
 
   const nextCache: SymbolMetadataCache = {
     schema_version: SYMBOL_METADATA_SCHEMA_VERSION,

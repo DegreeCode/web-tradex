@@ -143,7 +143,8 @@ test("legacy cancellation, expiry and failure notifications reconcile without a 
   }
 });
 
-test("a trigger domain event and its stored notification share one batched balance refetch", async () => {
+test("a trigger domain event and its stored notification share one batched balance refetch", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const client = new QueryClient();
   const fetches = new Map<string, number>();
   const subscriptions = holdRoots.map((root) => {
@@ -166,7 +167,8 @@ test("a trigger domain event and its stored notification share one batched balan
     assert.equal(fetches.size, 0, "refetches wait for the shared batch");
     for (const root of holdRoots) assert.equal(client.getQueryState([root, "cached"])?.isInvalidated, true);
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    t.mock.timers.tick(300);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     for (const root of holdRoots) assert.equal(fetches.get(root), 1, root);
   } finally {
     for (const unsubscribe of subscriptions) unsubscribe();

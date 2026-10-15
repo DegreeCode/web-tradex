@@ -63,12 +63,6 @@ export function ExitOrderDialog({
     try {
       const slipError = slippageError(slippage, exchange.data?.trade);
       if (slipError) throw new Error(slipError);
-      const expires = expiry ? new Date(expiry) : null;
-      if (
-        expires &&
-        (!Number.isFinite(expires.getTime()) || expires.getTime() <= Date.now())
-      )
-        throw new Error("만료 시각은 지금 이후로 정해주세요");
       const body = buildExitOrder({
         symbol,
         account_id: accountId,
@@ -79,7 +73,7 @@ export function ExitOrderDialog({
         ...(trailing && mode !== "TAKE_PROFIT"
           ? { trailingPercent: distance }
           : {}),
-        ...(expires ? { expires_at: expires.toISOString() } : {}),
+        ...(expiry ? { expires_at: expiry } : {}),
         margin_position_id: marginPositionId,
         margin_side: marginSide,
         policy: {

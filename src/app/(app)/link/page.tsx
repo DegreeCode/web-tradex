@@ -63,6 +63,7 @@ function LinkApproval() {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   async function runLookup(raw: string) {
+    if (lookingUp) return;
     const normalized = normalizeUserCode(raw);
     if (!normalized) {
       toast.error("코드 8자리를 확인해주세요. 0, 1, I, L, O는 쓰지 않아요");
@@ -189,9 +190,25 @@ function ApprovalForm({
     accountIds ?? accountList.filter((account) => account.is_primary).map((account) => account.account_id);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    let timer: number | undefined;
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      if (remainingSeconds(lookup.expires_at, current) > 0) timer = window.setTimeout(tick, 1000);
+    };
+    const onVisibility = () => {
+      window.clearTimeout(timer);
+      if (!document.hidden) tick();
+    };
+    if (!document.hidden && remainingSeconds(lookup.expires_at, Date.now()) > 0) {
+      timer = window.setTimeout(tick, 1000);
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [lookup.expires_at]);
 
   function toggleAccount(id: string) {
     setAccountIds(
@@ -210,6 +227,7 @@ function ApprovalForm({
           : null;
 
   async function approve() {
+    if (busy !== null || expired) return;
     if (problem || idle === null) {
       if (problem) toast.error(problem);
       return;
@@ -245,6 +263,7 @@ function ApprovalForm({
   }
 
   async function deny() {
+    if (busy !== null || expired) return;
     setBusy("deny");
     try {
       await postData(DEVICE_LINK_DENY_PATH, { user_code: code });
@@ -421,7 +440,7 @@ function approvalSummary({
     accountIds.length === 1
       ? accountLabel(accounts.find((account) => account.account_id === accountIds[0]) ?? { account_id: accountIds[0], is_primary: false }, accounts)
       : `계좌 ${accountIds.length}개`;
-  const where = bindNetwork ? "지금 접속 위치에서 " : "";
+  const where = bindNetwork ? "요청한 접속 위치에서 " : "";
   const what =
     permissions.length <= 1 ? `${target}를 조회만 할 수 있어요.` : `${target}에서 ${permissionSummary(permissions)}을 할 수 있어요.`;
   const idlePart = idle === null ? "" : ` 그 사이 ${formatMinutes(idle)} 동안 쓰지 않으면 먼저 끊겨요.`;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,13 +21,17 @@ export default function AccountsPage() {
   const manageAccess = useSessionAccess("FULL");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(copyResetTimer.current), []);
 
   const accounts = accountsQuery.data ?? [];
 
   async function copyId(accountId: string) {
     if (!(await copyToClipboard(accountId, "계좌 ID를 복사했어요"))) return;
+    clearTimeout(copyResetTimer.current);
     setCopiedId(accountId);
-    setTimeout(() => setCopiedId((current) => (current === accountId ? null : current)), 2000);
+    copyResetTimer.current = setTimeout(() => setCopiedId(null), 2000);
   }
 
   function handleCreate() {

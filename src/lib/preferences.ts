@@ -26,6 +26,7 @@ const DEFAULT_LIVE_NOTIFICATION_POPUP = true;
 const SLIPPAGE_PERCENT_PATTERN = /^(?!$)\d*\.?\d{0,4}$/;
 
 let preferences: Preferences | undefined;
+let pendingPatch: Partial<Preferences> = {};
 const listeners = new Set<() => void>();
 
 /** Keeps only well-formed fields so a hand-edited or stale record cannot break the UI. */
@@ -82,7 +83,8 @@ function loadPreferences(): Preferences {
       // General preferences can still be read if chart migration cannot write.
     }
     const raw = storage.getItem(PREFERENCES_STORAGE_KEY);
-    return raw === null ? migrateLegacyPreferences(storage) : parsePreferences(raw);
+    const stored = raw === null ? migrateLegacyPreferences(storage) : parsePreferences(raw);
+    return sanitizePreferences({ ...stored, ...pendingPatch });
   } catch {
     // Keep the in-memory preferences if storage becomes unavailable later.
     return preferences ?? {};
@@ -102,7 +104,9 @@ export function readPreferences(): Preferences {
 
 /** Merges a patch (undefined removes a field) and persists the whole record. */
 export function updatePreferences(patch: Partial<Preferences>): void {
-  const next: Preferences = { ...readPreferences(), ...patch };
+  // Merge with the latest stored record even when no component is subscribed
+  // to cross-tab events, so a change in another tab is not overwritten.
+  const next: Preferences = { ...loadPreferences(), ...patch };
   for (const key of Object.keys(next) as (keyof Preferences)[]) {
     if (next[key] === undefined) delete next[key];
   }
@@ -120,25 +124,36 @@ export function updatePreferences(patch: Partial<Preferences>): void {
       } catch { /* Ignore malformed legacy data. */ }
     }
     storage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ ...legacyChartFields, ...preferences }));
+    pendingPatch = {};
   } catch {
     // Keep the in-memory preferences when browser storage is unavailable.
+    pendingPatch = { ...pendingPatch, ...patch };
   }
+  emit();
+}
+
+function onStorage(event: StorageEvent) {
+  if (event.key !== PREFERENCES_STORAGE_KEY && event.key !== null) return;
+  // sessionStorage can use the same key; only localStorage owns preferences.
+  try {
+    if (event.storageArea && event.storageArea !== window.localStorage) return;
+  } catch {
+    return;
+  }
+  preferences = sanitizePreferences({ ...parsePreferences(event.newValue), ...pendingPatch });
   emit();
 }
 
 function subscribe(onChange: () => void) {
   if (typeof window === "undefined") return () => {};
-  // Another tab changed the record (key null: storage was cleared).
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== PREFERENCES_STORAGE_KEY && event.key !== null) return;
-    preferences = parsePreferences(event.newValue);
-    emit();
-  };
+  if (listeners.size === 0) {
+    window.addEventListener("storage", onStorage);
+    preferences = loadPreferences();
+  }
   listeners.add(onChange);
-  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(onChange);
-    window.removeEventListener("storage", onStorage);
+    if (listeners.size === 0) window.removeEventListener("storage", onStorage);
   };
 }
 

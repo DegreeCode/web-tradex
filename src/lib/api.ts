@@ -2,6 +2,7 @@ import type { Page } from "./types";
 
 const SESSION_EXPIRED_EVENT = "tradex:session-expired";
 const LINKED_NETWORK_CHANGED_EVENT = "tradex:linked-network-changed";
+const MAX_TIMER_MS = 2_147_483_647;
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
@@ -116,7 +117,8 @@ export function errorMessage(error: unknown): string {
     return "접속 위치가 바뀌어 이 연결을 더 이상 쓸 수 없어요";
   }
   if (error instanceof ApiError) {
-    return MESSAGES[error.code] ?? error.message ?? "요청을 처리하지 못했어요";
+    const message = Object.hasOwn(MESSAGES, error.code) ? MESSAGES[error.code] : undefined;
+    return message || error.message || "요청을 처리하지 못했어요";
   }
   if (error instanceof Error) return error.message || "요청을 처리하지 못했어요";
   return "알 수 없는 오류가 발생했어요";
@@ -129,7 +131,8 @@ export function isApiError(error: unknown, code?: string): error is ApiError {
 export function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const target = `${name}=`;
-  for (const part of document.cookie.split("; ")) {
+  for (const cookie of document.cookie.split(";")) {
+    const part = cookie.trimStart();
     if (!part.startsWith(target)) continue;
     try {
       return decodeURIComponent(part.slice(target.length));
@@ -191,11 +194,12 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
     if (csrf) headers["X-CSRF-Token"] = csrf;
   }
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  const body = hasBody ? JSON.stringify(options.body) : undefined;
 
   const controller = new AbortController();
-  const forwardAbort = () => controller.abort();
+  const forwardAbort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", forwardAbort, { once: true });
-  if (options.signal?.aborted) controller.abort();
+  if (options.signal?.aborted) forwardAbort();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
   let response: Response;
   let text: string;
@@ -205,12 +209,12 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
       headers,
       credentials: "include",
       cache: "no-store",
-      body: hasBody ? JSON.stringify(options.body) : undefined,
+      body,
       signal: controller.signal,
     });
     text = await response.text();
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError" && options.signal?.aborted) throw error;
+    if (options.signal?.aborted) throw error;
     throw new ApiError(0, "NETWORK_ERROR", "네트워크에 연결하지 못했어요");
   } finally {
     clearTimeout(timeout);
@@ -270,9 +274,9 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
 function retryAfterMilliseconds(value: string | null): number | undefined {
   if (!value) return undefined;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  if (Number.isFinite(seconds * 1000) && seconds >= 0) return Math.min(MAX_TIMER_MS, seconds * 1000);
   const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+  return Number.isFinite(date) ? Math.min(MAX_TIMER_MS, Math.max(0, date - Date.now())) : undefined;
 }
 
 export function onSessionExpired(handler: () => void): () => void {
@@ -313,22 +317,32 @@ export function postData<T>(path: string, body: unknown, idempotencyKey?: string
   return apiData<T>(path, { method: "POST", body, idempotencyKey });
 }
 
-const logicalMutationKeys = new Map<string, { key: string; touchedAt: number }>();
+interface LogicalMutation {
+  key: string;
+  pending?: Promise<unknown>;
+}
+
+const logicalMutationKeys = new Map<string, LogicalMutation>();
+
+/** Retry keys belong to one authenticated session, just like its cached data. */
+export function clearIdempotencyKeys(): void {
+  logicalMutationKeys.clear();
+}
 
 async function idempotentData<T>(method: "POST" | "PATCH", path: string, body: unknown): Promise<T> {
   const signature = `${method}:${path}:${JSON.stringify(body)}`;
-  const now = Date.now();
-  for (const [candidate, entry] of logicalMutationKeys) {
-    if (now - entry.touchedAt > 86_400_000) logicalMutationKeys.delete(candidate);
-  }
   const existing = logicalMutationKeys.get(signature);
-  const entry = existing ?? { key: newIdempotencyKey(), touchedAt: now };
-  entry.touchedAt = now;
+  if (existing?.pending) return existing.pending as Promise<T>;
+  // An uncertain response may have committed. Preserve its key until an
+  // outcome or session teardown, rather than turn an old retry into a new action.
+  const entry: LogicalMutation = existing ?? { key: newIdempotencyKey() };
   logicalMutationKeys.set(signature, entry);
 
+  const pending = apiData<T>(path, { method, body, idempotencyKey: entry.key });
+  entry.pending = pending;
   try {
-    const data = await apiData<T>(path, { method, body, idempotencyKey: entry.key });
-    if (logicalMutationKeys.get(signature)?.key === entry.key) logicalMutationKeys.delete(signature);
+    const data = await pending;
+    if (logicalMutationKeys.get(signature) === entry) logicalMutationKeys.delete(signature);
     return data;
   } catch (error) {
     const definitiveClientFailure =
@@ -336,10 +350,12 @@ async function idempotentData<T>(method: "POST" | "PATCH", path: string, body: u
       error.status >= 400 &&
       error.status < 500 &&
       error.code !== "IDEMPOTENCY_KEY_REUSED";
-    if (definitiveClientFailure && logicalMutationKeys.get(signature)?.key === entry.key) {
+    if (definitiveClientFailure && logicalMutationKeys.get(signature) === entry) {
       logicalMutationKeys.delete(signature);
     }
     throw error;
+  } finally {
+    delete entry.pending;
   }
 }
 

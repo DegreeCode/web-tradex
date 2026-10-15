@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Landmark, PlusCircle, Send, ShieldCheck } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
-import { HoldingRow, buildHolding, type HoldingView } from "@/components/holding-row";
+import { HoldingRow } from "@/components/holding-row";
 import { InstrumentList } from "@/components/instrument-list";
 import { NAV_RANGES, NavChart } from "@/components/nav-chart";
 import {
@@ -21,6 +21,7 @@ import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { changePercent, fmtCredit, fmtDateTime, fmtDecimal, fmtSigned, shortId, toNumber } from "@/lib/format";
 import { useAllPortfolios, useInstruments, useMarketState, useNav, useNavHistory } from "@/lib/hooks";
+import { buildHolding, type HoldingView } from "@/lib/holdings";
 import type { Account, NavRange } from "@/lib/types";
 
 const QUICK_ACTIONS = [
@@ -50,20 +51,20 @@ export default function HomePage() {
     [instruments],
   );
 
-  const { stockValue, costBasis, holdings } = useMemo(() => {
+  const { stockValue, costBasis, holdings, pricesReady } = useMemo(() => {
     let stockValue = 0;
     let costBasis = 0;
     const holdings: (HoldingView & { accountId: string })[] = [];
     for (const portfolio of portfolios) {
       for (const position of portfolio.positions) {
         const holding = buildHolding(position, instrumentMap);
-        stockValue += holding.value;
+        stockValue += holding.value ?? 0;
         costBasis += toNumber(position.cost_basis);
         holdings.push({ ...holding, accountId: portfolio.account_id });
       }
     }
-    holdings.sort((a, b) => b.value - a.value);
-    return { stockValue, costBasis, holdings };
+    holdings.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+    return { stockValue, costBasis, holdings, pricesReady: holdings.every((holding) => holding.value !== null) };
   }, [portfolios, instrumentMap]);
 
   const nav = navQuery.data;
@@ -74,6 +75,7 @@ export default function HomePage() {
 
   const unrealized = stockValue - costBasis;
   const unrealizedPct = costBasis > 0 ? (unrealized / costBasis) * 100 : null;
+  const valuationReady = !isLoading && !portfolioError && !instrumentsQuery.isLoading && pricesReady;
 
   const navSeries = useMemo(
     () =>
@@ -185,8 +187,8 @@ export default function HomePage() {
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1">
             <span className="text-[14px] text-app-gray-500">보유 종목 평가 손익</span>
             <span className="numeric min-w-0 break-all text-right text-[14px] font-semibold text-app-gray-900">
-              {isLoading || portfolioError || instrumentsQuery.isLoading ? "—" : fmtCredit(unrealized, 2)}
-              {!isLoading && !portfolioError && !instrumentsQuery.isLoading && unrealizedPct !== null ? (
+              {valuationReady ? fmtCredit(unrealized, 2) : "—"}
+              {valuationReady && unrealizedPct !== null ? (
                 <span className="ml-1 text-[12px] text-app-gray-400">({fmtSigned(unrealizedPct, 1)}%)</span>
               ) : null}
             </span>

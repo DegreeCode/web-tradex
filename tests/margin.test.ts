@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  getLeverageOptions,
+  getLeverageBounds,
   isIndefiniteMarginBlock,
   estimateMarginReturnPercent,
   validateCollateralAmount,
@@ -10,6 +10,7 @@ import {
   validateReductionQuantity,
   marginErrorMessage,
   marginMaxCollateral,
+  marginLimitReasonLabel,
   marginPartialFillText,
   marginSideEligible,
 } from "../src/lib/margin";
@@ -87,25 +88,15 @@ test("estimated return is unavailable without a valid open-position basis", () =
   assert.equal(estimateMarginReturnPercent({ ...position, side: "SHORT", collateral: "-1" }), null);
 });
 
-test("getLeverageOptions generates 0.1 step options capped by eligibility", () => {
-  // LONG: minimum is 1.1, capped by max_long_leverage
-  const longOptions = getLeverageOptions("LONG", "1.5");
-  assert.deepEqual(longOptions, ["1.1", "1.2", "1.3", "1.4", "1.5"]);
-
-  const longLowCap = getLeverageOptions("LONG", "1.0");
-  assert.deepEqual(longLowCap, []);
-
-  const longHigherCap = getLeverageOptions("LONG", "2.0");
-  assert.equal(longHigherCap.length, 10);
-  assert.equal(longHigherCap[0], "1.1");
-  assert.equal(longHigherCap[longHigherCap.length - 1], "2.0");
-
-  // SHORT: minimum is 1.0, capped by max_short_leverage
-  const shortOptions = getLeverageOptions("SHORT", "1.0");
-  assert.deepEqual(shortOptions, ["1.0"]);
-
-  const shortOptionsHigher = getLeverageOptions("SHORT", "1.5");
-  assert.deepEqual(shortOptionsHigher, ["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"]);
+test("leverage bounds use 0.1 steps without exceeding eligibility or allocating per step", () => {
+  assert.deepEqual(getLeverageBounds("LONG", "1.5"), { min: 11, max: 15 });
+  assert.equal(getLeverageBounds("LONG", "1.0"), null);
+  assert.deepEqual(getLeverageBounds("SHORT", "1.0"), { min: 10, max: 10 });
+  assert.deepEqual(getLeverageBounds("LONG", "1.59"), { min: 11, max: 15 });
+  assert.equal(getLeverageBounds("SHORT", "0.9999999999999999"), null);
+  assert.deepEqual(getLeverageBounds("SHORT", "214748364.7"), { min: 10, max: 2147483647 });
+  for (const invalid of ["", "invalid", "NaN", "Infinity", "1e2", "9007199254740992"])
+    assert.equal(getLeverageBounds("LONG", invalid), null);
 });
 
 test("validateCollateralAmount enforces positive decimal <= 16 decimals and balance check", () => {
@@ -148,6 +139,8 @@ test("validateLeverage checks bounds and 0.1 increment", () => {
   assert.equal(validateLeverage("1.0", "SHORT", "1.0"), null);
   assert.match(validateLeverage("0.9", "SHORT", "1.0") ?? "", /1.0 이상/);
   assert.match(validateLeverage("1.5", "SHORT", "1.0") ?? "", /허용된 최대 레버리지/);
+  assert.match(validateLeverage("1.0", "SHORT", "0.9999999999999999") ?? "", /허용된 최대 레버리지/);
+  assert.match(validateLeverage("1.1", "LONG", "invalid") ?? "", /허용된 최대 레버리지/);
 });
 
 test("validateReductionQuantity ensures quantity < position quantity and <= 8 decimals", () => {
@@ -217,4 +210,9 @@ test("marginPartialFillText describes clipped entries and settlements", () => {
     marginPartialFillText({ ...base, action: "REDUCE", requested_quantity: "200", limit_reasons: [] }),
     "요청 200주 중 150주 정산",
   );
+});
+
+test("unknown margin reason tokens remain text, including inherited object keys", () => {
+  for (const reason of ["UNKNOWN_REASON", "toString", "constructor", "__proto__"])
+    assert.equal(marginLimitReasonLabel(reason), reason);
 });

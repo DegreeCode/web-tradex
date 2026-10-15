@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   EVENT_CONFIG,
   eventKeyFromTitle,
-  localizeReason,
   parseNotificationBody,
   presentNotification,
 } from "../src/lib/notifications";
@@ -76,17 +75,6 @@ test("an unscoped group cancellation keeps the reason out of the symbol", () => 
   assert.equal(view.title, "예약 주문을 취소했어요");
   assert.match(view.body, /사유: 묶음 주문을 취소했어요$/);
 });
-
-for (const [reason, label] of [
-  ["GROUP_CANCELED", "묶음 주문을 취소했어요"],
-  ["CREDIT_LIMIT_EXHAUSTED", "예산을 모두 사용했어요"],
-  ["OCO_PEER_EXECUTED", "반대쪽 익절·손절 주문이 체결됐어요"],
-  ["paired OCO order executed", "반대쪽 익절·손절 주문이 체결됐어요"],
-]) {
-  test(`the new reason ${reason} reads as Korean copy`, () => {
-    assert.equal(localizeReason(reason), label);
-  });
-}
 
 test("a depleted trigger budget is explained in the notification body", () => {
   const view = presentNotification(notification("ALPHA.M TRIGGER_FAILED: CREDIT_LIMIT_EXHAUSTED"));

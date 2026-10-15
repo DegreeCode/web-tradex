@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { Bell, CheckCheck, MailOpen } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,22 +35,25 @@ export default function NotificationsPage() {
   const markBatch = useMarkNotificationsRead();
   const markAll = useMarkAllNotificationsRead();
 
-  const rows = notifications.data?.pages.flatMap((page) => page.data) ?? [];
-  const unreadRows = rows.filter((row) => !row.read);
+  const rows = useMemo(() => notifications.data?.pages.flatMap((page) => page.data) ?? [], [notifications.data]);
+  const unreadRows = useMemo(() => rows.filter((row) => !row.read), [rows]);
   const selectedPresentation = selected ? presentNotification(selected) : null;
   const SelectedIcon = selectedPresentation?.icon ?? Bell;
   const selectedTone = selectedPresentation
     ? TONE_STYLES[selectedPresentation.tone]
     : TONE_STYLES.neutral;
 
-  function handleOpen(item: Notification) {
+  const markReadMutation = markRead.mutate;
+  const handleOpen = useCallback((item: Notification) => {
     setSelected(item);
     if (!item.read) {
-      markRead.mutate(item.notification_id, {
+      markReadMutation(item.notification_id, {
+        onSuccess: () => setSelected((current) => current?.notification_id === item.notification_id
+          ? { ...current, read: true } : current),
         onError: (error) => toast.error(errorMessage(error)),
       });
     }
-  }
+  }, [markReadMutation]);
 
   function handleMarkAll() {
     markAll.mutate(undefined, {
@@ -159,12 +162,12 @@ export default function NotificationsPage() {
               <p className="max-h-[50vh] [overflow-wrap:anywhere] overflow-y-auto text-[14px] leading-relaxed whitespace-pre-wrap text-app-gray-700">
                 {selectedPresentation?.body}
               </p>
-              {selected.read ? null : (
+              {selected.read ? (
                 <p className="flex items-center gap-1.5 text-[12px] text-app-gray-400">
                   <MailOpen aria-hidden="true" className="size-3.5" />
-                  읽음으로 표시했어요
+                  읽은 알림이에요
                 </p>
-              )}
+              ) : null}
             </>
           ) : null}
         </DialogContent>
@@ -173,7 +176,7 @@ export default function NotificationsPage() {
   );
 }
 
-function NotificationCard({
+const NotificationCard = memo(function NotificationCard({
   item,
   onOpen,
 }: {
@@ -244,4 +247,4 @@ function NotificationCard({
       </div>
     </button>
   );
-}
+});

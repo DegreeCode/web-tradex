@@ -10,6 +10,18 @@ type GapHandler = (stream: string) => void;
 
 const MAX_BACKOFF_MS = 30_000;
 
+interface WireFrame extends WsFrame {
+  part?: number;
+  parts?: number;
+}
+
+interface PendingSnapshot {
+  seq: number;
+  parts: number;
+  nextPart: number;
+  data: unknown[];
+}
+
 /** What the stream hooks need from a socket, whether it is this tab's own or shared. */
 export interface StreamSocket {
   getStatus(): WsStatus;
@@ -54,10 +66,12 @@ export class TradexSocket implements StreamSocket {
   private readonly gapHandlers = new Set<GapHandler>();
   private readonly publicSeq = new Map<string, number>();
   private readonly resubscribing = new Set<string>();
+  private readonly partialSnapshots = new Map<string, PendingSnapshot>();
   private privateSeq: number | undefined;
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private connectPromise: Promise<void> | null = null;
+  private generation = 0;
   private privateConsumers = 0;
   private stopped = false;
   private gapClosedSocket = false;
@@ -104,11 +118,10 @@ export class TradexSocket implements StreamSocket {
   connect(): void {
     if (typeof WebSocket === "undefined") return;
     this.stopped = false;
-    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-    if (this.connectPromise) return;
-    this.connectPromise = this.openConnection().finally(() => {
+    // A closing connection still owns its close callback and reconnect timer.
+    if (this.socket) return;
+    if (this.connectPromise || this.timer) return;
+    this.connectPromise = this.openConnection(this.generation).finally(() => {
       this.connectPromise = null;
       // A consumer can leave and return before the previous connection settles.
       // Resume that demand without bypassing failed-connection backoff.
@@ -119,14 +132,14 @@ export class TradexSocket implements StreamSocket {
     });
   }
 
-  private async openConnection(): Promise<void> {
+  private async openConnection(generation: number): Promise<void> {
     this.setStatus("connecting");
     let ticket: string | undefined;
     if (this.kind === "private") {
       try {
         ticket = await (this.hooks.fetchTicket ?? requestWsTicket)();
       } catch (error) {
-        if (this.stopped) return;
+        if (this.stopped || generation !== this.generation) return;
         if (isAuthenticationError(error)) {
           this.handleAuthenticationFailure();
           return;
@@ -145,7 +158,7 @@ export class TradexSocket implements StreamSocket {
       }
     }
 
-    if (this.stopped) return;
+    if (this.stopped || generation !== this.generation) return;
     let socket: WebSocket;
     try {
       socket = new WebSocket(socketUrl(this.kind));
@@ -157,6 +170,7 @@ export class TradexSocket implements StreamSocket {
     this.socket = socket;
 
     socket.onopen = () => {
+      if (this.socket !== socket) return;
       if (this.kind === "private") {
         // The ticket is kept only in this closure and is never put in the URL,
         // headers, logs, or any other client-visible protocol field.
@@ -167,15 +181,24 @@ export class TradexSocket implements StreamSocket {
       this.setStatus("open");
     };
     socket.onmessage = (event) => {
-      let frame: WsFrame;
+      if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
+      let frame: WireFrame;
       const raw = String(event.data);
       try {
         if (hasUnsafeProtocolInteger(raw)) throw new Error("unsafe websocket sequence");
-        frame = JSON.parse(raw) as WsFrame;
+        const parsed: unknown = JSON.parse(raw);
+        if (!isWsFrame(parsed)) throw new Error("invalid websocket frame");
+        frame = parsed;
       } catch {
         this.handleGap();
         return;
       }
+      // Unsubscribe acknowledgements can race with already queued updates.
+      // They must not reset the sequences of channels still in use.
+      if (this.kind === "public" && frame.stream && !this.channels.has(frame.stream)) return;
+      const assembled = this.assembleSnapshot(frame);
+      if (!assembled) return;
+      frame = assembled;
       if (frame.type === "error" && frame.code === "SNAPSHOT_UNAVAILABLE") {
         this.handleGap();
         return;
@@ -192,7 +215,8 @@ export class TradexSocket implements StreamSocket {
       for (const handler of this.frameHandlers) handler(frame);
     };
     socket.onclose = () => {
-      if (this.socket === socket) this.socket = null;
+      if (this.socket !== socket) return;
+      this.socket = null;
       const wasGapClosed = this.gapClosedSocket;
       this.gapClosedSocket = false;
       this.resetSequences();
@@ -215,29 +239,7 @@ export class TradexSocket implements StreamSocket {
 
   close(): void {
     this.stopped = true;
-    this.gapClosedSocket = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    const socket = this.socket;
-    this.socket = null;
-    if (socket) {
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.onmessage = null;
-      try {
-        socket.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    this.setStatus("closed");
-    this.resetSequences();
-  }
-
-  private handleAuthenticationFailure(): void {
-    this.stopped = true;
+    this.generation += 1;
     this.gapClosedSocket = false;
     if (this.timer) {
       clearTimeout(this.timer);
@@ -258,6 +260,10 @@ export class TradexSocket implements StreamSocket {
     }
     this.setStatus("closed");
     this.resetSequences();
+  }
+
+  private handleAuthenticationFailure(): void {
+    this.close();
     (this.hooks.onAuthFailure ?? markSessionExpired)();
   }
 
@@ -284,6 +290,7 @@ export class TradexSocket implements StreamSocket {
     this.channels.delete(channel);
     this.publicSeq.delete(channel);
     this.resubscribing.delete(channel);
+    this.partialSnapshots.delete(channel);
     if (this.socket?.readyState === WebSocket.OPEN) this.send({ op: "unsubscribe", channel });
     if (this.kind === "public" && this.channels.size === 0) this.close();
   }
@@ -298,6 +305,7 @@ export class TradexSocket implements StreamSocket {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.publicSeq.delete(channel);
     this.resubscribing.add(channel);
+    this.partialSnapshots.delete(channel);
     this.send({ op: "unsubscribe", channel });
     this.send({ op: "subscribe", channel });
   }
@@ -332,12 +340,12 @@ export class TradexSocket implements StreamSocket {
 
   private acceptSequence(frame: WsFrame): boolean {
     if (frame.type !== "snapshot" && frame.type !== "update") return true;
-    if (!frame.stream || !Number.isSafeInteger(frame.seq) || frame.version !== frame.seq) {
+    if (!frame.stream || !isPositiveSafeInteger(frame.seq) || frame.version !== frame.seq) {
       this.handleGap();
       return false;
     }
 
-    const seq = frame.seq as number;
+    const seq = frame.seq;
     if (this.kind === "private") {
       // Private has no snapshot. The first live update starts the
       // connection-global sequence baseline at 1.
@@ -378,6 +386,44 @@ export class TradexSocket implements StreamSocket {
     return true;
   }
 
+  /** The server splits large array snapshots; publish only their complete contents. */
+  private assembleSnapshot(frame: WireFrame): WireFrame | null {
+    const stream = frame.stream;
+    if (frame.part === undefined && frame.parts === undefined) {
+      if (stream && this.partialSnapshots.has(stream)) {
+        this.handleGap();
+        return null;
+      }
+      return frame;
+    }
+    const { part, parts, seq } = frame;
+    if (this.kind !== "public" || frame.type !== "snapshot" || !stream ||
+        !isPositiveSafeInteger(seq) || frame.version !== seq ||
+        !isPositiveSafeInteger(part) || !isPositiveSafeInteger(parts) || part > parts || !Array.isArray(frame.data)) {
+      this.handleGap();
+      return null;
+    }
+    let pending = this.partialSnapshots.get(stream);
+    if (!pending && part === 1) {
+      // Reuse the first part and append later rows without retaining raw frames
+      // or repeatedly copying the already accumulated snapshot.
+      pending = { seq, parts, nextPart: 1, data: frame.data };
+      this.partialSnapshots.set(stream, pending);
+    }
+    if (!pending || pending.seq !== seq || pending.parts !== parts || pending.nextPart !== part) {
+      this.handleGap();
+      return null;
+    }
+    if (part !== 1) for (const row of frame.data) pending.data.push(row);
+    pending.nextPart += 1;
+    if (part !== parts) return null;
+    this.partialSnapshots.delete(stream);
+    const complete = { ...frame, data: pending.data };
+    delete complete.part;
+    delete complete.parts;
+    return complete;
+  }
+
   private handleGap(): void {
     // A protocol gap closes the whole connection, so every subscribed stream
     // needs to reconcile the updates it can miss while reconnecting.
@@ -394,20 +440,31 @@ export class TradexSocket implements StreamSocket {
     this.publicSeq.clear();
     this.resubscribing.clear();
     this.privateSeq = undefined;
+    this.partialSnapshots.clear();
   }
 }
 
-// Only integers of 16+ digits can exceed Number.MAX_SAFE_INTEGER, so the
-// common short values never reach the BigInt comparison.
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isWsFrame(value: unknown): value is WireFrame {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const frame = value as Record<string, unknown>;
+  return (
+    (frame.type === "snapshot" || frame.type === "update" || frame.type === "pong" || frame.type === "error") &&
+    (frame.stream === undefined || (typeof frame.stream === "string" && frame.stream.length > 0)) &&
+    (frame.code === undefined || typeof frame.code === "string") &&
+    (frame.event === undefined || typeof frame.event === "string")
+  );
+}
+
+// Only 16+ digits can lose integer precision. Inspect those literals before
+// JSON.parse rounds them, including large fractions rounded to a safe integer.
 function hasUnsafeProtocolInteger(raw: string): boolean {
-  const matches = raw.matchAll(/"(?:seq|version|sequence)"\s*:\s*(-?\d{16,})/g);
+  const matches = raw.matchAll(/"(?:seq|version|sequence)"\s*:\s*(-?\d{16,})([.eE]?)/g);
   for (const match of matches) {
-    try {
-      const value = BigInt(match[1]);
-      if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) return true;
-    } catch {
-      return true;
-    }
+    if (match[2] || !Number.isSafeInteger(Number(match[1]))) return true;
   }
   return false;
 }

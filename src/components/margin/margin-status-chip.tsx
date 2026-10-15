@@ -32,11 +32,11 @@ export function MarginStatusChip({
     <span
       className={cn(
         "inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-semibold",
-        STATUS_CLASS[status] ?? "bg-app-gray-100 text-app-gray-600",
+        Object.hasOwn(STATUS_CLASS, status) ? STATUS_CLASS[status] : "bg-app-gray-100 text-app-gray-600",
         className,
       )}
     >
-      {STATUS_LABEL[status] ?? status}
+      {Object.hasOwn(STATUS_LABEL, status) ? STATUS_LABEL[status] : status}
     </span>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { fmtCredit, fmtQuantity } from "@/lib/format";
 import { Collapse } from "@/components/primitives";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
   isMarginRiskAtOrBelow,
@@ -46,6 +47,7 @@ export function MarginClosureDialog({
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
   const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
   const closeMutation = useCloseMarginPosition(position?.position_id ?? "");
+  const access = useSessionAccess("MARGIN");
 
   if (!position) return null;
 
@@ -57,15 +59,16 @@ export function MarginClosureDialog({
   // Exiting a Long sells and exiting a Short buys back.
   const exitSide = position.side === "LONG" ? "SELL" : "BUY";
   const referencePrice = liveReferencePrice(slippageSettings, curvePrice);
-  const payload = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
-    ? null
-    : slippageRequestFields(slippageSettings);
+  const canClose = open && access.allowed && position.status === "OPEN";
+  const payload = canClose && !slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
+    ? slippageRequestFields(slippageSettings)
+    : null;
 
   async function handleClose(e: React.FormEvent) {
     e.preventDefault();
     const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
     if (invalidSlippage) { toast.error(invalidSlippage); return; }
-    if (!position || !payload) return;
+    if (!position || !payload || closeMutation.isPending) return;
     noteSelfAction("TRADE_EXECUTED", position.symbol);
     try {
       const result = await closeMutation.mutateAsync(
@@ -86,7 +89,7 @@ export function MarginClosureDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !closeMutation.isPending && onOpenChange(next)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>포지션 전액 종료</DialogTitle>
@@ -96,6 +99,7 @@ export function MarginClosureDialog({
         </DialogHeader>
 
         <form onSubmit={handleClose} className="space-y-4 pt-2">
+          {!access.allowed ? <ScopeNotice reason={access.reason} /> : null}
           <TradePolicy />
           <div className="rounded-xl bg-app-gray-50 p-3 text-[13px] text-app-gray-600 space-y-1.5">
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
@@ -177,6 +181,7 @@ export function MarginClosureDialog({
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={closeMutation.isPending}
               onClick={() => onOpenChange(false)}
               className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >
@@ -184,7 +189,7 @@ export function MarginClosureDialog({
             </button>
             <button
               type="submit"
-              disabled={closeMutation.isPending}
+              disabled={!payload || closeMutation.isPending}
               className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {closeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}

@@ -20,6 +20,14 @@ export function trailingDistance(value: string): number | null {
   return Number.isInteger(ppm) && ppm >= 1 && ppm <= 999_999 ? ppm : null;
 }
 
+/** Shared by all trigger forms so invalid local dates never reach toISOString. */
+export function orderExpiry(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now())
+    throw new Error("만료 시각은 지금 이후로 정해주세요");
+  return date.toISOString();
+}
+
 export function exitPriceError(
   takeProfit: string,
   stopLoss: string,
@@ -69,7 +77,7 @@ export function buildExitOrder(
     account_id: input.account_id,
     quantity: input.quantity,
     ...(margin ? { margin_position_id: input.margin_position_id } : {}),
-    ...(input.expires_at ? { expires_at: input.expires_at } : {}),
+    ...(input.expires_at ? { expires_at: orderExpiry(input.expires_at) } : {}),
   };
   if (input.mode === "OCO") {
     if (
@@ -160,10 +168,7 @@ export function buildOrderAmendment(
     body.slippage_ppm = values.slippage;
   if (values.expiryMode === "REMOVE") body.expires_at = null;
   if (values.expiryMode === "CHANGE") {
-    const date = new Date(values.expiresAt);
-    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now())
-      throw new Error("만료 시각은 지금 이후로 정해주세요");
-    body.expires_at = date.toISOString();
+    body.expires_at = orderExpiry(values.expiresAt);
   }
   return body;
 }

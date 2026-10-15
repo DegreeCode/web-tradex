@@ -61,27 +61,27 @@ export type PnLHistory = Page<PnLEntry> & {
   market_type: PnLMarket;
 };
 
+const PNL_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  TRADE: "현물 체결",
+  DELIST_SETTLEMENT: "상장폐지 정산",
+  ADJUSTMENT: "손익 조정",
+  MARGIN_REDUCE: "부분 정산",
+  MARGIN_CLOSE: "전액 종료",
+  MARGIN_LIQUIDATION: "강제청산",
+  MARGIN_DELIST_SETTLEMENT: "상장폐지 정산",
+  MARGIN_CUSTODY_SETTLEMENT: "보관 정산",
+  MARGIN_INTEREST: "이자",
+  MARGIN_OPENING_BALANCE: "이전 누적 손익",
+  CUSTODY_SETTLEMENT: "보관 정산",
+  INTEREST: "이자",
+  OPENING_BALANCE: "이전 누적 손익",
+};
+
 export function pnlSourceLabel(
   entry: Pick<PnLEntry, "is_baseline" | "source_type">,
 ): string {
   if (entry.is_baseline) return "이전 누적 손익";
-  return (
-    (
-      {
-        TRADE: "현물 체결",
-        DELIST_SETTLEMENT: "상장폐지 정산",
-        ADJUSTMENT: "손익 조정",
-        MARGIN_REDUCE: "부분 정산",
-        MARGIN_CLOSE: "전액 종료",
-      MARGIN_LIQUIDATION: "강제청산",
-      MARGIN_DELIST_SETTLEMENT: "상장폐지 정산",
-      MARGIN_CUSTODY_SETTLEMENT: "보관 정산",
-      MARGIN_INTEREST: "이자",
-      MARGIN_OPENING_BALANCE: "이전 누적 손익",
-        CUSTODY_SETTLEMENT: "보관 정산",
-        INTEREST: "이자",
-        OPENING_BALANCE: "이전 누적 손익",
-      } as Record<string, string>
-    )[entry.source_type] ?? "손익 기록"
-  );
+  return Object.hasOwn(PNL_SOURCE_LABELS, entry.source_type)
+    ? PNL_SOURCE_LABELS[entry.source_type]
+    : "손익 기록";
 }

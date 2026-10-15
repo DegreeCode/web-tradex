@@ -56,8 +56,7 @@ export function CandleChart({
   );
   const data = useMemo<LightweightCandlePoint[]>(
     () =>
-      [...candles]
-        .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+      candles
         .map((candle) => ({
           time: Math.floor(Date.parse(candle.timestamp) / 1_000) as LightweightCandlePoint["time"],
           timestamp: candle.timestamp,
@@ -74,7 +73,8 @@ export function CandleChart({
           closeText: candle.close,
           synthetic: candle.synthetic,
         }))
-        .filter((candle) => Number.isFinite(candle.time)),
+        .filter((candle) => Number.isFinite(candle.time))
+        .sort((left, right) => left.time - right.time),
     [candles],
   );
 

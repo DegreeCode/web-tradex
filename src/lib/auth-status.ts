@@ -8,6 +8,7 @@ export type AuthStatus = "loading" | "authenticated" | "anonymous" | "recovery" 
  * value is still the anonymous null from the login page.
  */
 export function authStatus(data: User | null | undefined, isError: boolean, errorCode?: string): AuthStatus {
+  if (isError && errorCode === "SESSION_INVALID") return "anonymous";
   if (isError && errorCode === "RECOVERY_RESTRICTED") return "recovery";
   // /me is open to every LINKED scope, so this answer means the session's
   // network binding no longer matches: the cookie is valid but unusable.

@@ -62,7 +62,7 @@ export function pollFailure(error: unknown, intervalMs: number): PollFailure {
     if (error.code === "DEVICE_LINK_INVALID") return { kind: "stop", outcome: "failed" };
     if (error.status === 429) {
       const widened = Math.min(MAX_POLL_MS, intervalMs + SLOW_DOWN_STEP_MS);
-      const delayMs = Math.min(MAX_POLL_MS, Math.max(widened, error.retryAfterMs ?? 0));
+      const delayMs = Math.max(widened, error.retryAfterMs ?? 0);
       return { kind: "retry", intervalMs: widened, delayMs };
     }
     if (error.status === 0 || error.status >= 500) {

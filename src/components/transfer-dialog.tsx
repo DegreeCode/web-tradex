@@ -16,7 +16,7 @@ import { Segmented } from "@/components/segmented";
 import { useExchangeInfo, transferAllowed } from "@/lib/exchange-info";
 import { ExchangeInfoNotice } from "@/components/exchange-policy";
 import { ErrorBlock } from "@/components/primitives";
-import { accountLabel, defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
+import { accountLabel, resolveAccountId } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
@@ -52,7 +52,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
   const createTransfer = useCreateTransfer();
   const transferAccess = useSessionAccess("TRANSFER");
 
-  const accountId = selectedAccountId || pickDefaultAccount(accounts);
+  const accountId = resolveAccountId(accounts, selectedAccountId);
 
   const portfolio = usePortfolio(accountId || undefined, Boolean(accountId));
   const availableCredit = portfolio.data?.available_credit ?? "0";
@@ -66,9 +66,14 @@ function TransferForm({ onDone }: { onDone: () => void }) {
   const allowed = transferAllowed(asset, sameOwner, exchangeInfo?.transfer.asset_policy);
 
   function submit() {
+    if (createTransfer.isPending || !transferAccess.allowed || !accountId || !portfolio.data) return;
     if (!allowed) { toast.error("현재 거래소 정책상 다른 사용자에게 이 자산을 보낼 수 없어요"); return; }
     if (!recipient.trim()) {
       toast.error("받는 계좌 ID를 입력해주세요");
+      return;
+    }
+    if (recipient.trim() === accountId) {
+      toast.error("보내는 계좌와 다른 계좌를 선택해주세요");
       return;
     }
 
@@ -99,7 +104,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
     noteSelfAction("transfer.updated");
     createTransfer.mutate(
       {
-        account_id: accountId || undefined,
+        account_id: accountId,
         recipient_account_id: recipient.trim(),
         asset,
         ...(asset === "CREDIT"

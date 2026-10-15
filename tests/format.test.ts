@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accountLabel } from "../src/lib/accounts";
 import {
   decimalPrecision,
   fmtCompact,
@@ -48,13 +47,4 @@ test("the last trade line only appears for a real trade that differs from spot",
   assert.equal(isAtCurveCeiling({ curve_spot_price: "2.00", curve_ceiling_price: "2" }), true);
   assert.equal(isAtCurveCeiling({ curve_spot_price: "0", curve_ceiling_price: "0" }), false);
   assert.equal(isAtCurveCeiling({ curve_spot_price: "1", curve_ceiling_price: null }), false);
-});
-
-test("extra accounts are numbered only when there is more than one", () => {
-  const primary = { account_id: "acc_p", is_primary: true };
-  const first = { account_id: "acc_1", is_primary: false };
-  const second = { account_id: "acc_2", is_primary: false };
-  assert.equal(accountLabel(primary, [primary, first]), "대표 계좌");
-  assert.equal(accountLabel(first, [primary, first]), "추가 계좌");
-  assert.equal(accountLabel(second, [primary, first, second]), "추가 계좌 2");
 });

@@ -19,7 +19,7 @@ import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { ExitOrderDialog } from "@/components/exit-order-dialog";
 import { OrderInput, TriggerPolicyFields } from "@/components/trigger-controls";
-import { exitPriceError, trailingDistance } from "@/lib/advanced-order";
+import { exitPriceError, orderExpiry, trailingDistance } from "@/lib/advanced-order";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
@@ -197,8 +197,11 @@ export function OrderForm({
       toast.error(validationError);
       return;
     }
-    if (orderMode === "TRIGGER" && expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
-      toast.error("만료 시각은 지금 이후로 정해주세요");
+    let expiry: string | undefined;
+    try {
+      if (orderMode === "TRIGGER" && expiresAt) expiry = orderExpiry(expiresAt);
+    } catch (error) {
+      toast.error(errorMessage(error));
       return;
     }
     const payload: OrderRequest = {
@@ -214,7 +217,7 @@ export function OrderForm({
       if (trailing) payload.trailing_ppm = trailingDistance(trailingPercent)!;
       else payload.trigger_price = targetPrice.trim();
       if (bracket && side === "BUY") payload.bracket = { take_profit_price: takeProfit.trim(), stop_loss_price: stopLoss.trim(), ...triggerPolicy, ...(payload.slippage_ppm !== undefined ? { slippage_ppm: payload.slippage_ppm } : {}) };
-      if (expiresAt) payload.expires_at = new Date(expiresAt).toISOString();
+      if (expiry) payload.expires_at = expiry;
     }
     if (effectiveAmountMode === "CREDIT") payload.credit_amount = orderAmount.trim();
     else payload.quantity = orderQuantity.trim();

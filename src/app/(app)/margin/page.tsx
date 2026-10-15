@@ -10,7 +10,7 @@ import { addDecimal, fmtCredit } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
 import { MarginCreateForm } from "@/components/margin/margin-create-form";
 import { MarginPositionsList } from "@/components/margin/margin-positions-list";
-import { useMarginPositions, type MarginPosition } from "@/lib/margin";
+import { isActiveMarginPosition, useMarginPositions, type MarginPosition } from "@/lib/margin";
 
 type MobileTab = "POSITIONS" | "CREATE";
 
@@ -58,7 +58,7 @@ function MarginContent() {
     let totalEquity = "0";
     let totalDebt = "0";
     for (const position of positions) {
-      if (position.status !== "OPEN") continue;
+      if (!isActiveMarginPosition(position.status)) continue;
       openCount += 1;
       totalCollateral = addDecimal(totalCollateral, position.collateral ?? "0");
       totalEquity = addDecimal(totalEquity, position.equity ?? "0");
