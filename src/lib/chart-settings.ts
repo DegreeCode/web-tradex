@@ -114,17 +114,25 @@ export function updateChartSettings(patch: Partial<ChartSettings>): void {
 }
 
 function subscribe(onChange: () => void) {
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== CHART_SETTINGS_STORAGE_KEY && event.key !== null) return;
-    settings = sanitizeChartSettings(parseRecord(event.newValue));
-    emit();
-  };
+  // Every chart reads these settings. A shared browser listener prevents each
+  // storage event from notifying all React subscribers once per chart.
+  if (listeners.size === 0) window.addEventListener("storage", onStorage);
   listeners.add(onChange);
-  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(onChange);
-    window.removeEventListener("storage", onStorage);
+    if (listeners.size === 0) window.removeEventListener("storage", onStorage);
   };
+}
+
+function onStorage(event: StorageEvent) {
+  if (event.key !== CHART_SETTINGS_STORAGE_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== window.localStorage) return;
+  } catch {
+    return;
+  }
+  settings = sanitizeChartSettings(parseRecord(event.newValue));
+  emit();
 }
 
 function getServerSnapshot(): null {

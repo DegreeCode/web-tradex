@@ -24,7 +24,7 @@ export default function InvitationPage() {
 
   async function redeem(event: React.FormEvent) {
     event.preventDefault();
-    if (!agreed || !token.trim()) return;
+    if (busy || !agreed || !token.trim()) return;
     setBusy(true);
     try {
       await postData("/api/v1/auth/invitations/redemption", {

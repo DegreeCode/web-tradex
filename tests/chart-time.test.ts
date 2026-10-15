@@ -7,27 +7,19 @@ import type { CandleInterval } from "../src/lib/types";
 const timestamp = (value: string) => Date.parse(value) / 1_000 as UTCTimestamp;
 const time = timestamp("2026-10-14T01:02:03Z");
 
-for (const interval of ["1s", "1m", "5m", "15m", "30m", "1h", "4h"] satisfies CandleInterval[]) {
-  test(`${interval} candle hover labels include seconds in Seoul time`, () => {
+test("intraday and default charts preserve consecutive seconds in Seoul time", () => {
+  for (const interval of [undefined, "1s", "1m", "5m", "15m", "30m", "1h", "4h"] satisfies (CandleInterval | undefined)[]) {
     assert.equal(formatChartTime(time, interval), "10. 14. 10:02:03");
-  });
-}
-
-test("an omitted interval includes seconds for trade charts and default candle charts", () => {
-  assert.equal(formatChartTime(time), "10. 14. 10:02:03");
+    assert.equal(formatChartTime((time + 1) as UTCTimestamp, interval), "10. 14. 10:02:04");
+  }
 });
 
-test("consecutive trade seconds have distinct hover labels", () => {
-  assert.equal(formatChartTime(time), "10. 14. 10:02:03");
-  assert.equal(formatChartTime((time + 1) as UTCTimestamp), "10. 14. 10:02:04");
-});
-
-for (const interval of ["1d", "1w"] satisfies CandleInterval[]) {
-  test(`${interval} candle hover labels show only the two-digit month and day`, () => {
+test("daily and weekly candle labels show the month and day", () => {
+  for (const interval of ["1d", "1w"] satisfies CandleInterval[]) {
     assert.equal(formatChartTime(time, interval), "10. 14.");
     assert.equal(formatChartTime(timestamp("2026-10-14T02:34:56Z"), interval), "10. 14.");
-  });
-}
+  }
+});
 
 test("monthly candle hover labels show the year and month", () => {
   assert.equal(formatChartTime(time, "1M"), "2026. 10.");
@@ -58,7 +50,7 @@ test("string and business-day times retain the existing input support", () => {
 });
 
 test("invalid times keep the existing placeholder", () => {
-  for (const invalid of ["invalid", NaN as UTCTimestamp, Infinity as UTCTimestamp]) {
+  for (const invalid of ["invalid", NaN as UTCTimestamp, Infinity as UTCTimestamp, 1e20 as UTCTimestamp]) {
     assert.equal(formatChartTime(invalid), "-");
     assert.equal(formatChartTime(invalid, "1y"), "-");
   }

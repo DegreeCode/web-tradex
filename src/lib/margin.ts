@@ -24,7 +24,6 @@ import {
   multiplyDecimal,
   fmtCredit,
   fmtQuantity,
-  toNumber,
 } from "./format";
 import { invalidateBatched } from "./query-batch";
 
@@ -213,7 +212,9 @@ const MARGIN_LIMIT_REASON_LABELS: Record<MarginLimitReason, string> = {
 };
 
 export function marginLimitReasonLabel(reason: string): string {
-  return MARGIN_LIMIT_REASON_LABELS[reason as MarginLimitReason] ?? reason;
+  return Object.hasOwn(MARGIN_LIMIT_REASON_LABELS, reason)
+    ? MARGIN_LIMIT_REASON_LABELS[reason as MarginLimitReason]
+    : reason;
 }
 
 /** One-line explanation of how much of a clipped margin request was filled and why. */
@@ -258,7 +259,7 @@ export function marginRiskLevel(
 }
 
 export function marginErrorMessage(error: unknown): string {
-  if (error instanceof ApiError && MARGIN_ERROR_MESSAGES[error.code]) {
+  if (error instanceof ApiError && Object.hasOwn(MARGIN_ERROR_MESSAGES, error.code)) {
     return MARGIN_ERROR_MESSAGES[error.code];
   }
   return errorMessage(error);
@@ -318,18 +319,17 @@ export function estimateMarginReturnPercent(
   return divideDecimal(multiplyDecimal(profit, "100", 16), basis, 16);
 }
 
-export function getLeverageOptions(side: MarginSide, maxLeverageStr: string): string[] {
-  const max = toNumber(maxLeverageStr);
-  const min = side === "LONG" ? 1.1 : 1.0;
-  if (max < min) return [];
-  const options: string[] = [];
-  let current = Math.round(min * 10);
-  const maxInt = Math.round(max * 10);
-  while (current <= maxInt) {
-    options.push((current / 10).toFixed(1));
-    current += 1;
-  }
-  return options;
+/** Slider bounds in tenths; a large server cap must not allocate one item per step. */
+export function getLeverageBounds(
+  side: MarginSide,
+  maxLeverageStr: string,
+): { min: number; max: number } | null {
+  const match = /^(\d+)(?:\.(\d*))?$/.exec(maxLeverageStr);
+  if (!match) return null;
+  // Discard extra decimal places so an option never exceeds the actual cap.
+  const max = Number(BigInt(match[1]) * 10n + BigInt(match[2]?.[0] ?? "0"));
+  const min = side === "LONG" ? 11 : 10;
+  return Number.isSafeInteger(max) && max >= min ? { min, max } : null;
 }
 
 export function validateCollateralAmount(
@@ -359,15 +359,13 @@ export function validateLeverage(
   if (!/^\d+(\.\d)?$/.test(leverage)) {
     return "레버리지는 0.1 단위로 입력해주세요 (예: 1.5)";
   }
-  const levNum = toNumber(leverage);
-  const maxNum = toNumber(maxLeverageStr);
-  if (side === "LONG" && levNum <= 1.0) {
+  if (side === "LONG" && compareDecimal(leverage, "1") <= 0) {
     return "LONG 레버리지는 1.0을 초과해야 해요 (최소 1.1)";
   }
-  if (side === "SHORT" && levNum < 1.0) {
+  if (side === "SHORT" && compareDecimal(leverage, "1") < 0) {
     return "SHORT 레버리지는 1.0 이상이어야 해요";
   }
-  if (levNum > maxNum) {
+  if (!getLeverageBounds(side, maxLeverageStr) || compareDecimal(leverage, maxLeverageStr) > 0) {
     return `허용된 최대 레버리지(${maxLeverageStr}x)를 초과할 수 없어요`;
   }
   return null;
@@ -404,13 +402,14 @@ export function useMarginPositions(
   const { accountId, limit = 50, enabled = true, poll = true } = options;
   return useInfiniteQuery({
     queryKey: [...MARGIN_QUERY_KEYS.positions(accountId), limit],
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       apiData<MarginPositionsData>(
         `/api/v1/margin/positions${buildQuery({
           limit,
           cursor: pageParam,
           account_id: accountId || undefined,
         })}`,
+        { signal },
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page?.has_more ? last.page.next_cursor : null),
@@ -429,15 +428,14 @@ export function useMarginPositions(
 export function useMarginPosition(positionId: string | null) {
   return useQuery({
     queryKey: MARGIN_QUERY_KEYS.position(positionId),
-    queryFn: () => apiData<MarginPosition>(`/api/v1/margin/positions/${positionId}`),
+    queryFn: ({ signal }) => apiData<MarginPosition>(`/api/v1/margin/positions/${positionId}`, { signal }),
     enabled: Boolean(positionId),
     refetchInterval: (query) =>
       query.state.data && LIVE_MARGIN_STATUSES.has(query.state.data.status) ? 5_000 : false,
   });
 }
 
-/** Read-only preview; requested explicitly and never reused after the inputs change. */
-/** Like useOrderSimulation, the live reference price is sent but kept out of the key. */
+/** Explicit preview; input changes discard it, while live prices stay outside the key. */
 export function useMarginSimulation(path: string | null, payload: object | null, referencePrice?: string) {
   return useQuery({
     queryKey: ["margin-simulation", path, payload],

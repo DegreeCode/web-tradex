@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { compareDecimal, fmtCredit, isDecimalInput } from "@/lib/format";
+import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import {
   marginErrorMessage,
   useAddMarginCollateral,
@@ -32,15 +33,16 @@ export function MarginCollateralDialog({
   const [amount, setAmount] = useState("");
   const inputId = useId();
   const addCollateral = useAddMarginCollateral(position?.position_id ?? "");
+  const access = useSessionAccess("MARGIN");
 
   if (!position) return null;
 
   const errorText = validateCollateralAmount(amount, availableCredit);
-  const isValid = !errorText;
+  const isValid = open && access.allowed && position.status === "OPEN" && !errorText;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isValid || !position) return;
+    if (!isValid || !position || addCollateral.isPending) return;
     try {
       await addCollateral.mutateAsync({ amount: amount.trim() });
       toast.success("담보를 추가했어요");
@@ -52,16 +54,17 @@ export function MarginCollateralDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !addCollateral.isPending && onOpenChange(next)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>담보 Credit 추가</DialogTitle>
           <DialogDescription>
-            {position.symbol} 포지션에 담보를 더해 위험 비율을 낮춰요. 빌린 원금은 그대로예요.
+            {position.symbol} 포지션에 담보를 더해 위험 비율을 높여요. 빌린 원금은 그대로예요.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {!access.allowed ? <ScopeNotice reason={access.reason} /> : null}
           <div className="rounded-xl bg-app-gray-50 p-3 text-[13px] text-app-gray-600 space-y-1">
             <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-3">
               <span>현재 담보</span>
@@ -135,6 +138,7 @@ export function MarginCollateralDialog({
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
+              disabled={addCollateral.isPending}
               onClick={() => onOpenChange(false)}
               className="rounded-xl border border-app-gray-200 px-4 py-2.5 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-50 pressable"
             >

@@ -5,6 +5,7 @@ import { ApiError, errorMessage } from "../src/lib/api";
 import {
   presentNotification,
   parseTradingNotification,
+  localizeReason,
 } from "../src/lib/notifications";
 import { reconcileNotificationData } from "../src/lib/hooks";
 import type { Notification } from "../src/lib/types";
@@ -23,6 +24,16 @@ function notification(body: string, title = "Notice"): Notification {
     updated_at: "2026-09-16T00:00:00Z",
   };
 }
+
+test("notification tokens and reasons never resolve inherited object properties", () => {
+  for (const token of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    const view = presentNotification(notification(`${token}: detail`, token));
+    assert.equal(view.title, token);
+    assert.equal(typeof view.body, "string");
+    assert.equal(parseTradingNotification(notification(token, token)), null);
+    assert.equal(localizeReason(token), token);
+  }
+});
 
 test("icon rejection preserves the symbol and exact moderation reason", () => {
   const notice = notification(

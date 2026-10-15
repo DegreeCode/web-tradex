@@ -148,8 +148,9 @@ test("a tab the worker forgot re-introduces everything it holds and reconciles",
   }
 });
 
-test("a worker that fails to start leaves this tab on its own connections", () => {
-  const { client, port, errorHandlers, direct } = setup();
+test("a worker that fails to start leaves this tab on its own connections", async () => {
+  let expired = 0;
+  const { client, port, errorHandlers, direct } = setup({ onSessionExpired: () => { expired += 1; } });
   try {
     client.socket("public").subscribe("tickers");
     const release = client.socket("private").retain();
@@ -160,6 +161,9 @@ test("a worker that fails to start leaves this tab on its own connections", () =
     const [publicSocket, privateSocket] = direct;
     assert.equal(publicSocket.channels.get("tickers"), 1);
     assert.equal(privateSocket.retains, 1);
+    assert.equal(await privateSocket.hooks.fetchTicket!(), "ticket");
+    privateSocket.hooks.onAuthFailure!();
+    assert.equal(expired, 1);
     assert.deepEqual(events, [], "nothing was missed before the worker ever answered");
 
     publicSocket.emit({ type: "snapshot", stream: "tickers", seq: 1, version: 1 });

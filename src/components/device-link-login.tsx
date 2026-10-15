@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { apiData, errorMessage, postData } from "@/lib/api";
+import { apiData, errorMessage } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import {
   DEVICE_LINK_CURRENT_PATH,
@@ -51,8 +51,9 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
-    postData<DeviceLinkStart>(DEVICE_LINKS_PATH, {}).then(
+    apiData<DeviceLinkStart>(DEVICE_LINKS_PATH, { method: "POST", body: {}, signal: controller.signal }).then(
       (created) => {
         if (cancelled) return;
         setLink(created);
@@ -67,6 +68,7 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
     );
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [attempt]);
 
@@ -79,12 +81,26 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
 
   useEffect(() => {
     if (phase !== "waiting" || !link) return;
-    const timer = window.setInterval(() => {
+    let timer: number | undefined;
+    const tick = () => {
       const current = Date.now();
       setNow(current);
-      if (remainingSeconds(link.expires_at, current) === 0) setPhase("expired");
-    }, 1000);
-    return () => window.clearInterval(timer);
+      if (remainingSeconds(link.expires_at, current) === 0) {
+        setPhase("expired");
+      } else {
+        timer = window.setTimeout(tick, 1000);
+      }
+    };
+    const onVisibility = () => {
+      window.clearTimeout(timer);
+      if (!document.hidden) tick();
+    };
+    if (!document.hidden) timer = window.setTimeout(tick, 1000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [phase, link]);
 
   useEffect(() => {
@@ -94,6 +110,7 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
     let paused = false;
     let timer: number | undefined;
     let interval = pollIntervalMs(link.poll_interval_seconds);
+    const expiresAt = link.expires_at;
 
     const schedule = (delay: number) => {
       timer = window.setTimeout(() => void poll(), delay);
@@ -105,6 +122,10 @@ export function DeviceLinkLogin({ onSignedIn }: { onSignedIn: () => void }) {
       // A hidden tab stops asking; becoming visible asks again right away.
       if (document.hidden) {
         paused = true;
+        return;
+      }
+      if (remainingSeconds(expiresAt, Date.now()) === 0) {
+        setPhase("expired");
         return;
       }
       try {
@@ -231,10 +252,15 @@ function CopyRow({
 }) {
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   async function copy() {
     if (!(await copyToClipboard(value, copiedMessage))) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   return (

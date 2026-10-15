@@ -9,11 +9,13 @@ import { reconcileDisclosureListings } from "./disclosure-cache";
 import { parseTradingNotification } from "./notifications";
 import {
   ensureSymbolMetadataCache,
+  compareVersion,
   isMarketSymbol,
   readSymbolMetadataCache,
   writeSymbolMetadataCache,
   type SymbolMetadataCache,
 } from "./symbol-metadata";
+export { compareVersion } from "./symbol-metadata";
 import type {
   Instrument,
   InstrumentState,
@@ -181,15 +183,6 @@ export function applySymbolToQueryCaches(queryClient: QueryClient, symbol: Marke
 // notifications, so each symbol keeps a watermark of the newest event applied.
 // ---------------------------------------------------------------------------
 
-export function compareVersion(a: string | undefined, b: string | undefined): number {
-  if (!a || !b || a === b) return 0;
-  if (/^\d+$/.test(a) && /^\d+$/.test(b)) {
-    const diff = BigInt(a) - BigInt(b);
-    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
-  }
-  return a.localeCompare(b);
-}
-
 export const lastTradingEventTimestamps = new Map<string, number>();
 
 /** Raises a symbol's (or the market's) event watermark; it never moves back. */
@@ -217,7 +210,8 @@ function upsertCachedSymbol(cache: SymbolMetadataCache, symbol: MarketSymbol): v
     symbols: index >= 0
       ? cache.symbols.map((row, i) => (i === index ? symbol : row))
       : [...cache.symbols, symbol],
-    saved_at: Date.now(),
+    // A single-symbol response doesn't advance the full-list watermark, so
+    // it must not postpone incremental synchronization for other symbols.
   });
 }
 
@@ -298,7 +292,7 @@ export function cacheSymbolMetadata(queryClient: QueryClient, fresh: MarketSymbo
 
 async function fetchSymbol(symbol: string): Promise<MarketSymbol | null> {
   const batch = await apiData<MarketSymbol[]>(`/api/v1/market/symbols/batch${buildQuery({ symbols: symbol })}`);
-  const fresh = Array.isArray(batch) ? batch[0] : undefined;
+  const fresh = Array.isArray(batch) ? batch.find((row) => row?.symbol === symbol) : undefined;
   return isMarketSymbol(fresh) ? fresh : null;
 }
 

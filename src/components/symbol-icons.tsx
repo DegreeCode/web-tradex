@@ -102,9 +102,10 @@ export function IconRequestHistory({ symbol }: { symbol: string }) {
   const query = useInfiniteQuery({
     queryKey: ["icon-requests", symbol],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       apiPage<IconRequest>(
         `/api/v1/symbols/${encodeURIComponent(symbol)}/icon-requests${buildQuery({ cursor: pageParam })}`,
+        { signal },
       ),
     getNextPageParam: (page) =>
       page.page.has_more ? (page.page.next_cursor ?? undefined) : undefined,
@@ -141,7 +142,7 @@ export function IconRequestHistory({ symbol }: { symbol: string }) {
             className="space-y-2 rounded-lg bg-app-gray-50 p-3 text-[12px]"
           >
             <div className="flex justify-between gap-2">
-              <span className="font-semibold">{states[request.state]}</span>
+              <span className="font-semibold">{Object.hasOwn(states, request.state) ? states[request.state] : request.state}</span>
               <time dateTime={request.created_at}>{fmtDateTime(request.created_at)}</time>
             </div>
             <p className="break-all text-app-gray-500">{request.source_url}</p>

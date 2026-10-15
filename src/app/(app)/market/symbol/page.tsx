@@ -583,9 +583,9 @@ function SymbolDetail() {
 
           {user ? (
             isManager ? (
-              <ManagerPanel instrument={instrument} userId={user.user_id} />
+              <ManagerPanel key={instrument.symbol} instrument={instrument} userId={user.user_id} />
             ) : (
-              <ManagerTransferInbox instrument={instrument} userId={user.user_id} />
+              <ManagerTransferInbox key={instrument.symbol} instrument={instrument} userId={user.user_id} />
             )
           ) : null}
         </div>

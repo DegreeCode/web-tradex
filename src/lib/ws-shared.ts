@@ -136,6 +136,7 @@ class DirectBackend {
   constructor(
     private readonly proxies: Record<WsKind, SocketProxy>,
     private readonly createSocket: NonNullable<SharedSocketsOptions["createSocket"]>,
+    private readonly privateHooks: SocketHooks,
   ) {
     this.publicSocket = this.open("public");
     this.privateSocket = this.open("private");
@@ -175,7 +176,7 @@ class DirectBackend {
   }
 
   private open(kind: WsKind): DirectSocket {
-    const socket = this.createSocket(kind, {});
+    const socket = this.createSocket(kind, kind === "private" ? this.privateHooks : {});
     const proxy = this.proxies[kind];
     const offFrame = socket.onFrame((frame) => proxy.emitFrame(frame));
     const offStatus = socket.onStatus((status) => proxy.setStatus(status));
@@ -217,7 +218,7 @@ export class SharedSockets {
   private direct: DirectBackend | null = null;
   private welcomed = false;
   private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly heartbeat: ReturnType<typeof setInterval>;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastTickAt: number | null = null;
   private awaitingPongSince: number | null = null;
   private readonly removeListeners: () => void;
@@ -229,7 +230,7 @@ export class SharedSockets {
     this.onSessionExpired = options.onSessionExpired ?? markSessionExpired;
     this.proxies = { public: new SocketProxy("public", this), private: new SocketProxy("private", this) };
     this.open();
-    this.heartbeat = setInterval(() => this.tick(), HEARTBEAT_MS);
+    if (!this.direct) this.heartbeat = setInterval(() => this.tick(), HEARTBEAT_MS);
     this.removeListeners = this.listen();
   }
 
@@ -249,7 +250,7 @@ export class SharedSockets {
   }
 
   dispose(): void {
-    clearInterval(this.heartbeat);
+    if (this.heartbeat) clearInterval(this.heartbeat);
     this.removeListeners();
     this.closePort();
     this.direct?.dispose();
@@ -366,10 +367,17 @@ export class SharedSockets {
 
   private fallBack(): void {
     if (this.direct) return;
+    if (this.heartbeat) {
+      clearInterval(this.heartbeat);
+      this.heartbeat = null;
+    }
     const missed = this.welcomed;
     this.closePort();
     if (missed) this.markMissed();
-    const direct = new DirectBackend(this.proxies, this.createSocket);
+    const direct = new DirectBackend(this.proxies, this.createSocket, {
+      fetchTicket: this.requestTicket,
+      onAuthFailure: this.onSessionExpired,
+    });
     this.direct = direct;
     for (const channel of this.proxies.public.channels.keys()) direct.subscribe(channel);
     if (this.proxies.private.retains > 0) direct.retain();

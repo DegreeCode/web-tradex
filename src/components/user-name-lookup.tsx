@@ -8,9 +8,10 @@ export function UserNameLookup({ userId }: { userId: string }) {
   const [selectedId, setSelectedId] = useState("");
   const query = useQuery({
     queryKey: ["public-user", selectedId],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiData<{ user_id: string; username: string }>(
         `/api/v1/users/${encodeURIComponent(selectedId)}`,
+        { signal },
       ),
     enabled: Boolean(selectedId),
     // Usernames never change; only the explicit button asks again.

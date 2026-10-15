@@ -40,6 +40,9 @@ test("custom slippage follows the current server maximum while blank uses the se
   );
   for (const invalid of ["-1", "NaN", ".", "1e2", "1.00001"])
     assert.ok(slippageError(invalid, trade));
+  for (const invalid of ["9".repeat(400), "9007199254741"]) {
+    assert.ok(slippageError(invalid), "unsafe ppm values must be rejected before settings load");
+  }
 });
 
 test("tag limits count UTF-8 bytes including Korean and emoji", () => {
@@ -72,6 +75,7 @@ test("icon host policy supports empty allowlists and does not imply wildcard sub
     iconPolicyError("https://other.images.example.com/icon.png", metadata),
   );
   assert.ok(iconPolicyError("http://images.example.com/icon.png", metadata));
+  assert.ok(iconPolicyError("https://name:password@images.example.com/icon.png", metadata));
 });
 
 test("external transfer restrictions preserve the own-account exception", () => {

@@ -4,10 +4,10 @@
  * rules can be tested on their own.
  */
 import {
-  EVENT_CONFIG,
   eventKeyFromTitle,
   isOcoPeerExecutedReason,
   parseNotificationBody,
+  notificationEventConfig,
   presentNotification,
   type NotificationTone,
 } from "./notifications";
@@ -114,7 +114,7 @@ export function clearSelfActions(): void {
 
 function eventOf(notification: Notification): { eventKey?: string; symbol?: string; reason?: string } {
   const parsed = parseNotificationBody(notification.body);
-  const eventKey = parsed.eventKey && EVENT_CONFIG[parsed.eventKey]
+  const eventKey = notificationEventConfig(parsed.eventKey)
     ? parsed.eventKey
     : eventKeyFromTitle(notification.title);
   return { eventKey, symbol: parsed.symbol, reason: parsed.reason };

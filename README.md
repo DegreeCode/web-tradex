@@ -156,8 +156,9 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
 - **CSRF**: `tradex_csrf` 쿠키를 읽어 `X-CSRF-Token` 헤더로 전송합니다(CSRF 쿠키는 두 호스트가 공유하는 상위 도메인으로 발급돼야 함).
 - **멱등성**: 키가 필요한 변경은 논리 요청별 키를 유지합니다. 네트워크·5xx처럼 결과가 불확실한
   재시도에는 같은 키를 재사용하고, 성공 또는 확정적인 4xx 뒤의 새 요청에는 새 키를 사용합니다.
-- **빠른 화면 전환**: 공통 메뉴는 Next.js 기본 프리페치로 정적 페이지 코드를 미리 가져오며,
-  종목 목록 등의 링크는 `prefetch={false}`를 유지합니다. 프리페치는 업무 API를 호출하지 않습니다.
+- **빠른 화면 전환**: 로그인한 사용자의 공통 메뉴는 Next.js 기본 프리페치로 정적 페이지 코드를
+  미리 가져옵니다. 비로그인 상태의 공통 메뉴와 종목 목록 등의 링크는 `prefetch={false}`로
+  불필요한 다운로드를 줄입니다. 프리페치는 업무 API를 호출하지 않습니다.
   공통 메뉴와 로딩 화면을 먼저 표시하고, 인증이 확인되면 페이지별 API 응답을 각 영역에 반영합니다.
 - **숫자 처리**: 금액·수량·가격은 문자열 고정소수점입니다. `src/lib/format.ts`는 문자열 표시 정밀도를
   유지하고, 입력값은 검증 후 문자열 그대로 전송합니다(Credit 16자리, 수량·가격 8자리).
@@ -197,6 +198,17 @@ npm test         # 단위 테스트 (node:test + tsx, tests/*.test.ts)
 - ESLint는 9를 유지합니다. `eslint-plugin-react`(eslint-config-next 포함)의 peer 범위가 ESLint 9까지입니다.
 - TypeScript는 6.0을 유지합니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
 - Next.js는 보안 릴리스 대응을 위해 정확한 버전으로 고정합니다.
+- `@types/node`는 개발 환경의 Node 24 LTS와 맞춥니다.
+- shadcn으로 생성한 UI 컴포넌트는 소스에서 관리합니다. 생성 CLI를 설치 의존성으로
+  유지하지 않으며, 실제 사용하는 Base UI 상태 스타일은 `globals.css`에 정의합니다.
+- 로컬 정적 서버 `serve`가 고정한 `compression`은 메모리 누수 수정판인 1.8.2 이상으로
+  override합니다. 상위 패키지에서 수정판을 사용하면 override를 제거할 수 있습니다.
+- 2026-10-15 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
+  ESLint의 `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`
+  경로에 높은 등급 5건(같은 원인에서 파생된 경고)이 남아 있습니다.
+  [braces 보안 공지](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)에 수정 버전이 없으며,
+  이 경로는 정적 배포 산출물에 포함되지 않는 개발용 검사 도구입니다.
+  경고를 없애려고 `npm audit fix --force`로 Next.js 검사 설정을 14로 내리지 않습니다.
 
 ## 라이선스
 

@@ -88,16 +88,17 @@ export function useCreateOrderGroup() {
 export function useOrderGroup(groupId: string) {
   return useQuery({
     queryKey: ["order-groups", groupId],
-    queryFn: () => apiData<OrderGroup>(`/api/v1/order-groups/${groupId}`),
+    queryFn: ({ signal }) => apiData<OrderGroup>(`/api/v1/order-groups/${groupId}`, { signal }),
     staleTime: 15_000,
   });
 }
 export function useOrderGroupChildren(groupId: string, enabled: boolean) {
   return useInfiniteQuery({
     queryKey: ["order-groups", groupId, "children"],
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       apiPage<OrderGroup>(
         `/api/v1/order-groups/${groupId}/children${buildQuery({ limit: 20, cursor: pageParam })}`,
+        { signal },
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) =>

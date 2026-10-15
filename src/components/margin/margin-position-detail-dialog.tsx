@@ -42,7 +42,7 @@ export function MarginPositionDetailDialog({
   const positionQuery = useMarginPosition(open ? positionId : null);
   const freshPosition = positionQuery.data;
   const position: MarginPosition | null = freshPosition ?? null;
-  const accountsQuery = useAccounts();
+  const accountsQuery = useAccounts(open);
   const { data: exchangeInfo } = useExchangeInfo();
   const positionAccount = (accountsQuery.data ?? []).find(
     (a) => a.account_id === position?.account_id
@@ -301,26 +301,33 @@ export function MarginPositionDetailDialog({
         </DialogContent>
       </Dialog>
 
-      <MarginCollateralDialog
-        position={position}
-        open={collateralOpen}
-        onOpenChange={setCollateralOpen}
-        availableCredit={effectiveCredit}
-      />
+      {collateralOpen ? (
+        <MarginCollateralDialog
+          key={position.position_id}
+          position={position}
+          open
+          onOpenChange={setCollateralOpen}
+          availableCredit={effectiveCredit}
+        />
+      ) : null}
 
-      <MarginReductionDialog
-        key={position?.position_id}
-        position={position}
-        open={reductionOpen}
-        onOpenChange={setReductionOpen}
-      />
+      {reductionOpen ? (
+        <MarginReductionDialog
+          key={position.position_id}
+          position={position}
+          open
+          onOpenChange={setReductionOpen}
+        />
+      ) : null}
 
-      <MarginClosureDialog
-        key={position?.position_id}
-        position={position}
-        open={closureOpen}
-        onOpenChange={setClosureOpen}
-      />
+      {closureOpen ? (
+        <MarginClosureDialog
+          key={position.position_id}
+          position={position}
+          open
+          onOpenChange={setClosureOpen}
+        />
+      ) : null}
     </>
   );
 }

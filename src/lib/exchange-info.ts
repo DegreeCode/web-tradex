@@ -75,7 +75,7 @@ export function useExchangeInfo(poll = false, { allowGuest = false } = {}) {
   const signedIn = useSignedIn();
   return useQuery({
     queryKey: ["exchange-info"],
-    queryFn: () => apiData<ExchangeInfo>("/api/v1/exchange/info"),
+    queryFn: ({ signal }) => apiData<ExchangeInfo>("/api/v1/exchange/info", { signal }),
     enabled: signedIn || allowGuest,
     // Settings change rarely; focus/reconnect refetch only once this is stale.
     staleTime: 60_000,
@@ -91,7 +91,9 @@ export function slippageError(
   if (!value.trim()) return null; // Omit the field so the server applies its current default.
   if (!isDecimalInput(value.trim(), 4) || !/[0-9]/.test(value))
     return "슬리피지를 0 이상의 숫자로 입력해주세요";
-  if (trade && ppmFromPercent(value.trim()) > trade.max_slippage_ppm)
+  const ppm = ppmFromPercent(value.trim());
+  if (!Number.isSafeInteger(ppm)) return "슬리피지 값이 너무 커요";
+  if (trade && ppm > trade.max_slippage_ppm)
     return `슬리피지는 0~${fmtPercentFromPPM(trade.max_slippage_ppm, 4)} 사이로 입력해주세요`;
   return null;
 }
@@ -116,11 +118,12 @@ export function tagPolicyError(
   metadata?: ExchangeInfo["metadata"],
 ): string | null {
   if (!metadata) return null;
+  const encoder = new TextEncoder();
   if (tags.length > metadata.max_tags)
     return `태그는 최대 ${metadata.max_tags}개까지 입력할 수 있어요`;
   if (
     tags.some(
-      (tag) => new TextEncoder().encode(tag).length > metadata.tag_max_bytes,
+      (tag) => encoder.encode(tag).length > metadata.tag_max_bytes,
     )
   )
     return `각 태그는 ${metadata.tag_encoding} 기준 ${metadata.tag_max_bytes}바이트 이내로 입력해주세요`;
@@ -148,6 +151,7 @@ export function iconPolicyError(
     const url = new URL(value.trim());
     if (
       url.protocol !== "https:" ||
+      Boolean(url.username || url.password) ||
       !metadata.icon_allowed_hosts.includes(url.hostname.toLowerCase())
     )
       return "아이콘은 안내된 허용 호스트의 HTTPS URL을 입력해주세요";

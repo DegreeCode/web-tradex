@@ -135,10 +135,10 @@ export function InstrumentStateChip({ state }: { state: InstrumentState }) {
     <span
       className={cn(
         "inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-[11px] font-semibold whitespace-nowrap",
-        INSTRUMENT_STATE_CLASS[state],
+        Object.hasOwn(INSTRUMENT_STATE_CLASS, state) ? INSTRUMENT_STATE_CLASS[state] : "",
       )}
     >
-      {INSTRUMENT_STATE_LABEL[state]}
+      {Object.hasOwn(INSTRUMENT_STATE_LABEL, state) ? INSTRUMENT_STATE_LABEL[state] : state}
     </span>
   );
 }
@@ -170,10 +170,10 @@ export function OrderStatusChip({ status }: { status: OrderStatus }) {
     <span
       className={cn(
         "inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-[11px] font-semibold whitespace-nowrap",
-        ORDER_STATUS_CLASS[status],
+        Object.hasOwn(ORDER_STATUS_CLASS, status) ? ORDER_STATUS_CLASS[status] : "",
       )}
     >
-      {ORDER_STATUS_LABEL[status]}
+      {Object.hasOwn(ORDER_STATUS_LABEL, status) ? ORDER_STATUS_LABEL[status] : status}
     </span>
   );
 }
@@ -199,10 +199,10 @@ export function TransferStatusChip({ status }: { status: TransferStatus }) {
     <span
       className={cn(
         "inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-[11px] font-semibold whitespace-nowrap",
-        TRANSFER_STATUS_CLASS[status],
+        Object.hasOwn(TRANSFER_STATUS_CLASS, status) ? TRANSFER_STATUS_CLASS[status] : "",
       )}
     >
-      {TRANSFER_STATUS_LABEL[status]}
+      {Object.hasOwn(TRANSFER_STATUS_LABEL, status) ? TRANSFER_STATUS_LABEL[status] : status}
     </span>
   );
 }

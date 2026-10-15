@@ -90,6 +90,7 @@ test(
   "overlapping refreshes and financial events never cancel or repeat an in-flight history request",
   { timeout: 5000 },
   async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     let summaries = 0;
     let historyRequests = 0;
     let stalled = false;
@@ -138,7 +139,7 @@ test(
     const repeated = observer.refetch({ cancelRefetch: false });
     invalidateBatched(client, [["pnl"], ["pnl-history"]]);
     invalidateBatched(client, [["pnl"]]);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    t.mock.timers.tick(400);
     assert.equal(historySignal!.aborted, false);
     assert.equal(historyRequests, 2);
     assert.equal(summaries, 2);

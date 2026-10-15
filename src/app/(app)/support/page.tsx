@@ -115,7 +115,7 @@ export default function SupportPage() {
                     statusClass(inquiry.status),
                   )}
                 >
-                  {STATUS_LABEL[inquiry.status]}
+                  {Object.hasOwn(STATUS_LABEL, inquiry.status) ? STATUS_LABEL[inquiry.status] : inquiry.status}
                 </span>
               </div>
               <p className="mt-1 text-[12px] text-app-gray-400">
@@ -271,7 +271,7 @@ function InquiryDialog({ ticket, onClose }: { ticket: string | null; onClose: ()
         {inquiry.isLoading ? (
           <SkeletonRows rows={3} />
         ) : inquiry.data ? (
-          <InquiryThread inquiry={inquiry.data} />
+          <InquiryThread key={inquiry.data.ticket} inquiry={inquiry.data} />
         ) : null}
       </DialogContent>
     </Dialog>
@@ -285,6 +285,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
   const closed = inquiry.status === "CLOSED";
 
   function submitReply() {
+    if (sendReply.isPending || resolve.isPending || closed) return;
     if (!reply.trim()) {
       toast.error("답변 내용을 입력해주세요");
       return;
@@ -305,7 +306,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
         <DialogTitle className="break-words [overflow-wrap:anywhere]">{inquiry.subject}</DialogTitle>
         <DialogDescription>
           {CATEGORIES.find((item) => item.value === inquiry.category)?.label ?? inquiry.category} ·{" "}
-          {STATUS_LABEL[inquiry.status]} · {fmtDateTime(inquiry.created_at)}
+          {Object.hasOwn(STATUS_LABEL, inquiry.status) ? STATUS_LABEL[inquiry.status] : inquiry.status} · {fmtDateTime(inquiry.created_at)}
         </DialogDescription>
       </DialogHeader>
 
@@ -359,7 +360,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
             <button
               type="button"
               onClick={submitReply}
-              disabled={sendReply.isPending}
+              disabled={sendReply.isPending || resolve.isPending}
               className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-app-blue text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-40 pressable"
             >
               <Send aria-hidden="true" className="size-4" />
@@ -374,7 +375,7 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
                     onError: (error) => toast.error(errorMessage(error)),
                   })
                 }
-                disabled={resolve.isPending}
+                disabled={resolve.isPending || sendReply.isPending}
                 className="h-11 rounded-xl bg-app-gray-100 px-4 text-[14px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-40 pressable"
               >
                 해결됨

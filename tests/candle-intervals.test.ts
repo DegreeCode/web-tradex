@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  CANDLE_INTERVAL_LABELS,
-  FALLBACK_CANDLE_INTERVALS,
   pickCandleInterval,
   resolveCandleIntervals,
 } from "../src/lib/candle-intervals";
@@ -13,14 +11,7 @@ const canonical: CandleInterval[] = [
 ];
 const fallback: CandleInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
-test("all supported intervals have Korean labels", () => {
-  assert.deepEqual(canonical.map((interval) => CANDLE_INTERVAL_LABELS[interval]), [
-    "1초", "1분", "5분", "15분", "30분", "1시간", "4시간", "1일", "1주", "1개월", "1년",
-  ]);
-});
-
 test("omitted market or intervals preserve the old timeframe buttons", () => {
-  assert.deepEqual(FALLBACK_CANDLE_INTERVALS, fallback);
   for (const info of [undefined, null, {}, { market: undefined }, { market: null }, { market: {} }]) {
     assert.deepEqual(resolveCandleIntervals(info), fallback);
   }

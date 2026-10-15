@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,10 +25,15 @@ function downloadKeys(keys: string[]) {
 export function RecoveryKeyGrid({ keys, className }: { keys: string[]; className?: string }) {
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   async function copyAll() {
     if (!(await copyToClipboard(keys.join("\n"), "복구키를 복사했어요"))) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   return (

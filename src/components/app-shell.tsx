@@ -39,9 +39,15 @@ function isActive(pathname: string, href: string): boolean {
 
 type NavItem = (typeof PRIMARY_NAV)[number];
 
-function SidebarLink({ item, active, badge }: { item: NavItem; active: boolean; badge?: string | null }) {
+function SidebarLink({ item, active, badge, prefetch }: {
+  item: NavItem;
+  active: boolean;
+  badge?: string | null;
+  prefetch?: boolean;
+}) {
   return (
     <Link
+      prefetch={prefetch}
       href={item.href}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -72,6 +78,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, status, linkedScope } = useAuth();
   const authenticated = status === "authenticated";
+  // Common destinations stay ready for signed-in navigation; guests avoid
+  // downloading screens they cannot open without signing in.
+  const navigationPrefetch = authenticated ? undefined : false;
   // Signed out on a market screen: browsing as a guest (other routes redirect).
   const guest = status === "anonymous";
   const linked = linkedScope !== null;
@@ -116,6 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-app-gray-200 bg-card lg:flex">
         <div className="shrink-0 px-6 pt-7 pb-6">
           <Link
+            prefetch={navigationPrefetch}
             href="/"
             className="text-[21px] font-extrabold tracking-[-0.04em] text-app-gray-900"
           >
@@ -124,7 +134,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav aria-label="주 메뉴" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
           {PRIMARY_NAV.map((item) => (
-            <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />
+            <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} prefetch={navigationPrefetch} />
           ))}
           <p className="px-3 pt-5 pb-1 text-[12px] font-semibold text-app-gray-400">더보기</p>
           {moreNav.map((item) => (
@@ -132,6 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               item={item}
               active={isActive(pathname, item.href)}
+              prefetch={navigationPrefetch}
               badge={item.href === "/notifications" ? unreadBadgeLabel : null}
             />
           ))}
@@ -186,6 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </p>
           ) : (
             <Link
+              prefetch={navigationPrefetch}
               href="/"
               className="text-[19px] font-extrabold tracking-[-0.04em] text-app-gray-900"
             >
@@ -197,6 +209,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <LoginLink className={cn(loginButton, "h-9 px-3.5 text-[13px]")}>로그인</LoginLink>
             ) : (
               <Link
+                prefetch={navigationPrefetch}
                 href="/notifications"
                 aria-label="알림"
                 aria-current={isActive(pathname, "/notifications") ? "page" : undefined}
@@ -248,6 +261,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const active = isActive(pathname, item.href);
               return (
                 <Link
+                  prefetch={navigationPrefetch}
                   key={item.href}
                   href={item.href}
                   aria-current={active ? "page" : undefined}
@@ -323,6 +337,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="space-y-1">
               {moreNav.map((item) => (
                 <Link
+                  prefetch={navigationPrefetch}
                   key={item.href}
                   href={item.href}
                   onClick={() => setMoreOpen(false)}

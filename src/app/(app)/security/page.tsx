@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, KeyRound, LogOut, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
@@ -19,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { RecoveryKeyGrid } from "@/components/recovery-keys";
 import { ErrorBlock, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
-import { ApiError, errorMessage, postData } from "@/lib/api";
+import { ApiError, errorMessage, markSessionExpired, postData } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtRelative, shortId } from "@/lib/format";
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
@@ -38,7 +37,6 @@ import type { CeremonyEnvelope } from "@/lib/webauthn";
 
 export default function SecurityPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { linkedScope } = useAuth();
   // A device-linked session may only list sessions and sign itself out; the
   // passkey, recovery and revoke controls would all be refused.
@@ -59,6 +57,7 @@ export default function SecurityPage() {
   const [pendingPasskeyDelete, setPendingPasskeyDelete] = useState<string | null>(null);
 
   async function handleAddPasskey() {
+    if (addBusy) return;
     setAddBusy(true);
     try {
       const options = await postData<CeremonyEnvelope<PublicKeyCredentialCreationOptionsJSON>>(
@@ -114,7 +113,7 @@ export default function SecurityPage() {
   }
 
   function handleSessionExpired() {
-    queryClient.setQueryData(["me"], null);
+    markSessionExpired();
     router.replace("/login");
   }
 
@@ -241,8 +240,16 @@ export default function SecurityPage() {
                 key={session.session_id}
                 session={session}
                 canRevoke={session.is_current || !linked}
-                pending={revokeSessions.isPending && revokeSessions.variables?.[0] === session.session_id}
+                pending={
+                  linked && session.is_current
+                    ? logout.isPending
+                    : revokeSessions.isPending && revokeSessions.variables?.[0] === session.session_id
+                }
                 onRevoke={() => {
+                  if (linked && session.is_current) {
+                    handleLogout();
+                    return;
+                  }
                   noteSelfAction("AUTH_SESSIONS_REVOKED");
                   revokeSessions.mutate([session.session_id], {
                     onSuccess: (result) =>

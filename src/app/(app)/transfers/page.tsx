@@ -36,7 +36,6 @@ export default function TransfersPage() {
   const transfersQuery = useTransfers("mine", 50);
   const action = useTransferAction();
   const transferAccess = useSessionAccess("TRANSFER");
-  const actingId = action.isPending ? action.variables?.transferId : undefined;
 
   const items = useMemo(
     () => transfersQuery.data?.pages.flatMap((page) => page.data) ?? [],
@@ -80,6 +79,7 @@ export default function TransfersPage() {
   const detailsError = details.find((detail) => detail.isError)?.error;
 
   function runAction(transferId: string, kind: "acceptance" | "rejection" | "cancellation") {
+    if (action.isPending || !transferAccess.allowed) return;
     noteSelfAction("transfer.updated");
     action.mutate(
       { transferId, action: kind },
@@ -201,7 +201,7 @@ export default function TransfersPage() {
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "rejection")}
-                            disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
+                            disabled={!transferAccess.allowed || action.isPending}
                             className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                           >
                             거절
@@ -209,7 +209,7 @@ export default function TransfersPage() {
                           <button
                             type="button"
                             onClick={() => runAction(transfer.transfer_id, "acceptance")}
-                            disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
+                            disabled={!transferAccess.allowed || action.isPending}
                             className="min-h-9 rounded-lg bg-app-blue px-3 text-[12px] font-bold text-white hover:bg-app-blue-hover disabled:opacity-50"
                           >
                             수락
@@ -219,7 +219,7 @@ export default function TransfersPage() {
                         <button
                           type="button"
                           onClick={() => runAction(transfer.transfer_id, "cancellation")}
-                          disabled={!transferAccess.allowed || actingId === transfer.transfer_id}
+                          disabled={!transferAccess.allowed || action.isPending}
                           className="min-h-9 rounded-lg bg-app-gray-100 px-3 text-[12px] font-semibold text-app-gray-700 hover:bg-app-gray-200 disabled:opacity-50"
                         >
                           취소

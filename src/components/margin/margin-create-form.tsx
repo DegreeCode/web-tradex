@@ -33,7 +33,7 @@ import { defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
 import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/lib/hooks";
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
-  getLeverageOptions,
+  getLeverageBounds,
   isIndefiniteMarginBlock,
   marginErrorMessage,
   marginPartialFillText,
@@ -108,15 +108,16 @@ export function MarginCreateForm({
     return side === "LONG" ? eligibility.max_long_leverage : eligibility.max_short_leverage;
   }, [eligibility, side]);
 
-  const leverageOptions = useMemo(() => {
-    return getLeverageOptions(side, maxLeverageStr);
+  const leverageBounds = useMemo(() => {
+    return getLeverageBounds(side, maxLeverageStr);
   }, [side, maxLeverageStr]);
 
-  // Adjust default leverage when side or options change if current leverage is invalid
+  // Keep the user's choice while it is within the current side's eligibility.
   const resolvedLeverage = useMemo(() => {
-    if (leverage && leverageOptions.includes(leverage)) return leverage;
-    return leverageOptions[0] ?? "";
-  }, [leverage, leverageOptions]);
+    if (!leverageBounds) return "";
+    if (leverage && !validateLeverage(leverage, side, maxLeverageStr)) return leverage;
+    return (leverageBounds.min / 10).toFixed(1);
+  }, [leverage, leverageBounds, side, maxLeverageStr]);
 
   // Validations
   const collateralError = validateCollateralAmount(collateral, currentAccount?.available_credit);
@@ -137,7 +138,12 @@ export function MarginCreateForm({
     marginAccess.allowed &&
     !collateralError &&
     !leverageError &&
-    currentAccountId &&
+    currentAccount &&
+    !accountsQuery.isError &&
+    !isGlobalHalted &&
+    isSymbolTrading &&
+    isEligibleToOpen &&
+    !managerSideBlocked &&
     resolvedSymbol &&
     !slippageSettingsError(slippageSettings, tradeSide, exchangeInfo?.trade)
       ? {
@@ -151,18 +157,7 @@ export function MarginCreateForm({
       : null;
   const referencePrice = liveReferencePrice(slippageSettings, selectedInstrument?.curve_spot_price);
 
-  const canSubmit =
-    marginAccess.allowed &&
-    !collateralError &&
-    !leverageError &&
-    !isGlobalHalted &&
-    isSymbolTrading &&
-    isEligibleToOpen &&
-    !managerSideBlocked &&
-    Boolean(currentAccountId) &&
-    Boolean(resolvedSymbol) &&
-    Boolean(collateral) &&
-    !createMutation.isPending;
+  const canSubmit = Boolean(payload) && !createMutation.isPending;
 
   // Estimation
   const estimatedNotional = useMemo(() => {
@@ -208,7 +203,6 @@ export function MarginCreateForm({
   }
 
   const availableCredit = currentAccount?.available_credit;
-  const leverageIndex = Math.max(0, leverageOptions.indexOf(resolvedLeverage));
   const blockedReason = eligibility && !eligibility.can_open
     ? eligibility.manual_blocked
       ? "관리자가 신규 개설을 막아 둔 계정이에요."
@@ -384,23 +378,23 @@ export function MarginCreateForm({
               {resolvedLeverage ? `${resolvedLeverage}x` : "—"}
             </span>
           </div>
-          {leverageOptions.length > 0 ? (
+          {leverageBounds ? (
             <>
               <input
                 id="margin-leverage"
                 type="range"
-                min={0}
-                max={leverageOptions.length - 1}
+                min={leverageBounds.min}
+                max={leverageBounds.max}
                 step={1}
-                value={leverageIndex}
-                disabled={leverageOptions.length < 2}
-                onChange={(e) => setLeverage(leverageOptions[Number(e.target.value)] ?? "")}
+                value={Math.round(Number(resolvedLeverage) * 10)}
+                disabled={leverageBounds.min === leverageBounds.max}
+                onChange={(e) => setLeverage((Number(e.target.value) / 10).toFixed(1))}
                 aria-valuetext={`${resolvedLeverage}배`}
                 className={`mt-2 h-2 w-full cursor-pointer ${side === "LONG" ? "accent-app-red" : "accent-app-blue"}`}
               />
               <div className="numeric mt-1 flex justify-between text-[11px] text-app-gray-400">
-                <span>{leverageOptions[0]}x</span>
-                <span>최대 {leverageOptions[leverageOptions.length - 1]}x</span>
+                <span>{(leverageBounds.min / 10).toFixed(1)}x</span>
+                <span>최대 {(leverageBounds.max / 10).toFixed(1)}x</span>
               </div>
             </>
           ) : (

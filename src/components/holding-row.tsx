@@ -6,16 +6,8 @@ import { ChevronRight } from "lucide-react";
 
 import { ChangeIndicator } from "@/components/primitives";
 import { fmtCompactQuantity, fmtCredit, fmtQuantity } from "@/lib/format";
+import type { HoldingView } from "@/lib/holdings";
 import { symbolHref } from "@/lib/routes";
-import type { Instrument, Position } from "@/lib/types";
-
-export interface HoldingView {
-  position: Position;
-  instrument: Instrument | undefined;
-  value: number;
-  changePct: number | null;
-  realizedPnL: string;
-}
 
 export function HoldingRow({ holding }: { holding: HoldingView }) {
   const { position, value, changePct } = holding;
@@ -35,7 +27,7 @@ export function HoldingRow({ holding }: { holding: HoldingView }) {
         </p>
       </div>
       <div className="col-start-2 row-start-2 min-w-0 text-left sm:col-start-3 sm:row-start-1 sm:text-right">
-        <p className="numeric break-all text-[15px] font-bold text-app-gray-900">{fmtCredit(value, 2)}</p>
+        <p className="numeric break-all text-[15px] font-bold text-app-gray-900">{value === null ? "—" : fmtCredit(value, 2)}</p>
         <div className="flex sm:justify-end">
           <ChangeIndicator value={changePct} />
         </div>
@@ -43,17 +35,4 @@ export function HoldingRow({ holding }: { holding: HoldingView }) {
       <ChevronRight className="col-start-3 row-start-1 size-4 shrink-0 sm:col-start-4 text-app-gray-300" />
     </Link>
   );
-}
-
-export function buildHolding(
-  position: Position,
-  instrumentMap: Map<string, Instrument>,
-): HoldingView {
-  const instrument = instrumentMap.get(position.symbol);
-  const price = instrument ? Number(instrument.curve_spot_price) : 0;
-  const quantity = Number(position.total_quantity);
-  const value = Number.isFinite(price * quantity) ? price * quantity : 0;
-  const cost = Number(position.cost_basis);
-  const changePct = cost > 0 ? ((value - cost) / cost) * 100 : null;
-  return { position, instrument, value, changePct, realizedPnL: position.realized_pnl };
 }

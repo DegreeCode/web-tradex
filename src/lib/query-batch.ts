@@ -1,4 +1,4 @@
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { hashKey, partialMatchKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 
 const REFETCH_BATCH_MS = 300;
 
@@ -17,10 +17,12 @@ export function invalidateBatched(
   keys: readonly QueryKey[],
   options: { passive?: boolean } = {},
 ): void {
-  for (const queryKey of keys) {
-    void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
-  }
-  if (options.passive || keys.length === 0) return;
+  if (keys.length === 0) return;
+  void queryClient.invalidateQueries({
+    predicate: (query) => keys.some((key) => partialMatchKey(query.queryKey, key)),
+    refetchType: "none",
+  });
+  if (options.passive) return;
 
   let pending = pendingByClient.get(queryClient);
   if (!pending) {
@@ -28,16 +30,18 @@ export function invalidateBatched(
       keys: new Map<string, QueryKey>(),
       timer: setTimeout(() => {
         pendingByClient.delete(queryClient);
-        for (const queryKey of batch.keys.values()) {
-          // Skip queries a poll or another refetch already refreshed.
-          void queryClient
-            .refetchQueries({ queryKey, type: "active", stale: true }, { cancelRefetch: false })
-            .catch(() => undefined);
-        }
+        const keys = [...batch.keys.values()];
+        // One cache pass also avoids matching overlapping prefixes repeatedly.
+        // Skip queries a poll or another refetch already refreshed.
+        void queryClient.refetchQueries({
+          predicate: (query) => keys.some((key) => partialMatchKey(query.queryKey, key)),
+          type: "active",
+          stale: true,
+        }, { cancelRefetch: false }).catch(() => undefined);
       }, REFETCH_BATCH_MS),
     };
     pending = batch;
     pendingByClient.set(queryClient, pending);
   }
-  for (const queryKey of keys) pending.keys.set(JSON.stringify(queryKey), queryKey);
+  for (const queryKey of keys) pending.keys.set(hashKey(queryKey), queryKey);
 }

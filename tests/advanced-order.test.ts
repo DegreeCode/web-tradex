@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildExitOrder,
   buildOrderAmendment,
+  orderExpiry,
   trailingDistance,
   type ExitOrderInput,
 } from "../src/lib/advanced-order";
@@ -94,6 +95,15 @@ test("trailing distance is precise to one ppm and excludes zero and 100 percent"
   assert.equal(trailingDistance("99.9999"), 999999);
   for (const value of ["", "0", "100", "-1", "0.00001", "NaN"])
     assert.equal(trailingDistance(value), null);
+});
+
+test("trigger expiry rejects invalid or past dates and sends normalized future dates", () => {
+  for (const expiry of ["", "invalid", "2020-01-01"])
+    assert.throws(() => orderExpiry(expiry), /만료 시각/);
+  const expiry = new Date(Date.now() + 86_400_000).toISOString();
+  assert.equal(orderExpiry(expiry), expiry);
+  assert.equal(buildExitOrder({ ...input, expires_at: expiry }).expires_at, expiry);
+  assert.throws(() => buildExitOrder({ ...input, expires_at: "invalid" }), /만료 시각/);
 });
 
 const order: Order = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { ApiError, errorMessage } from "@/lib/api";
 import { compareDecimal, fmtDateTime, fmtSigned, shortId } from "@/lib/format";
 import { usePnL } from "@/lib/advanced-order-hooks";
@@ -62,8 +63,13 @@ export function PnLPanel({
         className="flex flex-wrap gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          const date = dateInput ? new Date(dateInput) : null;
+          if (date && !Number.isFinite(date.getTime())) {
+            toast.error("올바른 기준 시각을 입력해주세요");
+            return;
+          }
           setSymbol(symbolInput.trim().toUpperCase());
-          setAsOf(dateInput ? new Date(dateInput).toISOString() : undefined);
+          setAsOf(date?.toISOString());
         }}
       >
         <input

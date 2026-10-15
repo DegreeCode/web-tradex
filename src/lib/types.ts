@@ -323,13 +323,6 @@ export interface Portfolio {
   updated_at: string;
 }
 
-export interface RealizedPnL {
-  symbol: string;
-  realized_pnl: string;
-  trade_id: string;
-  at: string;
-}
-
 export type TransferStatus = "PENDING" | "REJECTED" | "CANCELED" | "EXPIRED" | "COMPLETED";
 
 export interface Transfer {

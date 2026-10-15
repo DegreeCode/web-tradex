@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
-import { buildHolding, HoldingRow } from "@/components/holding-row";
+import { HoldingRow } from "@/components/holding-row";
 import { NAV_RANGES, NavChart } from "@/components/nav-chart";
 import {
   ChangeIndicator,
@@ -17,6 +17,7 @@ import {
 import { PnLPanel } from "@/components/pnl-panel";
 import { Segmented } from "@/components/segmented";
 import { accountLabel } from "@/lib/accounts";
+import { buildHolding } from "@/lib/holdings";
 import { errorMessage } from "@/lib/api";
 import {
   changePercent,
@@ -60,40 +61,35 @@ export default function PortfolioPage() {
   );
 
   const nav = navQuery.data;
-  // NAV already aggregates every account; portfolio sums are only a fallback.
-  const totalCredit = nav
-    ? toNumber(nav.total_credit)
-    : portfolios.reduce((sum, portfolio) => sum + toNumber(portfolio.total_credit), 0);
   const lockedCredit = nav
     ? toNumber(nav.locked_credit)
     : portfolios.reduce((sum, portfolio) => sum + toNumber(portfolio.locked_credit), 0);
 
-  const holdings = useMemo(() => {
-    const filtered =
-      accountFilter === "ALL"
-        ? portfolios
-        : portfolios.filter((portfolio) => portfolio.account_id === accountFilter);
-    const rows = filtered.flatMap((portfolio) =>
+  const allHoldings = useMemo(() => {
+    const rows = portfolios.flatMap((portfolio) =>
       portfolio.positions.map((position) => ({
         ...buildHolding(position, instrumentMap),
         accountId: portfolio.account_id,
       })),
     );
-    rows.sort((a, b) => b.value - a.value);
+    rows.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
     return rows;
-  }, [portfolios, accountFilter, instrumentMap]);
+  }, [portfolios, instrumentMap]);
+  const holdings = accountFilter === "ALL"
+    ? allHoldings
+    : allHoldings.filter((holding) => holding.accountId === accountFilter);
 
-  const stockValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
-  const costBasis = holdings.reduce(
+  const stockValue = allHoldings.reduce((sum, holding) => sum + (holding.value ?? 0), 0);
+  const costBasis = allHoldings.reduce(
     (sum, holding) => sum + toNumber(holding.position.cost_basis),
     0,
   );
   const unrealized = stockValue - costBasis;
   const unrealizedPct = costBasis > 0 ? (unrealized / costBasis) * 100 : null;
-  const computedTotal = totalCredit + stockValue;
+  const valuationReady = !isLoading && !portfolioError && !instrumentsQuery.isLoading &&
+    allHoldings.every((holding) => holding.value !== null);
 
   const historyQuery = accountFilter === "ALL" ? navHistory : accountHistory;
-  const totalAssets = nav ? toNumber(nav.total_value) : computedTotal;
   const navSeries = useMemo(
     () =>
       [...(accountFilter === "ALL" ? (navHistory.data?.pages.flatMap((page) => page.data) ?? []) : (accountHistory.data?.pages.flatMap((page) => page.data) ?? []))].sort(
@@ -119,6 +115,7 @@ export default function PortfolioPage() {
           action={
             <Link
               href="/margin"
+              prefetch={false}
               className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-blue bg-app-blue-light px-3.5 text-[13px] font-bold text-app-blue-dark hover:opacity-80 pressable"
             >
               마진 포지션 관리
@@ -132,12 +129,12 @@ export default function PortfolioPage() {
         <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
             <span className="numeric text-[clamp(1rem,6.5cqi,1.75rem)] leading-tight font-extrabold tracking-[-0.03em] text-app-gray-900 break-all">
-              {nav ? fmtDecimal(totalAssets, 2) : "—"}
+              {nav ? fmtDecimal(nav.total_value, 2) : "—"}
             </span>
             <span className="text-[13px] sm:text-[14px] font-bold text-app-gray-500 shrink-0">Credit</span>
           </div>
           <div className="shrink-0">
-            <ChangeIndicator value={isLoading || portfolioError || instrumentsQuery.isLoading ? null : unrealizedPct} />
+            <ChangeIndicator value={valuationReady ? unrealizedPct : null} />
           </div>
         </div>
         {navQuery.isLoading ? <p role="status" className="mt-2 text-[13px] text-app-gray-500">자산 정보를 불러오는 중이에요…</p> : null}
@@ -166,7 +163,7 @@ export default function PortfolioPage() {
           <div className="flex items-center justify-between gap-3">
             <span className="text-[12px] font-medium text-app-gray-500 shrink-0">평가 손익</span>
             <span className="numeric text-[13px] sm:text-[14px] font-bold text-app-gray-900 text-right break-all">
-              {isLoading || portfolioError || instrumentsQuery.isLoading ? "—" : fmtSigned(unrealized, 2)}
+              {valuationReady ? fmtSigned(unrealized, 2) : "—"}
             </span>
           </div>
         </div>

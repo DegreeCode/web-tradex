@@ -26,7 +26,7 @@ import { fmtCompactQuantity, fmtPrice, fmtSigned } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import type { ChartOrderLine } from "@/lib/chart-orders";
 import { formatChartTime } from "@/lib/chart-time";
-import { canIncrementallyUpdate } from "@/lib/chart-updates";
+import { canIncrementallyUpdate, findChartPoint } from "@/lib/chart-updates";
 import { calculateVolumePaneHeight, setVolumePaneRatio, useChartSettings } from "@/lib/chart-settings";
 import type { CandleInterval } from "@/lib/types";
 
@@ -244,8 +244,7 @@ function sameLinePoint(left: LightweightLinePoint | undefined, right: Lightweigh
   return Boolean(
     left &&
       left.time === right.time &&
-      left.value === right.value &&
-      left.valueText === right.valueText,
+      left.value === right.value,
   );
 }
 
@@ -259,9 +258,7 @@ function sameCandlePoint(
       left.open === right.open &&
       left.high === right.high &&
       left.low === right.low &&
-      left.close === right.close &&
-      left.volume === right.volume &&
-      left.tradeCount === right.tradeCount,
+      left.close === right.close,
   );
 }
 
@@ -283,10 +280,10 @@ function updateLineSeries(
     series.setData(next.map(({ time, value }) => ({ time, value })));
     return;
   }
-  const previousByTime = new Map(previous.map((point) => [point.time, point]));
   const previousLast = previous[previous.length - 1]?.time;
-  for (const point of next) {
-    if (sameLinePoint(previousByTime.get(point.time), point)) continue;
+  for (let index = 0; index < next.length; index += 1) {
+    const point = next[index];
+    if (sameLinePoint(previous[index], point)) continue;
     series.update(
       { time: point.time, value: point.value },
       previousLast !== undefined && point.time < previousLast,
@@ -303,10 +300,10 @@ function updateCandleSeries(
     series.setData(next.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
     return;
   }
-  const previousByTime = new Map(previous.map((point) => [point.time, point]));
   const previousLast = previous[previous.length - 1]?.time;
-  for (const point of next) {
-    if (sameCandlePoint(previousByTime.get(point.time), point)) continue;
+  for (let index = 0; index < next.length; index += 1) {
+    const point = next[index];
+    if (sameCandlePoint(previous[index], point)) continue;
     series.update(
       { time: point.time, open: point.open, high: point.high, low: point.low, close: point.close },
       previousLast !== undefined && point.time < previousLast,
@@ -323,10 +320,10 @@ function updateVolumeSeries(
     series.setData(next.map(({ time, value, color }) => ({ time, value, color })));
     return;
   }
-  const previousByTime = new Map(previous.map((point) => [point.time, point]));
   const previousLast = previous[previous.length - 1]?.time;
-  for (const point of next) {
-    if (sameVolumePoint(previousByTime.get(point.time), point)) continue;
+  for (let index = 0; index < next.length; index += 1) {
+    const point = next[index];
+    if (sameVolumePoint(previous[index], point)) continue;
     series.update(
       { time: point.time, value: point.value, color: point.color },
       previousLast !== undefined && point.time < previousLast,
@@ -489,19 +486,15 @@ export function LightweightLineChart({
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
   const previousRef = useRef<LightweightLinePoint[]>([]);
   const previousVolumeRef = useRef<LightweightVolumePoint[]>([]);
-  const dataRef = useRef(data);
   const colorRef = useRef(color);
   const pricePrecisionRef = useRef(pricePrecision);
-  const [hovered, setHovered] = useState<LightweightLinePoint | null>(null);
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   // Plot width excludes the price scale, so the legend never covers its labels.
   const [plotWidth, setPlotWidth] = useState(0);
   const hasData = data.length >= 2;
 
   const latest = data[data.length - 1];
 
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
   useEffect(() => {
     colorRef.current = color;
   }, [color]);
@@ -532,11 +525,10 @@ export function LightweightLineChart({
       const time = param.time;
       const point = param.seriesData.get(series);
       if (!param.point || time === undefined || !point || !("value" in point) || typeof time !== "number") {
-        setHovered(null);
+        setHoveredTime(null);
         return;
       }
-      const source = dataRef.current.find((item) => item.time === time);
-      if (source) setHovered({ ...source, value: Number(point.value) });
+      setHoveredTime(time);
     };
     chart.subscribeCrosshairMove(crosshairHandler);
     chart.timeScale().subscribeSizeChange(setPlotWidth);
@@ -578,10 +570,9 @@ export function LightweightLineChart({
     previousRef.current = data;
     if (volumeSeriesRef.current) updateVolumeSeries(volumeSeriesRef.current, previousVolumeRef.current, volume);
     previousVolumeRef.current = volume;
-    setHovered((current) => (current && data.some((item) => item.time === current.time) ? current : null));
   }, [color, data, height, pricePrecision, volume]);
 
-  const active = hovered ?? latest;
+  const active = findChartPoint(data, hoveredTime) ?? latest;
   if (data.length < 2) {
     return (
       <div
@@ -655,9 +646,8 @@ export function LightweightCandleChart({
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
   const previousRef = useRef<LightweightCandlePoint[]>([]);
   const previousVolumeRef = useRef<LightweightVolumePoint[]>([]);
-  const dataRef = useRef(data);
   const pricePrecisionRef = useRef(pricePrecision);
-  const [hovered, setHovered] = useState<LightweightCandlePoint | null>(null);
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   // Plot width excludes the price scale, so the legend never covers its labels.
   const [plotWidth, setPlotWidth] = useState(0);
   const hasData = data.length > 0;
@@ -667,9 +657,6 @@ export function LightweightCandleChart({
   const lineColor = latest && latest.close < data[0].open ? DOWN_COLOR : UP_COLOR;
   const lineColorRef = useRef(lineColor);
 
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
   useEffect(() => {
     pricePrecisionRef.current = pricePrecision;
   }, [pricePrecision]);
@@ -698,20 +685,17 @@ export function LightweightCandleChart({
           wickDownColor: DOWN_COLOR,
           priceFormat: priceFormat(pricePrecisionRef.current),
         });
-    const volumeSeries = dataRef.current.some((point) => point.volumeValue > 0 || point.volume === "0")
-      ? chart.addSeries(HistogramSeries, {
-          priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
-        }, 1)
-      : null;
-    const cleanupVolumeSync = setupVolumePaneResizeSync(volumeSeries ? chart.panes()[1] : null, height);
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
+    }, 1);
+    const cleanupVolumeSync = setupVolumePaneResizeSync(chart.panes()[1], height);
     const crosshairHandler = (param: MouseEventParams<Time>) => {
       const time = param.time;
       if (!param.point || time === undefined || typeof time !== "number") {
-        setHovered(null);
+        setHoveredTime(null);
         return;
       }
-      const source = dataRef.current.find((item) => item.time === time);
-      if (source) setHovered(source);
+      setHoveredTime(time);
     };
     chart.subscribeCrosshairMove(crosshairHandler);
     chart.timeScale().subscribeSizeChange(setPlotWidth);
@@ -761,23 +745,19 @@ export function LightweightCandleChart({
       updateCandleSeries(series as ISeriesApi<"Candlestick", Time>, previousRef.current, data);
     }
     previousRef.current = data;
-    if (volumeSeriesRef.current) {
-      updateVolumeSeries(
-        volumeSeriesRef.current,
-        previousVolumeRef.current,
-        data.map((point) => ({
-          time: point.time,
-          value: point.volumeValue,
-          color: point.close >= point.open ? `${UP_COLOR}99` : `${DOWN_COLOR}99`,
-        })),
-      );
-    }
-    previousVolumeRef.current = data.map((point) => ({
+    const volume = data.map((point) => ({
       time: point.time,
       value: point.volumeValue,
       color: point.close >= point.open ? `${UP_COLOR}99` : `${DOWN_COLOR}99`,
     }));
-    setHovered((current) => (current && data.some((item) => item.time === current.time) ? current : null));
+    if (volumeSeriesRef.current) {
+      updateVolumeSeries(
+        volumeSeriesRef.current,
+        previousVolumeRef.current,
+        volume,
+      );
+    }
+    previousVolumeRef.current = volume;
   }, [data, height, lineColor, pricePrecision, seriesType]);
 
   useEffect(() => {
@@ -803,7 +783,7 @@ export function LightweightCandleChart({
     return () => timeScale.unsubscribeVisibleLogicalRangeChange(onRangeChange);
   }, [hasData, height, seriesType, hasOlder, loadingOlder, onLoadOlder]);
 
-  const active = hovered ?? latest;
+  const active = findChartPoint(data, hoveredTime) ?? latest;
   if (data.length === 0 || !active) {
     return (
       <div
