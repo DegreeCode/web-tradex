@@ -9,6 +9,7 @@ import { Segmented } from "@/components/segmented";
 import { addDecimal, fmtCredit } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
 import { MarginCreateForm } from "@/components/margin/margin-create-form";
+import { MarginCloseAllDialog } from "@/components/margin/margin-close-all-dialog";
 import { MarginPositionsList } from "@/components/margin/margin-positions-list";
 import { isActiveMarginPosition, useMarginPositions, type MarginPosition } from "@/lib/margin";
 
@@ -77,19 +78,25 @@ function MarginContent() {
         title="마진 거래"
         subtitle="빌린 자금으로 롱·숏 포지션을 열고 관리해요"
         action={
-          <button
-            type="button"
-            onClick={() => void positionsQuery.refetch()}
-            disabled={!effectiveAccountId || positionsQuery.isRefetching}
-            aria-label="새로고침"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:opacity-50 pressable"
-          >
-            <RefreshCw
-              aria-hidden="true"
-              className={`size-3.5 ${positionsQuery.isRefetching ? "animate-spin" : ""}`}
+          <>
+            <MarginCloseAllDialog
+              accountId={effectiveAccountId}
+              accountName={selectedAccount ? accountLabel(selectedAccount, accounts) : "선택한 계좌"}
             />
-            <span className="max-sm:hidden">새로고침</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => void positionsQuery.refetch()}
+              disabled={!effectiveAccountId || positionsQuery.isRefetching}
+              aria-label="새로고침"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-app-gray-200 bg-card px-3 text-[13px] font-semibold text-app-gray-700 hover:bg-app-gray-50 disabled:opacity-50 pressable"
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={`size-3.5 ${positionsQuery.isRefetching ? "animate-spin" : ""}`}
+              />
+              <span className="max-sm:hidden">새로고침</span>
+            </button>
+          </>
         }
       />
 
