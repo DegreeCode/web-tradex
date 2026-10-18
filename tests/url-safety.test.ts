@@ -9,6 +9,9 @@ test("post-login redirects stay on this site", () => {
   for (const hostile of [
     null, "", "portfolio", "https://evil.example", "//evil.example", "/\\evil.example",
     "/\t/evil.example", "javascript:alert(1)", " /portfolio",
+    // URL normalisation used to turn these into a protocol-relative host.
+    "/..//evil.example", "/%2e//evil.example", "/./\\\\evil.example",
+    "///evil.example", "/%2f%2fevil.example", "/%5c%5cevil.example",
   ]) {
     assert.equal(safeRedirectPath(hostile), "/", String(hostile));
   }

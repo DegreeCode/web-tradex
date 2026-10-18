@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { memo } from "react";
 import { InstrumentAvatar } from "@/components/instrument-list";
 import { ChevronRight } from "lucide-react";
 
@@ -9,7 +10,9 @@ import { fmtCompactQuantity, fmtCredit, fmtQuantity } from "@/lib/format";
 import type { HoldingView } from "@/lib/holdings";
 import { symbolHref } from "@/lib/routes";
 
-export function HoldingRow({ holding }: { holding: HoldingView }) {
+// Holdings are rebuilt when any ticker moves. Keeping row props by identity
+// lets unchanged rows skip rendering while the parent list updates.
+export const HoldingRow = memo(function HoldingRow({ holding }: { holding: HoldingView }) {
   const { position, value, changePct } = holding;
   return (
     <Link
@@ -35,4 +38,4 @@ export function HoldingRow({ holding }: { holding: HoldingView }) {
       <ChevronRight className="col-start-3 row-start-1 size-4 shrink-0 sm:col-start-4 text-app-gray-300" />
     </Link>
   );
-}
+});

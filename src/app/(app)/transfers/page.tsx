@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Send } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,13 +15,17 @@ import {
   TransferStatusChip,
 } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
-import { TransferDialog } from "@/components/transfer-dialog";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { errorMessage } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
 import { fmtCredit, fmtDeadline, fmtQuantity, fmtRelative, shortId } from "@/lib/format";
 import { useTransferAction, useTransferDetails, useTransfers } from "@/lib/hooks";
 import type { Transfer } from "@/lib/types";
+
+const TransferDialog = dynamic(
+  () => import("@/components/transfer-dialog").then((module) => module.TransferDialog),
+  { ssr: false },
+);
 
 type Tab = "INBOX" | "SENT" | "ALL";
 

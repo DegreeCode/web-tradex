@@ -1,39 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, Download } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { copyToClipboard } from "@/lib/clipboard";
 
-function downloadKeys(keys: string[]) {
-  const text = [
-    "TradeX 복구키",
-    "패스키를 잃어버렸을 때 아래 키 중 하나로 계정을 되찾을 수 있어요. 각 키는 한 번만 쓸 수 있어요.",
-    "",
-    ...keys.map((key, index) => `${index + 1}. ${key}`),
-    "",
-  ].join("\n");
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "tradex-recovery-keys.txt";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 export function RecoveryKeyGrid({ keys, className }: { keys: string[]; className?: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
+    const timer = window.setTimeout(() => setCopied(null), 2000);
     return () => window.clearTimeout(timer);
   }, [copied]);
 
-  async function copyAll() {
-    if (!(await copyToClipboard(keys.join("\n"), "복구키를 복사했어요"))) return;
-    setCopied(true);
+  async function copy(key: string) {
+    if (!(await copyToClipboard(key, "복구키를 복사했어요"))) return;
+    setCopied(key);
   }
 
   return (
@@ -44,25 +27,22 @@ export function RecoveryKeyGrid({ keys, className }: { keys: string[]; className
             <span aria-hidden="true" className="w-4 shrink-0 text-[11px] font-semibold text-app-gray-400">
               {index + 1}
             </span>
-            <code className="numeric min-w-0 break-all text-[12px] text-app-gray-800 select-all">{key}</code>
+            <code className="numeric min-w-0 flex-1 break-all text-[12px] text-app-gray-800 select-all">{key}</code>
+            <button
+              type="button"
+              onClick={() => void copy(key)}
+              aria-label={`${index + 1}번째 복구키 복사`}
+              className="shrink-0 rounded-md p-1.5 text-app-gray-400 hover:bg-card hover:text-app-gray-700"
+            >
+              {copied === key ? <Check aria-hidden="true" className="size-3.5" /> : <Copy aria-hidden="true" className="size-3.5" />}
+            </button>
           </li>
         ))}
       </ol>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button type="button" variant="outline" onClick={copyAll} className="h-10 gap-2 rounded-xl text-[14px]">
-          {copied ? <Check aria-hidden="true" className="size-4" /> : <Copy aria-hidden="true" className="size-4" />}
-          전체 복사
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => downloadKeys(keys)}
-          className="h-10 gap-2 rounded-xl text-[14px]"
-        >
-          <Download aria-hidden="true" className="size-4" />
-          파일로 저장
-        </Button>
-      </div>
+      <p className="mt-3 rounded-xl bg-app-orange-light px-3.5 py-3 text-[12px] leading-relaxed break-keep text-app-gray-800">
+        복구키는 비밀번호 관리자처럼 안전한 곳에 한 개씩 저장하세요. 평문 파일로 내려받거나
+        클립보드에 오래 두지 마세요.
+      </p>
     </div>
   );
 }

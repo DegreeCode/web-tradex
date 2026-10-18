@@ -106,9 +106,12 @@ export default function SecurityPage() {
 
   function handleLogout() {
     logout.mutate(undefined, {
-      onSettled: () => {
+      // Only a confirmed sign-out leaves the app; otherwise the session may
+      // still be valid, so say so instead of bouncing back from /login.
+      onSuccess: () => {
         router.replace("/login");
       },
+      onError: (error) => toast.error(`로그아웃하지 못했어요. ${errorMessage(error)}`),
     });
   }
 

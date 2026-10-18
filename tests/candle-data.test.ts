@@ -51,11 +51,13 @@ test("monthly buckets follow Asia/Seoul calendar boundaries", () => {
   ]);
 });
 
-test("very sparse history keeps only a contiguous newest window and retires its cursor", () => {
+test("very sparse history keeps a contiguous newest window and can keep paging", () => {
   const result = appendCandleHistoryWithGaps(page([candle(100_000, "20")]), page([candle(0, "10")]), "1m");
   assert.equal(result.data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
-  assert.equal(result.page.has_more, false);
-  assert.equal(result.page.next_cursor, null);
+  // The cursor is owned by the older REST page; the client keeps it so the
+  // chart can continue loading history past the live-window cap.
+  assert.equal(result.page.has_more, true);
+  assert.equal(result.page.next_cursor, "older");
   assert.deepEqual(result.data.map((c) => Date.parse(c.timestamp) / 60_000),
     Array.from({ length: MAX_MATERIALIZED_CANDLE_BUCKETS }, (_, i) => 100_000 - i));
   assert.equal(result.data.at(-1)?.close, "10");
@@ -87,7 +89,7 @@ test("sparse second candles fill the entire displayed range within the total cap
   assert.equal(result.page.has_more, false);
 });
 
-test("older loading retains its cursor while there is room and closes it at exact capacity", () => {
+test("older loading retains its cursor past the live-window capacity", () => {
   const current = page([candle(2)]);
   const extended = appendCandleHistoryWithGaps(current, page([candle(0)]), "1m");
   assert.equal(extended.page.next_cursor, "older");
@@ -98,7 +100,9 @@ test("older loading retains its cursor while there is room and closes it at exac
   assert.equal(almostFull.page.next_cursor, "older");
   const full = appendCandleHistoryWithGaps(page([candle(MAX_MATERIALIZED_CANDLE_BUCKETS - 1)]), page([candle(0)]), "1m");
   assert.equal(full.data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
-  assert.equal(full.page.has_more, false);
+  assert.equal(full.page.has_more, true);
+  // This fixture's older row becomes the carry-in seed for the newest window;
+  // history begins accumulating once a further older page arrives.
 });
 
 test("a late real trade replaces a synthetic bucket and corrects following dots", () => {
@@ -132,7 +136,7 @@ test("clock-only windows retain a price seed without claiming real data", () => 
 });
 
 
-test("REST-sized older pages continue past 500 and retire only at the materialized cap", () => {
+test("REST-sized older pages continue past the live-window cap", () => {
   const restLimit = 500;
   const newest = MAX_MATERIALIZED_CANDLE_BUCKETS - 1;
   let current = page(Array.from({ length: restLimit }, (_, i) => candle(newest - i)));
@@ -151,8 +155,7 @@ test("REST-sized older pages continue past 500 and retire only at the materializ
       assert.equal(current.page.next_cursor, older.page.next_cursor);
     }
   }
-  assert.equal(current.page.has_more, false);
-  assert.equal(current.page.next_cursor, null);
+  assert.equal(current.page.has_more, true);
 });
 
 test("older seam fills beyond 500 without prematurely retiring the cursor", () => {

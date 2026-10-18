@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 
 import { InstrumentList } from "@/components/instrument-list";
@@ -26,6 +26,7 @@ const MAX_VISIBLE = 100;
 export default function MarketPage() {
   const instrumentsQuery = useInstruments();
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [sort, setSort] = useState<TickerSort>("recent");
   const [revealState, setRevealState] = useState({ key: "recent:", count: INITIAL_VISIBLE });
   const tickerOrderQuery = useTickerOrder(sort);
@@ -36,11 +37,11 @@ export default function MarketPage() {
     [instruments],
   );
 
-  const revealKey = `${sort}:${query}`;
+  const revealKey = `${sort}:${deferredQuery}`;
   const visibleCount = revealState.key === revealKey ? revealState.count : INITIAL_VISIBLE;
 
   const filtered = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
+    const keyword = deferredQuery.trim().toLowerCase();
     const orderedSymbols = tickerOrderQuery.data ?? [];
     const rankedSymbols = new Set(orderedSymbols);
     const ordered = orderedSymbols
@@ -56,7 +57,7 @@ export default function MarketPage() {
         instrument.tags.some((tag) => tag.toLowerCase().includes(keyword))
       );
     });
-  }, [instruments, instrumentsBySymbol, query, tickerOrderQuery.data]);
+  }, [instruments, instrumentsBySymbol, deferredQuery, tickerOrderQuery.data]);
 
   const visible = filtered.slice(0, Math.min(visibleCount, MAX_VISIBLE));
   const canShowMore = visibleCount < Math.min(filtered.length, MAX_VISIBLE);
@@ -107,6 +108,7 @@ export default function MarketPage() {
         value={sort}
         onChange={setSort}
         options={SORT_OPTIONS}
+        ariaLabel="정렬 기준"
         className="grid-cols-3! sm:grid-cols-6!"
       />
 

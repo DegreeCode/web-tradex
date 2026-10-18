@@ -6,6 +6,12 @@ const MAX_TIMER_MS = 2_147_483_647;
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
+if (process.env.NODE_ENV === "production" && !configuredBase) {
+  // A production bundle that silently points at localhost cannot reach the API
+  // and could be steered at a local service; fail at build time instead.
+  throw new Error("NEXT_PUBLIC_API_BASE_URL must be set for production builds");
+}
+
 export const API_BASE_URL = (
   configuredBase && configuredBase.length > 0 ? configuredBase : "http://localhost:8080"
 ).replace(/\/+$/, "");
@@ -17,6 +23,9 @@ export const API_BASE_URL = (
  */
 export function apiAssetUrl(path: string | null | undefined): string | null {
   if (!path || !/^\/(?![/\\])[^\s]*$/.test(path)) return null;
+  // Instrument icons are the only server-relative asset this client renders.
+  // Keep the resolver from turning a crafted value into an arbitrary API GET.
+  if (!path.startsWith("/api/v1/market/icons/")) return null;
   return `${API_BASE_URL}${path}`;
 }
 
@@ -58,6 +67,7 @@ const MESSAGES: Record<string, string> = {
   INVALID_BODY: "요청 형식이 올바르지 않아요",
   IDEMPOTENCY_REQUIRED: "요청을 다시 시도해주세요",
   IDEMPOTENCY_KEY_REUSED: "이미 처리된 요청이에요",
+  IDEMPOTENCY_IN_PROGRESS: "요청을 처리 중이에요. 잠시 후 다시 시도해주세요",
   AUTH_FAILED: "본인 확인에 실패했어요",
   SESSION_INVALID: "로그인이 만료됐어요. 다시 로그인해주세요",
   ORIGIN_INVALID: "허용되지 않은 접근이에요",
@@ -233,6 +243,9 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
   if (!response.ok) {
     const envelope = (payload ?? {}) as ErrorEnvelope;
     const code = envelope.error?.code ?? "INTERNAL_ERROR";
+    // AUTH_FAILED is a rejected proof (passkey step-up, device-link approval,
+    // recovery key), not an ended session; signing out on it would drop a
+    // valid session after a cancelled prompt.
     if (response.status === 401 && code === "SESSION_INVALID" && typeof window !== "undefined") {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
@@ -345,11 +358,14 @@ async function idempotentData<T>(method: "POST" | "PATCH", path: string, body: u
     if (logicalMutationKeys.get(signature) === entry) logicalMutationKeys.delete(signature);
     return data;
   } catch (error) {
+    // A key must also survive "still in progress": the original request may
+    // commit later, so retrying with a fresh key could duplicate an order or transfer.
     const definitiveClientFailure =
       error instanceof ApiError &&
       error.status >= 400 &&
       error.status < 500 &&
-      error.code !== "IDEMPOTENCY_KEY_REUSED";
+      error.code !== "IDEMPOTENCY_KEY_REUSED" &&
+      error.code !== "IDEMPOTENCY_IN_PROGRESS";
     if (definitiveClientFailure && logicalMutationKeys.get(signature) === entry) {
       logicalMutationKeys.delete(signature);
     }

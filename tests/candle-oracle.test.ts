@@ -160,7 +160,8 @@ for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
       current = appendCandleHistoryWithGaps(current, page(oracle([older], interval)), interval);
       check(current, seen, interval, `seed=99 interval=${interval} step=${step} history`);
       assert.equal(current.data.length, 5000);
-      assert.equal(current.page.has_more, false);
+      // History keeps the REST cursor open so the chart can page further back.
+      assert.equal(current.page.has_more, true);
     }
   });
 }

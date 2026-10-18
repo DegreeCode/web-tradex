@@ -143,7 +143,7 @@ export function PnLPanel({
       {summary && !error && rows.length === 0 ? (
         <EmptyState title="실현 손익 내역이 없어요" />
       ) : null}
-      <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
+      <div className="divide-y divide-app-gray-100 [&>*]:[content-visibility:auto] rounded-2xl bg-card px-4 shadow-card">
         {rows.map((row, index) => (
           <div
             key={`${row.account_id}-${row.instrument_id}-${row.source_type}-${row.source_id}-${row.at}-${index}`}

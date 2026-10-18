@@ -16,6 +16,7 @@ import { createPasskey, supportsPasskeys, webauthnErrorMessage } from "@/lib/web
 import type { CeremonyEnvelope } from "@/lib/webauthn";
 import type { Account, User } from "@/lib/types";
 import { LegalConsent } from "@/components/legal-consent";
+import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { BrandLogo } from "@/components/brand-logo";
 
@@ -65,6 +66,11 @@ export default function SignupPage() {
       const payload = await postData<RegistrationResult>("/api/v1/auth/registration/verify", {
         ceremony_id: registration.ceremonyId,
         credential: registration.credential,
+        // The server can persist the accepted versions for an audit trail.
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
+        consented_at: new Date().toISOString(),
+        age_over_14: true,
       });
       setResult(payload);
       toast.success("패스키를 등록했어요");

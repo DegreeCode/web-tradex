@@ -116,7 +116,7 @@ export default function NotificationsPage() {
           icon={<Bell aria-hidden="true" className="size-6" />}
         />
       ) : (
-        <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-2 [&>*]:[content-visibility:auto] xl:grid-cols-2">
           {rows.map((item) => (
             <NotificationCard key={item.notification_id} item={item} onOpen={handleOpen} />
           ))}

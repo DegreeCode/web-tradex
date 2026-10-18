@@ -56,7 +56,23 @@ function LinkApproval() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { linkedScope } = useAuth();
-  const [codeInput, setCodeInput] = useState(() => searchParams.get("code") ?? "");
+  // The approval address keeps the code in the fragment so it is not sent in
+  // Referer headers or access logs; older links may still use a query string.
+  const [codeInput, setCodeInput] = useState(() => {
+    if (typeof window === "undefined") return searchParams.get("code") ?? "";
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    return fragment.get("code") ?? searchParams.get("code") ?? "";
+  });
+  // A short-lived credential should not linger in the address bar or history.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const hadCode = url.searchParams.has("code") || /(?:^#|&)code=/.test(url.hash);
+    if (!hadCode) return;
+    url.searchParams.delete("code");
+    url.hash = "";
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}`);
+  }, []);
   const [code, setCode] = useState<string | null>(null);
   const [lookup, setLookup] = useState<DeviceLinkLookup | null>(null);
   const [lookingUp, setLookingUp] = useState(false);

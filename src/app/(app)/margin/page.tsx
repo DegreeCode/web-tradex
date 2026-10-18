@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { ErrorBlock, LoadingBlock, PageHeader, Surface } from "@/components/primitives";
@@ -9,9 +10,13 @@ import { Segmented } from "@/components/segmented";
 import { addDecimal, fmtCredit } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks";
 import { MarginCreateForm } from "@/components/margin/margin-create-form";
-import { MarginCloseAllDialog } from "@/components/margin/margin-close-all-dialog";
 import { MarginPositionsList } from "@/components/margin/margin-positions-list";
 import { isActiveMarginPosition, useMarginPositions, type MarginPosition } from "@/lib/margin";
+
+const MarginCloseAllDialog = dynamic(
+  () => import("@/components/margin/margin-close-all-dialog").then((module) => module.MarginCloseAllDialog),
+  { ssr: false },
+);
 
 type MobileTab = "POSITIONS" | "CREATE";
 
@@ -167,7 +172,10 @@ function MarginContent() {
         </div>
 
         <div className={`min-w-0 lg:col-span-5 lg:sticky lg:top-6 lg:self-start ${mobileTab === "CREATE" ? "" : "max-lg:hidden"}`}>
-          <MarginCreateForm
+          {/* On mobile the form mounts the first time its tab opens, then stays
+              mounted so switching tabs keeps what was typed. */}
+          <MarginCreateFormGate
+            mobileVisible={mobileTab === "CREATE"}
             eligibility={eligibility}
             eligibilityPending={positionsPending && !positionsUnavailable}
             initialSymbol={paramSymbol}
@@ -177,6 +185,31 @@ function MarginContent() {
         </div>
       </div>
     </div>
+  );
+}
+
+function MarginCreateFormGate(props: React.ComponentProps<typeof MarginCreateForm> & { mobileVisible: boolean }) {
+  const [shown, setShown] = useState(props.mobileVisible);
+  if (props.mobileVisible && !shown) setShown(true);
+  useEffect(() => {
+    if (shown) return;
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => {
+      if (query.matches) setShown(true);
+    };
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, [shown]);
+  if (!shown) return null;
+  return (
+    <MarginCreateForm
+      eligibility={props.eligibility}
+      eligibilityPending={props.eligibilityPending}
+      initialSymbol={props.initialSymbol}
+      selectedAccountId={props.selectedAccountId}
+      onCreated={props.onCreated}
+    />
   );
 }
 

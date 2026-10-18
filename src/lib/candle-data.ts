@@ -18,6 +18,12 @@ function parseTime(timestamp: string): number {
 }
 
 export interface CandlePage extends Page<Candle> {
+  /**
+   * Older candles kept after the live window filled. The newest window stays
+   * bounded so live updates and gap filling stay cheap, while history can grow
+   * without a cap as the user pages further back.
+   */
+  history?: Candle[];
   historyLoaded?: boolean;
   /** Exclusive REST trade timestamp boundary, used to avoid delayed WS duplicates. */
   syncedThrough?: string;
@@ -369,28 +375,64 @@ export function materializeCandlePage(
   throughTimestamp?: string,
 ): CandlePage {
   const filled = fillCandleGaps(page.data, interval, MAX_MATERIALIZED_CANDLE_BUCKETS, throughTimestamp);
-  return replaceCandlePageData(page, filled.data);
-}
-
-export function replaceCandlePageData(page: CandlePage, data: Candle[]): CandlePage {
   return {
-    ...page,
-    data,
-    // At capacity, extending history would immediately discard what was loaded.
-    // Retire the REST cursor instead of skipping omitted buckets silently.
-    page: data.length >= MAX_MATERIALIZED_CANDLE_BUCKETS
-      ? { ...page.page, has_more: false, next_cursor: null }
-      : page.page,
+    ...replaceCandlePageData(page, filled.data),
+    page: retireCursorAtCapacity(page, filled.data),
   };
 }
 
-/** Fill history and its seam in one bounded walk from the newest bucket. */
+/** Retire the cursor once a single contiguous window has reached its cap. */
+function retireCursorAtCapacity(page: CandlePage, data: Candle[]): CandlePage["page"] {
+  return data.length >= MAX_MATERIALIZED_CANDLE_BUCKETS && !page.history?.length
+    ? { ...page.page, has_more: false, next_cursor: null }
+    : page.page;
+}
+
+/**
+ * Replaces the bounded live window. `history` holds real candles from older
+ * REST pages and is never trimmed; the cursor stays exactly as the server
+ * reported it, so loading can continue past the live-window cap.
+ */
+export function replaceCandlePageData(
+  page: CandlePage,
+  data: Candle[],
+  history = page.history,
+): CandlePage {
+  return {
+    ...page,
+    data,
+    ...(history && history.length > 0 ? { history } : { history: undefined }),
+  };
+}
+
+/**
+ * Appends an older REST page. The live window stays contiguous and bounded,
+ * while real candles beyond it are kept in `history` for the chart to show.
+ */
 export function appendCandleHistoryWithGaps(
   current: CandlePage,
   older: Page<Candle>,
   interval: CandleInterval,
 ): CandlePage {
-  return materializeCandlePage(appendCandleHistory(current, older), interval);
+  // `older` is the first argument so the newer live overlap keeps its values.
+  const merged = mergeCandles(older.data, current.data);
+  // Materialise the whole merged set so a newly loaded older row can become
+  // the carry-in price for synthetic flats at the seam.
+  const materialized = materializeCandlePage({ ...current, data: merged, history: undefined }, interval);
+  // Keep the first page complete (its rows and synthetic seam) and move only
+  // the rows beyond the live-window cap into history. The cursor is owned by
+  // the older page, so paging can continue indefinitely.
+  const oldest = materialized.data.at(-1)?.timestamp;
+  const oldestTime = oldest ? parseTime(oldest) : Number.NEGATIVE_INFINITY;
+  const olderRows = merged.filter((candle) =>
+    !candle.synthetic && parseTime(candle.timestamp) < oldestTime);
+  const history = mergeCandles(current.history ?? [], olderRows);
+  return {
+    ...materialized,
+    history: history.length > 0 ? history : undefined,
+    page: older.page,
+    historyLoaded: true,
+  };
 }
 
 /** Clock-only changes preserve REST synchronization and never invent a seed. */
@@ -413,7 +455,10 @@ export function advanceCandlePage(
     cursor = previousCandleBucketTimestamp(cursor, interval);
   }
   const data = appended.concat(page.data.slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS - appended.length));
-  return replaceCandlePageData(page, rememberMaterializedData(data, interval));
+  return {
+    ...replaceCandlePageData(page, rememberMaterializedData(data, interval), page.history),
+    page: retireCursorAtCapacity(page, data),
+  };
 }
 
 export function isCandleInterval(value: unknown): value is CandleInterval {
@@ -492,6 +537,7 @@ export function reconcileCandleSnapshot(
 ): CandlePage {
   let result = materializeCandlePage({
     data: mergeCandles(current?.data ?? [], fetched.data),
+    history: current?.history,
     page: from && current ? current.page : fetched.page,
     historyLoaded: current?.historyLoaded,
     syncedThrough: to,
@@ -506,7 +552,7 @@ export function reconcileCandleSnapshot(
     // Do not silently acknowledge a replay we could not represent. The normal
     // query error/recovery path retains the previous cache on failure.
     if (!applied.data) throw new Error("Candle snapshot could not replay a buffered trade");
-    result = replaceCandlePageData(result, applied.data);
+    result = replaceCandlePageData(result, applied.data, result.history);
   }
   return result;
 }
@@ -532,6 +578,12 @@ export function applyTradeToCandlePage(
   if (!timestamp || !trade.price || !trade.quantity || !trade.credit) return { status: "recovery" };
   const contiguous = isMaterializedData(page.data, interval);
   const tradeTime = parseTime(timestamp);
+  // Older pages are immutable REST history. A delayed live trade cannot change
+  // them, and forcing a refetch here would discard the user's scrollback.
+  const oldestWindow = page.data.at(-1)?.timestamp;
+  if (page.history?.length && oldestWindow && tradeTime < parseTime(oldestWindow)) {
+    return { status: "updated", data: page.data };
+  }
   const latestTime = contiguous ? parseTime(page.data[0].timestamp) : page.data.reduce((latest, candle) => {
     const value = parseTime(candle.timestamp);
     return Number.isFinite(value) && value > latest ? value : latest;

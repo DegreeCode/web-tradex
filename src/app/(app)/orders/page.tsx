@@ -1,11 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { OrderAmendDialog } from "@/components/order-amend-dialog";
-import { OrderGroupDialog } from "@/components/order-group-dialog";
 import { accountLabel } from "@/lib/accounts";
 import {
   EmptyState,
@@ -36,6 +35,15 @@ import {
   triggerOrderDisplayRows,
 } from "@/lib/trigger-order";
 import type { Order } from "@/lib/types";
+
+const OrderAmendDialog = dynamic(
+  () => import("@/components/order-amend-dialog").then((module) => module.OrderAmendDialog),
+  { ssr: false },
+);
+const OrderGroupDialog = dynamic(
+  () => import("@/components/order-group-dialog").then((module) => module.OrderGroupDialog),
+  { ssr: false },
+);
 
 type Tab = "ORDERS" | "TRADES";
 type Filter = "ALL" | "PENDING" | "DONE" | "CLOSED";
@@ -297,7 +305,7 @@ export default function OrdersPage() {
           ) : trades.length === 0 ? (
             <EmptyState title="체결 내역이 없어요" description="주문이 체결되면 여기에 표시돼요" />
           ) : (
-            <div className="divide-y divide-app-gray-100 rounded-2xl bg-card px-4 shadow-card">
+            <div className="divide-y divide-app-gray-100 [&>*]:[content-visibility:auto] rounded-2xl bg-card px-4 shadow-card">
               {trades.map((trade) => (
                 <div key={trade.trade_id} className="grid min-w-0 gap-2 py-3 sm:grid-cols-2">
                   <div className="flex min-w-0 items-start gap-2">

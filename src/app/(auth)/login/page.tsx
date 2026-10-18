@@ -318,8 +318,26 @@ function MethodOption({
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<LoginSkeleton />}>
       <LoginScreen />
     </Suspense>
+  );
+}
+
+function LoginSkeleton() {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center px-5 py-10" role="status" aria-label="로그인 화면 불러오는 중">
+      <div className="w-full max-w-[400px]">
+        <div className="mb-8 text-center">
+          <p className="text-[26px] font-extrabold tracking-[-0.04em] text-app-gray-900">
+            <BrandLogo />
+          </p>
+          <div className="mx-auto mt-6 h-7 w-44 animate-pulse rounded-md bg-app-gray-200" />
+          <div className="mx-auto mt-2 h-4 w-60 animate-pulse rounded bg-app-gray-100" />
+        </div>
+        <div className="h-[148px] animate-pulse rounded-2xl bg-card shadow-card" />
+        <div className="mx-auto mt-5 h-4 w-40 animate-pulse rounded bg-app-gray-100" />
+      </div>
+    </div>
   );
 }

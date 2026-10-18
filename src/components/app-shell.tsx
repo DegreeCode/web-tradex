@@ -24,6 +24,8 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { useConnectionToast, useLiveNotificationToasts } from "@/lib/live-toasts";
+import { errorMessage } from "@/lib/api";
+import { toast } from "sonner";
 import { formatUnreadBadge } from "@/lib/notifications";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
 import { BrandLogo } from "@/components/brand-logo";
@@ -113,10 +115,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   function handleLogout() {
     logout.mutate(undefined, {
-      onSettled: () => {
+      // Only a confirmed sign-out leaves the app; otherwise the session may
+      // still be valid, so say so instead of bouncing back from /login.
+      onSuccess: () => {
         setMoreOpen(false);
         router.replace("/login");
       },
+      onError: (error) => toast.error(`로그아웃하지 못했어요. ${errorMessage(error)}`),
     });
   }
 

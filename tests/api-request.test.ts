@@ -84,6 +84,22 @@ test("uncertain mutations reuse their key until the authenticated session is cle
   assert.notEqual(keys[1], keys[2]);
 });
 
+test("an in-progress mutation keeps its key so a retry cannot duplicate it", async (t) => {
+  t.after(clearIdempotencyKeys);
+  const keys: string[] = [];
+  t.mock.method(globalThis, "fetch", async (_url: string, options: RequestInit) => {
+    keys.push((options.headers as Record<string, string>)["Idempotency-Key"]);
+    if (keys.length === 1) {
+      return Response.json({ error: { code: "IDEMPOTENCY_IN_PROGRESS" } }, { status: 409 });
+    }
+    return Response.json({ data: { status: "ok" } });
+  });
+  const action = () => postIdempotentData("/api/v1/orders", { quantity: "1" });
+  await assert.rejects(action(), (error) => error instanceof ApiError && error.code === "IDEMPOTENCY_IN_PROGRESS");
+  await action();
+  assert.equal(keys[0], keys[1], "the original request may still commit");
+});
+
 test("definitive rejection releases a mutation key for the next attempt", async (t) => {
   t.after(clearIdempotencyKeys);
   const keys: string[] = [];

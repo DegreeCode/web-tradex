@@ -14,11 +14,13 @@ export function Segmented<T extends string>({
   onChange,
   options,
   className,
+  ariaLabel,
 }: {
   value: T;
   onChange: (value: T) => void;
   options: SegmentedOption<T>[];
   className?: string;
+  ariaLabel?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const indicatorRef = useRef<HTMLSpanElement>(null);
@@ -56,6 +58,8 @@ export function Segmented<T extends string>({
   return (
     <div
       ref={containerRef}
+      role="group"
+      aria-label={ariaLabel}
       className={cn(
         "relative grid gap-1 rounded-xl bg-app-gray-100 p-1",
         // Until the highlight is placed (before hydration), the button paints its own.

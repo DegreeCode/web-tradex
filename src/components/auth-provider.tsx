@@ -1,11 +1,12 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
 import { clearSessionCache, resetSessionCache, useMe } from "@/lib/hooks";
+import { broadcastSessionChange, onSessionChange, type SessionIdentity } from "@/lib/session-sync";
 import { setSignedIn } from "@/lib/session-mode";
 import type { SessionScope, User } from "@/lib/types";
 
@@ -33,6 +34,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // not restore the account after another request invalidated its session.
         void queryClient.cancelQueries({ queryKey: ["me"], exact: true }).then(() => {
           queryClient.setQueryData(["me"], null);
+        });
+      }),
+    [queryClient],
+  );
+
+  // The account this tab last confirmed; undefined until /me first resolves.
+  const confirmedIdentity = useRef<SessionIdentity | undefined>(undefined);
+
+  // Another tab signed in, signed out, or switched accounts. Cancel the local
+  // /me answer, drop the old account's private cache, and ask again with the
+  // new cookies before showing anything. A tab already on that account keeps
+  // its cache, sockets and pending idempotency keys.
+  useEffect(
+    () =>
+      onSessionChange((identity) => {
+        if (confirmedIdentity.current === identity) return;
+        void queryClient.cancelQueries({ queryKey: ["me"], exact: true }).then(() => {
+          void clearSessionCache(queryClient).then(() => {
+            void queryClient.invalidateQueries({ queryKey: ["me"] });
+          });
         });
       }),
     [queryClient],
@@ -84,6 +105,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setSignedIn(value.status === "authenticated");
   }, [value.status]);
+
+  // A confirmed account change (including sign-in and sign-out) is announced
+  // to the other tabs, which then re-read /me and clear their private caches.
+  // The first answer only learns the current session: opening or reloading a
+  // tab must not reset the others.
+  useEffect(() => {
+    if (auth.status === "loading") return;
+    const previous = confirmedIdentity.current;
+    confirmedIdentity.current = userId;
+    if (previous === undefined || previous === userId) return;
+    broadcastSessionChange(userId);
+  }, [auth.status, userId]);
 
   // Private queries aren't keyed by user, so the cache must not outlive the
   // account that filled it: a session that ends drops it, and a different

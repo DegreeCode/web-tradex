@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -80,6 +80,7 @@ import {
   updateNotificationCaches,
 } from "./notification-cache";
 import { eventKeyFromTitle, parseNotificationBody } from "./notifications";
+import { updatePreferences } from "./preferences";
 import { invalidateBatched } from "./query-batch";
 import { isSignedIn, useSignedIn } from "./session-mode";
 import {
@@ -721,11 +722,13 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => postData<{ status: string }>("/api/v1/auth/logout", {}),
-    onSettled: async () => {
+    // A failed logout may leave the HttpOnly session cookie valid. Clearing the
+    // local cache and showing the login screen then would be a fail-open on a
+    // shared device, so only a confirmed sign-out changes local state.
+    onSuccess: async () => {
       await queryClient.cancelQueries({ queryKey: ["me"], exact: true });
-      // Keep the observed auth query so AuthProvider receives the anonymous
-      // state before navigation, even when the logout request failed.
       queryClient.setQueryData(["me"], null);
+      updatePreferences({ selectedAccount: undefined });
       await clearSessionCache(queryClient);
     },
   });
@@ -875,6 +878,7 @@ export function useCandles(
         let cursor: string | undefined;
         let fetched: Candle[] = [];
         let page: Page<Candle>;
+        const seenCursors = new Set<string>();
         do {
           page = await apiPage<Candle>(
             `/api/v1/market/symbols/${encodeURIComponent(symbol ?? "")}/candles${buildQuery({
@@ -884,7 +888,10 @@ export function useCandles(
           // Recovery can span many REST pages after a long hidden period;
           // only the newest bounded window can survive materialization.
           fetched = mergeCandles(fetched, page.data).slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS);
-          cursor = from && page.page.has_more ? page.page.next_cursor ?? undefined : undefined;
+          const next = from && page.page.has_more ? page.page.next_cursor ?? undefined : undefined;
+          // A repeated cursor would otherwise loop forever on a bad server page.
+          cursor = next && !seenCursors.has(next) ? next : undefined;
+          if (next) seenCursors.add(next);
         } while (cursor && fetched.length < MAX_MATERIALIZED_CANDLE_BUCKETS);
         // Keep the older-history cursor: this request only advances the newest end.
         const latest = queryClient.getQueryData<CandlePage>(queryKey);
@@ -907,8 +914,10 @@ export function useCandles(
     ...(signedIn ? {} : { gcTime: 0 }),
     refetchInterval: false,
     refetchOnMount: signedIn ? "always" : false,
-    refetchOnWindowFocus: signedIn ? "always" : false,
-    refetchOnReconnect: signedIn ? "always" : false,
+    // The public stream and the local boundary clock own the cached tail. A
+    // focus/reconnect refetch would pull the whole page again for nothing.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: false,
   });
 
@@ -962,8 +971,17 @@ export function useCandles(
     older.mutate({ symbol, interval, limit, cursor });
   };
 
+  // The live window stays bounded; older pages accumulate in `history` so the
+  // chart can keep loading them without a hard cap.
+  const candles = useMemo(() => {
+    const page = query.data;
+    if (!page) return [];
+    return page.history?.length ? [...page.data, ...page.history] : page.data;
+  }, [query.data]);
+
   return {
     ...query,
+    candles,
     hasOlder,
     isLoadingOlder,
     olderError: olderIsCurrent && older.isError ? older.error : null,
@@ -1039,6 +1057,7 @@ export function useUnreadNotifications(enabled = true) {
   const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["notifications", "unread"],
+    // The badge caps at 50+, so one full page tells the shell everything it needs.
     queryFn: ({ signal }) =>
       loadNotificationPage(queryClient, `/api/v1/notifications${buildQuery({ sort: "pinned", unread: "true", limit: 50 })}`, { unreadOnly: true, signal }),
     enabled,
@@ -1204,11 +1223,22 @@ export function applyTickers(queryClient: QueryClient, rows: LiveTicker[], snaps
       return !update ? [instrument] : update.deleted ? [] : [{ ...instrument, ...update }];
     }),
   );
+  // A tombstone always drops the detail and its price overlay.
   for (const ticker of rows) {
-    if (ticker.deleted) {
-      clearTradePriceOverlay(ticker.symbol);
-      queryClient.removeQueries({ queryKey: ["instrument", ticker.symbol] });
-    } else {
+    if (!ticker.deleted) continue;
+    clearTradePriceOverlay(ticker.symbol);
+    queryClient.removeQueries({ queryKey: ["instrument", ticker.symbol] });
+  }
+  // Instrument details are keyed per symbol; a live frame rarely touches the
+  // open detail. Skip the per-row setQueryData walk unless it does.
+  const openDetails = queryClient.getQueryCache().findAll({
+    queryKey: ["instrument"],
+    type: "active",
+  });
+  if (snapshot || rows.length > 1 || openDetails.some((query) =>
+    changed.has(String(query.queryKey[1])))) {
+    for (const ticker of rows) {
+      if (ticker.deleted) continue;
       queryClient.setQueryData<Instrument>(["instrument", ticker.symbol], (old) =>
         old ? applyTradePriceOverlay({ ...old, ...ticker }) : old,
       );

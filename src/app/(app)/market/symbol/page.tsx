@@ -2,15 +2,14 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { CalendarClock, Clock, OctagonAlert } from "lucide-react";
 import { cn } from "cn";
 
 import { useAuth } from "@/components/auth-provider";
-import { CandleChart } from "@/components/candle-chart";
 import { ChartSettingsButton } from "@/components/chart-settings-button";
 import { CeilingBadge, InstrumentAvatar } from "@/components/instrument-list";
-import { ManagerPanel, ManagerTransferInbox } from "@/components/manager-panel";
 import { PriceChart } from "@/components/price-chart";
 import { PriceFlash } from "@/components/price-flash";
 import {
@@ -27,7 +26,6 @@ import {
 } from "@/components/primitives";
 import { GuestDetailsNotice } from "@/components/guest";
 import { ResponsiveOrderForm } from "@/components/responsive-order-form";
-import { SymbolDisclosures } from "@/components/symbol-disclosures";
 import { errorMessage } from "@/lib/api";
 import { resolveAccountId } from "@/lib/accounts";
 import { CANDLE_INTERVAL_LABELS, pickCandleInterval, resolveCandleIntervals } from "@/lib/candle-intervals";
@@ -63,6 +61,23 @@ import {
 import { hasDistinctLastTrade, isAtCurveCeiling } from "@/lib/instruments";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import type { CandleInterval, Instrument } from "@/lib/types";
+
+const CandleChart = dynamic(
+  () => import("@/components/candle-chart").then((module) => module.CandleChart),
+  { ssr: false, loading: () => <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" /> },
+);
+const SymbolDisclosures = dynamic(
+  () => import("@/components/symbol-disclosures").then((module) => module.SymbolDisclosures),
+  { ssr: false, loading: () => <Surface><SkeletonRows rows={3} /></Surface> },
+);
+const ManagerPanel = dynamic(
+  () => import("@/components/manager-panel").then((module) => module.ManagerPanel),
+  { ssr: false },
+);
+const ManagerTransferInbox = dynamic(
+  () => import("@/components/manager-panel").then((module) => module.ManagerTransferInbox),
+  { ssr: false },
+);
 
 const DEFAULT_CANDLE_INTERVAL: CandleInterval = "1h";
 
@@ -219,6 +234,8 @@ function SymbolDetail() {
     account_id: accountId || undefined,
     status: "PENDING,ACTIVATED",
   });
+  // The list is account-wide, so this symbol's lines may sit past the first
+  // page; load every page so no open order is missing from the chart.
   const { hasNextPage, isFetching, isError: ordersFailed, fetchNextPage } = ordersQuery;
   useEffect(() => {
     if (ordersEnabled && hasNextPage && !isFetching && !ordersFailed) {
@@ -315,16 +332,10 @@ function SymbolDetail() {
   ) : undefined;
   const chartHolding = holding ? { ...holding, showAverageCost } : undefined;
   const trades = tradesQuery.data?.data ?? [];
-  const candles = interval === undefined ? [] : candlesQuery.data?.data ?? [];
-  // Same rule as the line view's color: the loaded period's latest close
-  // against its earliest open. The chart sorts candles by time, so do too.
-  let first = candles[0];
-  let last = candles[0];
-  for (const candle of candles) {
-    if (Date.parse(candle.timestamp) < Date.parse(first.timestamp)) first = candle;
-    if (Date.parse(candle.timestamp) > Date.parse(last.timestamp)) last = candle;
-  }
-  const periodRising = !first || Number(last.close) >= Number(first.open);
+  const candles = interval === undefined ? [] : candlesQuery.candles;
+  // Candle pages are newest-first, including the appended history window.
+  const periodRising = !candles.length ||
+    Number(candles[0].close) >= Number(candles[candles.length - 1].open);
   const newest = trades[0];
   const oldest = trades[trades.length - 1];
   const windowChange = trades.length >= 2 ? changePercent(oldest.price, newest.price) : null;
@@ -445,17 +456,31 @@ function SymbolDetail() {
               ) : candles.length === 0 && (candlesQuery.isLoading || candlesQuery.isPending) ? (
                 <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
               ) : candles.length > 0 ? (
-                <CandleChart
-                  candles={candles}
-                  interval={interval}
-                  seriesType={chartSeriesType}
-                  onLoadOlder={candlesQuery.loadOlder}
-                  hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
-                  loadingOlder={candlesQuery.isLoadingOlder}
-                  holding={chartHolding}
-                  orders={chartOrders}
-                  curvePrice={curvePrice}
-                />
+                <>
+                  <CandleChart
+                    candles={candles}
+                    interval={interval}
+                    seriesType={chartSeriesType}
+                    onLoadOlder={candlesQuery.loadOlder}
+                    hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
+                    loadingOlder={candlesQuery.isLoadingOlder}
+                    holding={chartHolding}
+                    orders={chartOrders}
+                    curvePrice={curvePrice}
+                  />
+                  {/* Keep the history affordance visible below the chart as well
+                      as the chart's own edge control. */}
+                  {candlesQuery.hasOlder ? (
+                    <button
+                      type="button"
+                      onClick={candlesQuery.loadOlder}
+                      disabled={candlesQuery.isLoadingOlder}
+                      className="mt-2 h-10 w-full rounded-xl bg-app-gray-50 text-[13px] font-semibold text-app-gray-600 hover:bg-app-gray-100 disabled:opacity-50"
+                    >
+                      {candlesQuery.isLoadingOlder ? "이전 캔들 불러오는 중…" : "이전 캔들 더 불러오기"}
+                    </button>
+                  ) : null}
+                </>
               ) : (
                 <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} curvePrice={curvePrice} />
               )}

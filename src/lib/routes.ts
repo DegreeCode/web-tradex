@@ -17,7 +17,16 @@ export function safeRedirectPath(target: string | null | undefined): string {
   try {
     const base = "https://app.invalid";
     const url = new URL(target, base);
-    return url.origin === base ? `${url.pathname}${url.search}${url.hash}` : "/";
+    // URL normalisation can turn "/..//host" or "/./\\host" into a
+    // protocol-relative "//host". Re-check the normalised path, and refuse
+    // encoded separators that a browser may decode before navigating.
+    if (
+      url.origin !== base ||
+      url.pathname.startsWith("//") ||
+      url.pathname.includes("\\") ||
+      /%2f|%5c/i.test(target)
+    ) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "/";
   }

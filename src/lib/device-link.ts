@@ -80,7 +80,13 @@ export function pollFailure(error: unknown, intervalMs: number): PollFailure {
  */
 export function verificationUrl(origin: string, path: string | null | undefined): string | null {
   if (!path || !/^\/link(?:[?#][^\s\\]*)?$/.test(path)) return null;
-  return `${origin}${path}`;
+  // The code is a short-lived credential; keep it in the fragment so it is not
+  // sent in Referer headers or written to server access logs.
+  const [base, query] = path.split("#", 2);
+  if (query !== undefined) return `${origin}${base}#${query}`;
+  const index = base.indexOf("?");
+  if (index < 0) return `${origin}${base}`;
+  return `${origin}${base.slice(0, index)}#${base.slice(index + 1)}`;
 }
 
 export function remainingSeconds(expiresAt: string, now: number): number {

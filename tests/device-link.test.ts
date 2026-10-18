@@ -69,7 +69,7 @@ test("a dead request stops polling", () => {
 
 test("only a same-origin /link path becomes the approval address", () => {
   const origin = "https://app.example.com";
-  assert.equal(verificationUrl(origin, "/link?code=K7QM-2XRP"), "https://app.example.com/link?code=K7QM-2XRP");
+  assert.equal(verificationUrl(origin, "/link?code=K7QM-2XRP"), "https://app.example.com/link#code=K7QM-2XRP");
   assert.equal(verificationUrl(origin, "/link"), "https://app.example.com/link");
   assert.equal(verificationUrl(origin, "//evil.example/link"), null);
   assert.equal(verificationUrl(origin, "https://evil.example/link"), null);

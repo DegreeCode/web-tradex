@@ -47,6 +47,7 @@ API 서버는 프론트 오리진을 CORS·WebAuthn 허용 오리진으로 등�
 ## 로컬 실행
 
 1. API 서버를 `http://localhost:8080`에서 실행하고, 허용 오리진에 `http://localhost:3000`을 등록합니다.
+   Node.js 24 이상을 사용하세요(`.nvmrc`, `engines`).
    `localhost:3000`과 `localhost:8080`은 같은 사이트(포트는 SameSite 판단에 영향 없음)라 별도 도메인
    설정이 필요 없습니다.
 
@@ -62,6 +63,12 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 
 3. 정적 산출물 확인(선택): `npm run build` → `out/` 생성, `npm run start`로 그대로 서빙해 확인합니다.
 
+## 보안 헤더
+
+`vercel.json`은 CSP(스크립트·연결·이미지·폰트·워커), HSTS, COOP, XFO, nosniff, Referrer/Permissions
+정책과 정적 자산 캐시 헤더를 설정합니다. CSP의 `connect-src`는 배포 시 실제 API/WSS 오리진으로
+좁히세요. `npm run start`로 띄우는 로컬 `serve`에는 이 헤더가 적용되지 않습니다.
+
 ## Vercel 배포 (정적)
 
 1. `DegreeCode/web-tradex` 저장소를 Import 하고 **Root Directory를 저장소 루트(`./`)** 로 지정합니다.
@@ -72,9 +79,11 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 4. Settings → Domains 에서 커스텀 도메인(예: `app.example.com`)을 연결합니다.
 5. API 서버의 허용 오리진을 새 도메인으로 맞춥니다.
 
-`vercel.json`은 모든 경로에 보안 헤더(클릭재킹 차단 `frame-ancestors 'none'`·`X-Frame-Options`,
-`form-action 'self'`, `Cross-Origin-Opener-Policy: same-origin`, `nosniff`, Referrer/Permissions 정책)를
-붙입니다. 정적 익스포트는 인라인 부트스트랩 스크립트를 쓰므로 `script-src`는 지정하지 않습니다.
+`vercel.json`은 모든 경로에 CSP(인라인 부트스트랩 때문에 `script-src 'unsafe-inline'` 포함), HSTS,
+클릭재킹 차단(`frame-ancestors 'none'`·`X-Frame-Options`), `form-action 'self'`,
+`Cross-Origin-Opener-Policy: same-origin`, `nosniff`, Referrer/Permissions 정책과 정적 자산 캐시
+헤더를 붙입니다. 배포 전에 `connect-src`를 실제 API/WSS 오리진으로 좁히고, `Content-Security-Policy-Report-Only`로
+위반을 먼저 확인하는 것을 권장합니다.
 
 ## 화면과 사용 API
 
@@ -180,7 +189,11 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
 - **세션 만료**: `401 SESSION_INVALID` 수신 시 `["me"]` 캐시를 `null`로 내려 로그인 화면으로 보냅니다.
   이때 재요청(invalidate)은 하지 않습니다 — 무효화하면 401→이벤트→재요청이 무한 반복됩니다.
   비공개 조회 캐시는 사용자별 키가 없으므로, 로그인 상태가 끝나면 `["me"]`를 뺀 캐시를 지우고
-  다른 계정으로 바뀌면 다시 조회합니다.
+  다른 계정으로 바뀌면 다시 조회합니다. 로그인·로그아웃·계정 전환은 `BroadcastChannel`/`storage`로
+  다른 탭에 전파해 각 탭이 `/me`를 다시 확인하고 비공개 캐시를 비웁니다.
+- **캔들 히스토리**: 최신 구간은 5,000버킷으로 제한해 실시간 병합 비용을 유지하고, 그보다 오래된
+  실제 캔들은 `history`에 무제한 누적합니다. 차트는 아래쪽으로 계속 스크롤하거나 "이전 캔들 더
+  불러오기"를 눌러 REST 페이지를 끝까지 이어서 가져올 수 있습니다.
 - **복구 모드**: `403 RECOVERY_RESTRICTED`는 별도 상태로 처리해 `/recover`에서 새 패스키를 등록하도록 안내합니다.
 
 ## 스크립트
@@ -190,7 +203,9 @@ npm run dev      # 개발 서버 (next dev)
 npm run build    # 정적 빌드 → out/
 npm run start    # out/ 정적 미리보기 (serve)
 npm run lint     # ESLint
-npm test         # 단위 테스트 (node:test + tsx, tests/*.test.ts)
+npm run typecheck # TypeScript 검사
+npm test         # 단위 테스트 (node:test + tsx, tests/**/*.test.ts)
+npm run check    # lint + typecheck + test
 ```
 
 ## 의존성 메모

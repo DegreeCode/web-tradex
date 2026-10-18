@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, postData } from "@/lib/api";
+import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { clearSessionCache } from "@/lib/hooks";
 
 export default function InvitationPage() {
@@ -29,6 +30,10 @@ export default function InvitationPage() {
     try {
       await postData("/api/v1/auth/invitations/redemption", {
         invitation_token: token.trim(),
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
+        consented_at: new Date().toISOString(),
+        age_over_14: true,
       });
       setToken("");
       // The session now belongs to the invited account.

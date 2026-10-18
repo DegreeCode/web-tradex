@@ -7,7 +7,8 @@ import { AlertTriangle } from "lucide-react";
 /** Shown by error boundaries instead of a blank screen when rendering fails. */
 export function ErrorFallback({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error(error);
+    // Keep stack traces and request details out of the browser console.
+    console.error(error instanceof Error ? error.message : "render error");
   }, [error]);
 
   return (
