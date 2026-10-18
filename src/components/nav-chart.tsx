@@ -59,12 +59,15 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
     const values = data.map((point) => point.value);
     const min = Math.min(...values);
     const max = Math.max(...values);
-    const range = max - min || 1;
+    const range = max - min;
     const x = (index: number) => (index / (data.length - 1)) * width;
-    const y = (value: number) => inset + (1 - (value - min) / range) * (height - inset * 2);
+    // An unchanged value has no range to scale; draw it across the middle
+    // instead of pinning it to the bottom edge, where it is hard to see.
+    const y = (value: number) =>
+      range === 0 ? height / 2 : inset + (1 - (value - min) / range) * (height - inset * 2);
     const line = data.map((point, index) => `${index === 0 ? "M" : "L"}${x(index).toFixed(2)},${y(point.value).toFixed(2)}`).join(" ");
     const area = `${line} L${width},${height} L0,${height} Z`;
-    return { width, line, area, min, max };
+    return { width, line, area, min, max, y };
   }, [data, hasData, height]);
 
   if (!geometry) {
@@ -89,10 +92,12 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
     const index = Math.round(ratio * (data.length - 1));
     const point = data[index];
     if (!point) return;
+    // Snap to the nearest point, as the previous chart's magnet crosshair did.
+    // The viewBox height matches the element, so y is already in pixels.
     setHovered({
       ...point,
-      x: ratio * rect.width,
-      y: 0,
+      x: (index / (data.length - 1)) * rect.width,
+      y: geometry.y(point.value),
       width: rect.width,
     });
   }
@@ -131,10 +136,24 @@ export function NavChart({ points, height = 200 }: { points: NavPoint[]; height?
         />
       </svg>
       {hovered ? (
+        <>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[#b0b8c1]"
+            style={{ left: hovered.x }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{ left: hovered.x, top: hovered.y, backgroundColor: color }}
+          />
+        </>
+      ) : null}
+      {hovered ? (
         <div
           className="pointer-events-none absolute z-10 rounded-lg bg-app-gray-900/90 px-2.5 py-1.5 whitespace-nowrap text-app-gray-50 shadow-lg"
           style={{
-            top: 8,
+            top: Math.max(0, Math.min(hovered.y - 24, height - 52)),
             ...(hovered.x < hovered.width / 2
               ? { left: hovered.x + TOOLTIP_GAP }
               : { right: hovered.width - hovered.x + TOOLTIP_GAP }),

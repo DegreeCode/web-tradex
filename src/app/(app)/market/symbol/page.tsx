@@ -456,31 +456,17 @@ function SymbolDetail() {
               ) : candles.length === 0 && (candlesQuery.isLoading || candlesQuery.isPending) ? (
                 <LoadingBlock className="h-[300px] rounded-xl bg-app-gray-50 py-0" />
               ) : candles.length > 0 ? (
-                <>
-                  <CandleChart
-                    candles={candles}
-                    interval={interval}
-                    seriesType={chartSeriesType}
-                    onLoadOlder={candlesQuery.loadOlder}
-                    hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
-                    loadingOlder={candlesQuery.isLoadingOlder}
-                    holding={chartHolding}
-                    orders={chartOrders}
-                    curvePrice={curvePrice}
-                  />
-                  {/* Keep the history affordance visible below the chart as well
-                      as the chart's own edge control. */}
-                  {candlesQuery.hasOlder ? (
-                    <button
-                      type="button"
-                      onClick={candlesQuery.loadOlder}
-                      disabled={candlesQuery.isLoadingOlder}
-                      className="mt-2 h-10 w-full rounded-xl bg-app-gray-50 text-[13px] font-semibold text-app-gray-600 hover:bg-app-gray-100 disabled:opacity-50"
-                    >
-                      {candlesQuery.isLoadingOlder ? "이전 캔들 불러오는 중…" : "이전 캔들 더 불러오기"}
-                    </button>
-                  ) : null}
-                </>
+                <CandleChart
+                  candles={candles}
+                  interval={interval}
+                  seriesType={chartSeriesType}
+                  onLoadOlder={candlesQuery.loadOlder}
+                  hasOlder={candlesQuery.hasOlder && !candlesQuery.olderError}
+                  loadingOlder={candlesQuery.isLoadingOlder}
+                  holding={chartHolding}
+                  orders={chartOrders}
+                  curvePrice={curvePrice}
+                />
               ) : (
                 <PriceChart trades={trades} holding={chartHolding} orders={chartOrders} curvePrice={curvePrice} />
               )}
