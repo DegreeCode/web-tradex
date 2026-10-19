@@ -7,8 +7,11 @@ import { ArrowUpRight } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { GuestOrderBar, GuestOrderPrompt } from "@/components/guest";
 import { OrderForm, type OrderAccountState } from "@/components/order-form";
+import { MarginCapacityChips } from "@/components/margin/margin-capacity";
+import { useMarginCapacity } from "@/lib/hooks/margin-capacity";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { fmtPrice } from "@/lib/format";
+import { shouldShowMarginCapacityRow } from "@/lib/margin-capacity";
 import type { Instrument } from "@/lib/types";
 
 // Matches Tailwind's `lg` breakpoint, where the form sits in the side column.
@@ -110,13 +113,20 @@ export function ResponsiveOrderForm({
 }
 
 function MarginLink({ symbol, className }: { symbol: string; className?: string }) {
+  const { capacity, hidden, status } = useMarginCapacity(symbol);
+  const showCapacityRow = shouldShowMarginCapacityRow({ capacity, hidden, status });
   return (
     <Link
       href={`/margin?symbol=${encodeURIComponent(symbol)}`}
-      className={`flex items-center justify-between gap-3 rounded-xl bg-card px-4 py-3 text-[13px] text-app-gray-500 transition-colors hover:bg-app-gray-50 ${className ?? ""}`}
+      className={`flex min-w-0 items-center justify-between gap-2 rounded-xl bg-card px-4 py-3 text-[13px] text-app-gray-500 transition-colors hover:bg-app-gray-50 ${className ?? ""}`}
     >
-      레버리지로 롱·숏 거래하기
-      <span className="inline-flex items-center gap-0.5 font-bold text-app-blue">
+      {showCapacityRow ? (
+        <span className="flex min-w-0 flex-col gap-1">
+          <span>레버리지로 롱·숏 거래하기</span>
+          <span className="flex h-5 items-center"><MarginCapacityChips capacity={capacity} /></span>
+        </span>
+      ) : "레버리지로 롱·숏 거래하기"}
+      <span className="inline-flex shrink-0 items-center gap-0.5 font-bold text-app-blue">
         마진 거래
         <ArrowUpRight className="size-3.5" />
       </span>

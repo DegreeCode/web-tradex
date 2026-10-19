@@ -19,6 +19,8 @@ import { Collapse, ErrorBlock, InstrumentStateChip, Surface } from "@/components
 import { Segmented } from "@/components/segmented";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
+import { MarginCapacityPanel } from "./margin-capacity";
+import { useMarginCapacity } from "@/lib/hooks/margin-capacity";
 import {
   addDecimal,
   compareDecimal,
@@ -74,6 +76,7 @@ export function MarginCreateForm({
   // Form states
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const resolvedSymbol = symbol || initialSymbol || instruments[0]?.symbol || "";
+  const { capacity } = useMarginCapacity(resolvedSymbol);
   const [side, setSide] = useState<MarginSide>("LONG");
   const [sideInitialized, setSideInitialized] = useState(false);
   const [collateral, setCollateral] = useState("");
@@ -316,6 +319,8 @@ export function MarginCreateForm({
             발행사(매니저)는 자기 종목에 {side === "LONG" ? "롱" : "숏"} 포지션을 열 수 없어요.
           </p>
         ) : null}
+
+        <MarginCapacityPanel capacity={capacity} side={side} />
 
         <div>
           <div className="flex items-center gap-0.5">

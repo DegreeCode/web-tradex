@@ -64,6 +64,10 @@ const SymbolDisclosures = dynamic(
   () => import("@/components/symbol-disclosures").then((module) => module.SymbolDisclosures),
   { ssr: false, loading: () => <Surface><SkeletonRows rows={3} /></Surface> },
 );
+const SymbolHoldings = dynamic(
+  () => import("@/components/symbol-holdings").then((module) => module.SymbolHoldings),
+  { ssr: false, loading: () => <Surface><div className="h-[456px]"><SkeletonRows rows={4} /></div></Surface> },
+);
 const ManagerPanel = dynamic(
   () => import("@/components/manager-panel").then((module) => module.ManagerPanel),
   { ssr: false },
@@ -538,6 +542,7 @@ function SymbolDetail() {
               </div>
             ) : null}
           </Surface>
+          <SymbolHoldings key={symbol} symbol={symbol} />
         </div>
 
         <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100dvh-3rem)] lg:self-start lg:overflow-y-auto">
