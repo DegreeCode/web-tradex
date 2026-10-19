@@ -89,7 +89,7 @@ export interface MarginPosition {
   closed_at: string | null;
 }
 
-export type MarginLimitReason =
+type MarginLimitReason =
   | "BORROW_LIMIT"
   | "SLIPPAGE"
   | "POOL_INVENTORY"
@@ -116,7 +116,7 @@ export interface MarginExecution {
   net_proceeds: string;
 }
 
-export interface MarginPositionsPage {
+interface MarginPositionsPage {
   next_cursor: string | null;
   has_more: boolean;
 }
@@ -265,7 +265,7 @@ export function marginErrorMessage(error: unknown): string {
   return errorMessage(error);
 }
 
-export const MARGIN_QUERY_KEYS = {
+const MARGIN_QUERY_KEYS = {
   positions: (accountId?: string) => ["margin-positions", accountId ?? "all"] as const,
   positionsAll: () => ["margin-positions"] as const,
   position: (positionId: string | null) => ["margin-position", positionId] as const,
@@ -428,7 +428,7 @@ export function useMarginPositions(
 export function useMarginPosition(positionId: string | null) {
   return useQuery({
     queryKey: MARGIN_QUERY_KEYS.position(positionId),
-    queryFn: ({ signal }) => apiData<MarginPosition>(`/api/v1/margin/positions/${positionId}`, { signal }),
+    queryFn: ({ signal }) => apiData<MarginPosition>(`/api/v1/margin/positions/${encodeURIComponent(positionId ?? "")}`, { signal }),
     enabled: Boolean(positionId),
     refetchInterval: (query) =>
       query.state.data && LIVE_MARGIN_STATUSES.has(query.state.data.status) ? 5_000 : false,
@@ -467,7 +467,7 @@ export function useAddMarginCollateral(positionId: string) {
   return useMutation({
     mutationFn: (payload: MarginAddCollateralRequest) =>
       postIdempotentData<MarginPosition>(
-        `/api/v1/margin/positions/${positionId}/collateral`,
+        `/api/v1/margin/positions/${encodeURIComponent(positionId)}/collateral`,
         payload,
       ),
     onSuccess: () => {
@@ -481,7 +481,7 @@ export function useReduceMarginPosition(positionId: string) {
   return useMutation({
     mutationFn: (payload: MarginReductionRequest) =>
       postIdempotentData<MarginPosition>(
-        `/api/v1/margin/positions/${positionId}/reductions`,
+        `/api/v1/margin/positions/${encodeURIComponent(positionId)}/reductions`,
         payload,
       ),
     onSuccess: () => {
@@ -495,7 +495,7 @@ export function useCloseMarginPosition(positionId: string) {
   return useMutation({
     mutationFn: (payload: MarginClosureRequest = {}) =>
       postIdempotentData<MarginPosition>(
-        `/api/v1/margin/positions/${positionId}/closure`,
+        `/api/v1/margin/positions/${encodeURIComponent(positionId)}/closure`,
         payload,
       ),
     onSuccess: () => {

@@ -178,7 +178,7 @@ export function shortId(id: string | null | undefined): string {
   return `${id.slice(0, 8)}…${id.slice(-4)}`;
 }
 
-export function trimDecimal(value: string): string {
+function trimDecimal(value: string): string {
   if (!value.includes(".")) return value;
   return value.replace(/0+$/, "").replace(/\.$/, "");
 }

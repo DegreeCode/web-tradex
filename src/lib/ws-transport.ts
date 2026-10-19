@@ -52,7 +52,7 @@ export async function requestWsTicket(): Promise<string> {
   return response.ticket;
 }
 
-export function socketUrl(kind: WsKind): string {
+function socketUrl(kind: WsKind): string {
   return `${API_BASE_URL.replace(/^http/, "ws")}/ws/v1/${kind}`;
 }
 
@@ -272,7 +272,7 @@ export class TradexSocket implements StreamSocket {
     const count = this.channels.get(channel) ?? 0;
     this.channels.set(channel, count + 1);
     if (count > 0) return;
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.send({ op: "subscribe", channel });
     } else {
       this.connect();
@@ -291,7 +291,7 @@ export class TradexSocket implements StreamSocket {
     this.publicSeq.delete(channel);
     this.resubscribing.delete(channel);
     this.partialSnapshots.delete(channel);
-    if (this.socket?.readyState === WebSocket.OPEN) this.send({ op: "unsubscribe", channel });
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) this.send({ op: "unsubscribe", channel });
     if (this.kind === "public" && this.channels.size === 0) this.close();
   }
 
@@ -302,7 +302,7 @@ export class TradexSocket implements StreamSocket {
    */
   resubscribe(channel: string): void {
     if (this.kind === "private" || !this.channels.has(channel)) return;
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     this.publicSeq.delete(channel);
     this.resubscribing.add(channel);
     this.partialSnapshots.delete(channel);

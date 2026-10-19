@@ -14,7 +14,7 @@ import {
 import { symbolHref } from "./routes";
 import type { Notification } from "./types";
 
-export interface LiveToastAction {
+interface LiveToastAction {
   label: string;
   href: string;
 }
@@ -53,7 +53,7 @@ const symbolSlot = (prefix: string) => (symbol: string | undefined) => `${prefix
  * right away. Echoes of the user's own actions (logins, created orders,
  * created accounts) stay in the notification list.
  */
-export const LIVE_TOAST_RULES: Record<string, LiveToastRule> = {
+const LIVE_TOAST_RULES: Record<string, LiveToastRule> = {
   TRADE_EXECUTED: { action: () => ORDERS },
   TRIGGER_ACTIVATED: { action: () => ORDERS },
   TRIGGER_FAILED: { action: () => ORDERS, long: true },
@@ -102,7 +102,7 @@ function pruneSelfActions(now: number): void {
   while (selfActions.length > 0 && now - selfActions[0].at > SELF_ACTION_WINDOW_MS) selfActions.shift();
 }
 
-export function isSelfAction(event: string, symbol: string | undefined, now = Date.now()): boolean {
+function isSelfAction(event: string, symbol: string | undefined, now = Date.now()): boolean {
   pruneSelfActions(now);
   return selfActions.some((entry) =>
     entry.event === event && (!entry.symbol || !symbol || entry.symbol === symbol));

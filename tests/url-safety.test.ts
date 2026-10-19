@@ -19,7 +19,12 @@ test("post-login redirects stay on this site", () => {
 
 test("asset paths only resolve against the API origin", () => {
   assert.equal(apiAssetUrl("/api/v1/market/icons/ico_1"), `${API_BASE_URL}/api/v1/market/icons/ico_1`);
-  for (const hostile of [null, "", "@evil.example/x.png", "//evil.example/x.png", "/\\evil.example", "https://evil.example/x.png", "/a b"]) {
+  for (const hostile of [
+    null, "", "@evil.example/x.png", "//evil.example/x.png", "/\\evil.example", "https://evil.example/x.png", "/a b",
+    "/api/v1/market/icons/../tickers", "/api/v1/market/icons/%2e%2e/tickers",
+    "/api/v1/market/icons/..\\tickers", "/api/v1/market/icons/ico_1?redirect=/me",
+    "/api/v1/market/icons/ico_1#fragment", "/api/v1/market/icons/%2fme", "/api/v1/market/icons/",
+  ]) {
     assert.equal(apiAssetUrl(hostile), null, String(hostile));
   }
 });

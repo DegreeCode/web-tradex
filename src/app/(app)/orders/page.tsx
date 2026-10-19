@@ -26,7 +26,8 @@ import {
   fmtRelative,
   isPositiveDecimal,
 } from "@/lib/format";
-import { useAccounts, useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks";
+import { useAccounts } from "@/lib/hooks/accounts";
+import { useCancelOrder, useMyTrades, useOrders } from "@/lib/hooks/orders";
 import { useSessionAccess } from "@/components/session-access";
 import {
   hasTriggerOrderFields,

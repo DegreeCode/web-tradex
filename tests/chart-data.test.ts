@@ -54,6 +54,7 @@ test("charts update incrementally only for corrections and new trailing bars", (
   assert.equal(canIncrementallyUpdate(previous, points(60, 180, 300, 360)), true);
   // Finer intervals, backfills, rolling windows and empty states need setData.
   assert.equal(canIncrementallyUpdate(previous, points(60, 120, 180, 240, 300)), false);
+  assert.equal(canIncrementallyUpdate(previous, points(60, 240, 300)), false);
   assert.equal(canIncrementallyUpdate(previous, points(0, 60, 180, 300)), false);
   assert.equal(canIncrementallyUpdate(points(60, 180), points(180, 300)), false);
   assert.equal(canIncrementallyUpdate([], points(60)), false);

@@ -12,72 +12,98 @@ type Listener = (identity: SessionIdentity) => void;
 const listeners = new Set<Listener>();
 let channel: BroadcastChannel | null = null;
 let started = false;
+const recentMessages = new Set<string>();
+const MAX_RECENT_MESSAGES = 64;
 
 interface SessionMessage {
   type: "changed";
   userId: SessionIdentity;
+  nonce?: string;
 }
 
 function parse(data: unknown): SessionMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as Partial<SessionMessage>;
-  if (message.type !== "changed") return null;
-  return { type: "changed", userId: typeof message.userId === "string" ? message.userId : null };
+  if (message.type !== "changed" ||
+      !(message.userId === null || typeof message.userId === "string" && message.userId.length > 0)) return null;
+  return { type: "changed", userId: message.userId, nonce: typeof message.nonce === "string" ? message.nonce : undefined };
 }
 
-function emit(identity: SessionIdentity): void {
-  for (const listener of listeners) listener(identity);
+function emit(message: SessionMessage): void {
+  // BroadcastChannel and storage can deliver the same transition. Process it
+  // once so the second delivery cannot cancel the fresh /me request.
+  if (message.nonce) {
+    if (recentMessages.has(message.nonce)) return;
+    recentMessages.add(message.nonce);
+    if (recentMessages.size > MAX_RECENT_MESSAGES) recentMessages.delete(recentMessages.values().next().value!);
+  }
+  for (const listener of listeners) listener(message.userId);
+}
+
+function onStorage(event: StorageEvent): void {
+  if (event.key !== STORAGE_KEY || !event.newValue) return;
+  try {
+    if (event.storageArea && event.storageArea !== window.localStorage) return;
+    const message = parse(JSON.parse(event.newValue));
+    if (message) emit(message);
+  } catch {
+    // A foreign or malformed value is not a session change.
+  }
 }
 
 function start(): void {
   if (started || typeof window === "undefined") return;
   started = true;
   if (typeof BroadcastChannel !== "undefined") {
-    channel = new BroadcastChannel(CHANNEL);
-    channel.onmessage = (event) => {
-      const message = parse(event.data);
-      if (message) emit(message.userId);
-    };
-  }
-  window.addEventListener("storage", (event: StorageEvent) => {
-    // The key is removed right after it is written; ignore that removal.
-    if (event.key !== STORAGE_KEY || !event.newValue) return;
     try {
-      const message = parse(JSON.parse(event.newValue));
-      if (message) emit(message.userId);
+      channel = new BroadcastChannel(CHANNEL);
+      channel.onmessage = (event) => {
+        const message = parse(event.data);
+        if (message) emit(message);
+      };
     } catch {
-      // A foreign or malformed value is not a session change.
+      // Some browsers expose the API but deny it in restricted contexts.
     }
-  });
+  }
+  window.addEventListener("storage", onStorage);
+}
+
+function stop(): void {
+  if (!started) return;
+  window.removeEventListener("storage", onStorage);
+  channel?.close();
+  channel = null;
+  started = false;
+  recentMessages.clear();
 }
 
 /** Announces a completed session transition to every other tab. */
 export function broadcastSessionChange(userId: SessionIdentity): void {
   if (typeof window === "undefined") return;
   start();
-  const message: SessionMessage = { type: "changed", userId };
-  channel?.postMessage(message);
+  const message: SessionMessage = { type: "changed", userId, nonce: `${Date.now()}-${Math.random()}` };
+  try {
+    channel?.postMessage(message);
+  } catch {
+    // The storage event can still deliver when the channel is unavailable.
+  }
   try {
     // The nonce makes repeated identities still fire a storage event; removing
     // the key keeps the account ID from persisting in storage.
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...message, nonce: `${Date.now()}-${Math.random()}` }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(message));
     window.localStorage.removeItem(STORAGE_KEY);
   } catch {
     // BroadcastChannel still reaches tabs when storage is unavailable.
   }
-}
-
-/** Test seam: clears module state between sessions in one process. */
-export function resetSessionSyncForTests(): void {
-  listeners.clear();
-  channel?.close();
-  channel = null;
-  started = false;
+  if (listeners.size === 0) stop();
 }
 
 /** Registers a listener for session changes made by another tab. */
 export function onSessionChange(handler: Listener): () => void {
   start();
   listeners.add(handler);
-  return () => listeners.delete(handler);
+  return () => {
+    listeners.delete(handler);
+    if (listeners.size === 0) stop();
+  };
 }

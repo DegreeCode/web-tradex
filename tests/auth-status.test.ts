@@ -27,7 +27,7 @@ test("other states keep their meaning", () => {
 
 test("ending a session drops the previous account's cached data", async () => {
   const { QueryClient } = await import("@tanstack/react-query");
-  const { clearSessionCache } = await import("../src/lib/hooks");
+  const { clearSessionCache } = await import("../src/lib/hooks/session");
   const queryClient = new QueryClient();
   queryClient.setQueryData(["me"], null);
   queryClient.setQueryData(["notifications", "unread"], { data: [{ notification_id: "ntf_a" }], page: { has_more: false, next_cursor: null } });
@@ -41,7 +41,7 @@ test("ending a session drops the previous account's cached data", async () => {
 
 test("switching accounts clears old private data while preserving and refreshing mounted queries", async () => {
   const { QueryClient, QueryObserver } = await import("@tanstack/react-query");
-  const { resetSessionCache } = await import("../src/lib/hooks");
+  const { resetSessionCache } = await import("../src/lib/hooks/session");
   const queryClient = new QueryClient();
   const queryKey = ["portfolio"];
   queryClient.setQueryData(["me"], user);

@@ -55,7 +55,7 @@ export function CeilingBadge({ className }: { className?: string }) {
 
 // Ticker frames keep unchanged instruments by identity, so memoized rows only
 // re-render for the symbols whose price actually moved.
-export const InstrumentRow = memo(function InstrumentRow({
+const InstrumentRow = memo(function InstrumentRow({
   instrument,
   twoColumn = false,
 }: {

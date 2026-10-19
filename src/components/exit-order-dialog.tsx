@@ -16,7 +16,7 @@ import {
 } from "./trigger-controls";
 import { ScopeNotice, useSessionAccess } from "./session-access";
 import { useCreateOrderGroup } from "@/lib/advanced-order-hooks";
-import { usePlaceOrder } from "@/lib/hooks";
+import { usePlaceOrder } from "@/lib/hooks/orders";
 import { buildExitOrder, type ExitOrderInput } from "@/lib/advanced-order";
 import { errorMessage } from "@/lib/api";
 import { compareDecimal, fmtQuantity, ppmFromPercent } from "@/lib/format";

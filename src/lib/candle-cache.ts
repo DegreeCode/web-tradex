@@ -28,6 +28,25 @@ export const candleTradeRuntimes = new Map<string, CandleTradeRuntime>();
 export type CandleFetchBuffer = BufferedCandleTrade[] & { syncedThrough?: string };
 export const candleFetchTrades = new Map<string, CandleFetchBuffer>();
 const candleClockListeners = new Map<string, Set<() => void>>();
+const runtimeConsumers = new Map<string, number>();
+
+/** A symbol's replay history only lives while its trade stream is mounted. */
+export function retainCandleRuntime(symbol: string): () => void {
+  const runtime = candleRuntime(symbol);
+  runtimeConsumers.set(symbol, (runtimeConsumers.get(symbol) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = (runtimeConsumers.get(symbol) ?? 1) - 1;
+    if (remaining > 0) {
+      runtimeConsumers.set(symbol, remaining);
+      return;
+    }
+    runtimeConsumers.delete(symbol);
+    if (candleTradeRuntimes.get(symbol) === runtime) candleTradeRuntimes.delete(symbol);
+  };
+}
 
 /** Recovery flags are outside Query state; wake clocks when that ownership ends. */
 export function resumeCandleClocks(symbol: string): void {
@@ -179,6 +198,9 @@ export function requestCandleRecovery(
     .catch(() => undefined)
     .finally(() => {
       runtime.recoveryInFlight = false;
+      // A completed request from an unmounted stream cannot schedule recovery
+      // for a fresh runtime created by a later visit to the same symbol.
+      if (candleTradeRuntimes.get(symbol) !== runtime) return;
       // A truncated WS snapshot received during this request can expose a
       // missing replay prefix. Its observed server time bounds the next
       // ordinary recovery; do not silently clear that new uncertainty.

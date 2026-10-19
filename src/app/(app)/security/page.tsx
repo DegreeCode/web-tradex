@@ -29,7 +29,7 @@ import {
   useRevokeSessions,
   useRotateRecoveryKeys,
   useSessions,
-} from "@/lib/hooks";
+} from "@/lib/hooks/session";
 import { formatMinutes, permissionSummary } from "@/lib/device-link";
 import type { SessionInfo, SessionScope } from "@/lib/types";
 import { createPasskey, webauthnErrorMessage } from "@/lib/webauthn";

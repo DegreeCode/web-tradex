@@ -8,7 +8,7 @@ import { ErrorBlock, LoadingBlock, PageHeader, Surface } from "@/components/prim
 import { accountLabel, defaultAccountId as pickDefaultAccount, singleAccountHeading } from "@/lib/accounts";
 import { Segmented } from "@/components/segmented";
 import { addDecimal, fmtCredit } from "@/lib/format";
-import { useAccounts } from "@/lib/hooks";
+import { useAccounts } from "@/lib/hooks/accounts";
 import { MarginCreateForm } from "@/components/margin/margin-create-form";
 import { MarginPositionsList } from "@/components/margin/margin-positions-list";
 import { isActiveMarginPosition, useMarginPositions, type MarginPosition } from "@/lib/margin";

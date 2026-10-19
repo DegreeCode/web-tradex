@@ -18,7 +18,7 @@ import {
 
 export type ClientPort = PortLike<HubMessage, ClientMessage>;
 
-export interface SharedConnection {
+interface SharedConnection {
   port: ClientPort;
   /** Registers for the worker failing to start. */
   onError(handler: () => void): void;
@@ -38,7 +38,7 @@ export interface SharedSocketsOptions {
 // once a minute.
 export const HEARTBEAT_MS = 15_000;
 // A worker that leaves a ping unanswered this long while the tab runs is gone.
-export const PONG_TIMEOUT_MS = 20_000;
+const PONG_TIMEOUT_MS = 20_000;
 // Loading the worker script can be slow on a poor connection.
 export const WELCOME_TIMEOUT_MS = 15_000;
 

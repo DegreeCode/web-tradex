@@ -19,7 +19,7 @@ import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/brow
 
 import { useAuth } from "@/components/auth-provider";
 import { ApiError, errorMessage, postData } from "@/lib/api";
-import { useLogout } from "@/lib/hooks";
+import { useLogout } from "@/lib/hooks/session";
 import { getPasskeyAssertion, supportsPasskeys, webauthnErrorMessage } from "@/lib/webauthn";
 import type { CeremonyEnvelope } from "@/lib/webauthn";
 import type { User } from "@/lib/types";

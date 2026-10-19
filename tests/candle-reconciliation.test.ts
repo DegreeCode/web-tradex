@@ -6,7 +6,8 @@ import {
   candleSnapshotTo, compareTradeTimestamps, reconcileCandleSnapshot, type CandlePage,
   type BufferedCandleTrade,
 } from "../src/lib/candle-data";
-import { candleFetchTrades, candleTradeRuntimes, updateCachedCandleQueries } from "../src/lib/candle-cache";
+import { candleFetchTrades, candleTradeRuntimes, candleRuntime, retainCandleRuntime, updateCachedCandleQueries } from "../src/lib/candle-cache";
+import { fetchCandleSnapshot } from "../src/lib/candle-query";
 import type { PublicTrade } from "../src/lib/types";
 
 const base = Date.parse("2026-10-14T15:00:00Z");
@@ -27,6 +28,41 @@ function rest(page: CandlePage): CandlePage {
     open: c.open, high: c.high, low: c.low, close: c.close, volume_shares: c.volume_shares,
     volume_credit: c.volume_credit, trade_count: c.trade_count })) };
 }
+
+test("leaving the last trade stream releases its replay history and reopening starts fresh", () => {
+  const release = retainCandleRuntime("LIFETIME.M");
+  const second = retainCandleRuntime("LIFETIME.M");
+  const old = candleRuntime("LIFETIME.M");
+  old.seenSequences.add(10);
+  release();
+  release();
+  assert.equal(candleTradeRuntimes.get("LIFETIME.M"), old);
+  second();
+  assert.equal(candleTradeRuntimes.has("LIFETIME.M"), false);
+  const reopened = retainCandleRuntime("LIFETIME.M");
+  assert.equal(candleRuntime("LIFETIME.M").seenSequences.size, 0);
+  reopened();
+});
+
+test("canceling a candle fetch aborts its transport and releases the replay buffer", async (t) => {
+  const client = new QueryClient();
+  t.after(() => client.clear());
+  let transport: AbortSignal | null = null;
+  t.mock.method(globalThis, "fetch", (_url: string, options: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      transport = options.signal as AbortSignal;
+      transport.addEventListener("abort", () => reject(transport!.reason), { once: true });
+    }),
+  );
+  const controller = new AbortController();
+  const pending = fetchCandleSnapshot(client, "CANCEL.M", "1m", 200, true, controller.signal);
+  const key = JSON.stringify(["candles", "CANCEL.M", "1m", 200]);
+  assert.equal(candleFetchTrades.has(key), true);
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal((transport as unknown as AbortSignal).aborted, true);
+  assert.equal(candleFetchTrades.has(key), false);
+});
 
 test("snapshot cutoff is conservative with ±2s skew and includes already applied server trades", () => {
   for (const skew of [-2000, 0, 2000]) {

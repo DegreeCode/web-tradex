@@ -7,7 +7,7 @@ import { InstrumentList } from "@/components/instrument-list";
 import { EmptyState, ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows } from "@/components/primitives";
 import { Segmented } from "@/components/segmented";
 import { errorMessage } from "@/lib/api";
-import { useInstruments, useTickerOrder } from "@/lib/hooks";
+import { useInstruments, useTickerOrder } from "@/lib/hooks/market";
 import type { Instrument, TickerSort } from "@/lib/types";
 
 const SORT_OPTIONS: { value: TickerSort; label: string }[] = [

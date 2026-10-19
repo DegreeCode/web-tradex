@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { updateCachedCandleQueries } from "../src/lib/candle-cache";
-import { applyTickers, fetchMe, tradeSinceTicker } from "../src/lib/hooks";
+import { applyTickers } from "../src/lib/hooks/tickers";
+import { fetchMe } from "../src/lib/hooks/session";
+import { tradeSinceTicker } from "../src/lib/hooks/trades";
 import { isGuestRoute } from "../src/lib/navigation";
 import { loginHref } from "../src/lib/routes";
 import type { CandlePage } from "../src/lib/candle-data";
@@ -45,6 +47,8 @@ test("a polled ticker page merges into the cache and keeps symbols outside the p
     { symbol: "AAA.M", name: "A" } as Instrument,
     { symbol: "BBB.M", name: "B" } as Instrument,
   ]);
+  // Details use an infinite stale time, including when their observer is gone.
+  client.setQueryData<Instrument>(["instrument", "BBB.M"], { symbol: "BBB.M", name: "B" } as Instrument);
 
   applyTickers(client, [ticker("BBB.M", "3")]);
 
@@ -55,6 +59,8 @@ test("a polled ticker page merges into the cache and keeps symbols outside the p
   const instruments = client.getQueryData<Instrument[]>(["instruments"]);
   assert.equal(instruments?.[1].curve_spot_price, "3");
   assert.equal(instruments?.[1].name, "B");
+  assert.equal(client.getQueryData<Instrument>(["instrument", "BBB.M"])?.curve_spot_price, "3");
+  client.clear();
 });
 
 const polled = (overrides: Partial<Ticker>): Ticker => ({

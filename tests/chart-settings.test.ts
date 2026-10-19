@@ -79,3 +79,18 @@ test("chart controls work in memory when browser storage is blocked", async (t) 
   assert.deepEqual(chart.readChartSettings(), { seriesType: "line", volumePaneRatio: 0.5, showCurvePrice: false, showAverageCost: false, logarithmic: true });
   assert.equal(chart.calculateVolumePaneHeight(260), 130);
 });
+
+test("saving without a mounted chart preserves another tab's changes and blocked writes", async (t) => {
+  const storage = memoryStorage({ [KEY]: JSON.stringify({ candleInterval: "1m" }) });
+  const chart = await loadWith(t, storage, "cross-tab-writes");
+  chart.readChartSettings();
+  storage.setItem(KEY, JSON.stringify({ candleInterval: "1d", showOrders: false }));
+  chart.updateChartSettings({ logarithmic: true });
+  assert.deepEqual(chart.readChartSettings(), { candleInterval: "1d", showOrders: false, logarithmic: true });
+
+  t.mock.method(storage, "setItem", blockedStorage.setItem);
+  chart.updateChartSettings({ showAverageCost: false });
+  t.mock.restoreAll();
+  chart.updateChartSettings({ seriesType: "line" });
+  assert.equal(JSON.parse(storage.getItem(KEY)!).showAverageCost, false);
+});

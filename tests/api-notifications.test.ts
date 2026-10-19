@@ -7,7 +7,7 @@ import {
   parseTradingNotification,
   localizeReason,
 } from "../src/lib/notifications";
-import { reconcileNotificationData } from "../src/lib/hooks";
+import { reconcileNotificationData } from "../src/lib/hooks/private-stream";
 import type { Notification } from "../src/lib/types";
 
 function notification(body: string, title = "Notice"): Notification {

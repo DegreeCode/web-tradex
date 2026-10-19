@@ -18,6 +18,10 @@ export class FakeTransport {
     readonly hooks: SocketHooks,
   ) {}
 
+  get handlerCount(): number {
+    return this.frames.size + this.statuses.size + this.gaps.size;
+  }
+
   getStatus(): WsStatus {
     return this.status;
   }

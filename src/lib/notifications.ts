@@ -50,7 +50,7 @@ export interface NotificationEventConfig {
 const symbolOf = (symbol: string | undefined, noun = "종목") => (symbol ? `${symbol} ${noun}` : noun);
 const symbolPrefix = (symbol: string | undefined) => (symbol ? `${symbol} ` : "");
 
-export type TradingEventType =
+type TradingEventType =
   | "SYMBOL_HALTED"
   | "SYMBOL_RESUMED"
   | "GLOBAL_MARKET_HALTED"
@@ -62,7 +62,7 @@ export type TradingEventType =
   | "SYMBOL_METADATA_CHANGED"
   | "ICON_REVOKED";
 
-export const TRADING_EVENT_TYPES: ReadonlySet<TradingEventType> = new Set<TradingEventType>([
+const TRADING_EVENT_TYPES: ReadonlySet<TradingEventType> = new Set<TradingEventType>([
   "SYMBOL_HALTED",
   "SYMBOL_RESUMED",
   "GLOBAL_MARKET_HALTED",
@@ -75,7 +75,7 @@ export const TRADING_EVENT_TYPES: ReadonlySet<TradingEventType> = new Set<Tradin
   "ICON_REVOKED",
 ]);
 
-export function isTradingEventType(value: string): value is TradingEventType {
+function isTradingEventType(value: string): value is TradingEventType {
   return TRADING_EVENT_TYPES.has(value as TradingEventType);
 }
 
@@ -396,7 +396,7 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
   },
 };
 
-export const TITLE_EVENT_KEYS: Record<string, string> = {
+const TITLE_EVENT_KEYS: Record<string, string> = {
   "종목 아이콘 게시 중단": "ICON_REVOKED",
   "종목 아이콘 승인 거절": "ICON_REJECTED",
   "가격 밴드 상단 도달": "CURVE_CEILING_REACHED",
@@ -448,7 +448,7 @@ export const TITLE_EVENT_KEYS: Record<string, string> = {
   "관리자 권한이 설정됐어요": "AUTH_SUPER_ADMIN_BOOTSTRAP",
 };
 
-export const REASON_LABELS: Record<string, string> = {
+const REASON_LABELS: Record<string, string> = {
   HALT_EXPIRED: "거래정지 기간 종료",
   MANUAL: "관리자 조치",
   MAINTENANCE: "시스템 점검",
@@ -478,7 +478,7 @@ export const TONE_STYLES: Record<NotificationTone, { icon: string; body: string 
   neutral: { icon: "bg-app-gray-100 text-app-gray-600", body: "text-app-gray-500" },
 };
 
-export function isEnumToken(value: string): boolean {
+function isEnumToken(value: string): boolean {
   return (
     /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(value) ||
     /^[a-z][a-z0-9]*(?:\.[a-z0-9_]+)+$/.test(value)

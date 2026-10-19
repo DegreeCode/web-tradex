@@ -42,6 +42,23 @@ function mockSockets(t: TestContext) {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+test("an unavailable WebSocket leaves streams closed so REST fallback can keep rendering", (t) => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: undefined });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, "WebSocket", previous);
+    else Reflect.deleteProperty(globalThis, "WebSocket");
+  });
+  const socket = new TradexSocket("public");
+  assert.doesNotThrow(() => {
+    socket.subscribe("tickers");
+    socket.resubscribe("tickers");
+    socket.unsubscribe("tickers");
+    socket.close();
+  });
+  assert.equal(socket.getStatus(), "closed");
+});
+
 test("socket lookup stays idle, remount reconnects, and a stream gap reconciles once", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");

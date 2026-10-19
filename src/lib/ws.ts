@@ -2,7 +2,7 @@ import { SharedSockets, type ClientPort } from "./ws-shared";
 import { WS_PROTOCOL_VERSION } from "./ws-protocol";
 import { TradexSocket, type StreamSocket, type WsKind } from "./ws-transport";
 
-export { socketUrl, TradexSocket } from "./ws-transport";
+export { TradexSocket } from "./ws-transport";
 export type { StreamSocket, WsKind, WsStatus } from "./ws-transport";
 
 let shared: SharedSockets | null | undefined;

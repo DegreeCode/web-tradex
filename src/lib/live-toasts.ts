@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { toast, type ExternalToast } from "sonner";
 
-import { useMarkNotificationRead } from "./hooks";
+import { useMarkNotificationRead } from "./hooks/notifications";
 import { liveToastFor, type LiveToast } from "./live-notifications";
 import { notificationFromPrivateFrame } from "./notification-cache";
 import { shouldShowLiveNotificationPopup } from "./preferences";

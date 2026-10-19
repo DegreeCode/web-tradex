@@ -3,7 +3,7 @@
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
-import { useInstrument } from "@/lib/hooks";
+import { useInstrument } from "@/lib/hooks/market";
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
   liveReferencePrice,

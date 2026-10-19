@@ -11,7 +11,7 @@ import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { fmtCredit, fmtDate } from "@/lib/format";
-import { useAccounts, useCreateAccount, useDeleteAccount } from "@/lib/hooks";
+import { useAccounts, useCreateAccount, useDeleteAccount } from "@/lib/hooks/accounts";
 
 export default function AccountsPage() {
   const accountsQuery = useAccounts();

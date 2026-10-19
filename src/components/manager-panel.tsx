@@ -33,7 +33,7 @@ import {
   useManagerRequests,
   useRespondManagerRequest,
   useUpdateMetadata,
-} from "@/lib/hooks";
+} from "@/lib/hooks/symbols";
 import type { Instrument, IssuancePreview } from "@/lib/types";
 
 export function ManagerPanel({ instrument, userId }: { instrument: Instrument; userId: string }) {

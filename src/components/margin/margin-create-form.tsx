@@ -30,7 +30,8 @@ import {
   scaleDecimal,
 } from "@/lib/format";
 import { defaultAccountId as pickDefaultAccount } from "@/lib/accounts";
-import { useAccounts, useInstrument, useInstruments, useMarketState } from "@/lib/hooks";
+import { useAccounts } from "@/lib/hooks/accounts";
+import { useInstrument, useInstruments, useMarketState } from "@/lib/hooks/market";
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
   getLeverageBounds,

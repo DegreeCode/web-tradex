@@ -5,7 +5,7 @@ import { QueryClient } from "@tanstack/react-query";
 import {
   parseTradingNotification,
 } from "../src/lib/notifications";
-import { reconcileNotificationData } from "../src/lib/hooks";
+import { reconcileNotificationData } from "../src/lib/hooks/private-stream";
 import {
   applyTradingNotification,
   cacheSymbolMetadata,

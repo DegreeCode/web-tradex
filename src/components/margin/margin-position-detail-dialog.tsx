@@ -17,7 +17,7 @@ import {
 } from "@/lib/format";
 import { ErrorBlock, LoadingBlock } from "@/components/primitives";
 import { copyToClipboard } from "@/lib/clipboard";
-import { useAccounts } from "@/lib/hooks";
+import { useAccounts } from "@/lib/hooks/accounts";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginCollateralDialog } from "./margin-collateral-dialog";
 import { MarginReductionDialog } from "./margin-reduction-dialog";

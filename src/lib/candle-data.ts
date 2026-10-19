@@ -308,7 +308,7 @@ interface FilledCandleData {
   capped: boolean;
 }
 
-export function fillCandleGaps(
+function fillCandleGaps(
   candles: Candle[],
   interval: CandleInterval,
   limit: number,

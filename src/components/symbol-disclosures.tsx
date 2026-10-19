@@ -38,7 +38,7 @@ import {
   fmtRelative,
   shortId,
 } from "@/lib/format";
-import { useDisclosures } from "@/lib/hooks";
+import { useDisclosures } from "@/lib/hooks/disclosures";
 import type { Disclosure } from "@/lib/types";
 
 type DisclosureTone = "blue" | "green" | "orange" | "red" | "gray";

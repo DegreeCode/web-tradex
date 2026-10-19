@@ -134,7 +134,7 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 
 ## WebSocket (실시간)
 
-`src/lib/ws.ts`가 연결을 관리하고, `src/lib/hooks.ts`의 스트림 훅이 수신 프레임을 React Query 캐시에
+`src/lib/ws.ts`가 연결을 관리하고, `src/lib/hooks/`의 스트림 훅이 수신 프레임을 React Query 캐시에
 반영합니다. 채널 구독은 참조 카운트로 관리되며, 끊기면 1s→30s 지수 백오프로 재연결합니다.
 
 | 소켓 | 채널 | 사용하는 화면 | 동작 |
@@ -152,6 +152,8 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 
 두 소켓 모두 로그인 상태에서만 열리고(둘러보기는 위의 REST 폴링), private 소켓은 로그아웃 시 닫힙니다. 공개 시세·체결·시장 상태·공시는
 WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 REST snapshot으로 복구합니다.
+공개 소켓을 사용할 수 없는 동안에는 로그인 상태에서도 기존 시세 API를 5초마다 조회하고,
+소켓이 열리면 시세 폴링을 멈춥니다. 숨겨진 탭의 폴링은 중단됩니다.
 종목 기본정보는 `symbols/changes`와 `symbols/batch`로 별도 동기화합니다.
 
 같은 심볼이 재상장되면 새 상장 시각 이전의 공시 캐시를 제거하고, 공시 페이지 커서를 초기화해
@@ -175,11 +177,14 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
   데이터만 제한적으로 폴링합니다. 비공개 WS가 연결된 동안 계좌 데이터는 이벤트로 무효화되므로
   포커스·재마운트 재조회는 60초가 지난 뒤에만 합니다.
 - **모듈** (`src/lib`):
-  - `hooks.ts`: React Query 훅과 WS 스트림 훅
+  - `hooks/`: 인증·계좌·주문·송금·종목 관리·고객센터·시세·캔들·공시·알림의 React Query 훅.
+    각 화면은 해당 모듈을 직접 참조하며, 공통 구독·stale time 정책은 `socket.ts`에서 관리합니다
+  - `candle-query.ts`: 취소 신호를 전달하는 캔들 REST 스냅샷·복구 페이지 조회
   - `market-cache.ts`: 종목 메타데이터·시세·거래 상태 이벤트를 종목 목록/상세 캐시에 반영(이벤트 순서 역전 방지 워터마크 포함)
   - `notification-cache.ts`: 알림 프레임·읽음 처리를 불러온 알림 목록 캐시에 반영
-  - `candle-data.ts` / `candle-cache.ts`: 캔들 버킷·빈 구간 계산 / 실시간 체결을 캔들 캐시에 합치는 런타임.
-    체결마다 같은 타임스탬프를 다시 계산하지 않도록 버킷·시각 파싱 결과를 상한 있는 메모로 재사용합니다
+- `candle-data.ts` / `candle-cache.ts`: 캔들 버킷·빈 구간 계산 / 실시간 체결을 캔들 캐시에 합치는 런타임.
+    체결마다 같은 타임스탬프를 다시 계산하지 않도록 버킷·시각 파싱 결과를 상한 있는 메모로
+    재사용하고, 마지막 종목 스트림을 닫으면 체결 재생 상태를 해제합니다
   - `symbol-metadata.ts`: 탭 간에 공유하는 종목 메타데이터 localStorage 캐시
   - `accounts.ts`·`instruments.ts`·`clipboard.ts`: 계좌 표시 이름(“추가 계좌 2”), 상한가·최근 체결 표시 조건, 복사 처리
 - **화면 공통**: 페이지 제목은 `PageHeader`, 커서 목록의 다음 페이지는 `LoadMoreButton`(필터 결과가 비어도 표시),
@@ -190,7 +195,8 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
   이때 재요청(invalidate)은 하지 않습니다 — 무효화하면 401→이벤트→재요청이 무한 반복됩니다.
   비공개 조회 캐시는 사용자별 키가 없으므로, 로그인 상태가 끝나면 `["me"]`를 뺀 캐시를 지우고
   다른 계정으로 바뀌면 다시 조회합니다. 로그인·로그아웃·계정 전환은 `BroadcastChannel`/`storage`로
-  다른 탭에 전파해 각 탭이 `/me`를 다시 확인하고 비공개 캐시를 비웁니다.
+  다른 탭에 전파해 각 탭이 `/me`를 다시 확인하고 비공개 캐시를 비웁니다. 같은 전환이 두 전달 경로로
+  들어와도 한 번만 처리하고, 새 세션 확인 중에는 이전 사용자 정보를 숨깁니다.
 - **캔들 히스토리**: 최신 구간은 5,000버킷으로 제한해 실시간 병합 비용을 유지하고, 그보다 오래된
   실제 캔들은 `history`에 무제한 누적합니다. 차트는 아래쪽으로 계속 스크롤하거나 "이전 캔들 더
   불러오기"를 눌러 REST 페이지를 끝까지 이어서 가져올 수 있습니다.
@@ -210,6 +216,8 @@ npm run check    # lint + typecheck + test
 
 ## 의존성 메모
 
+모듈별 점검·수정 내용과 검증 범위는 [리팩터링 기록](REFACTOR_REVIEW.md)을 참고하세요.
+
 - ESLint는 9를 유지합니다. `eslint-plugin-react`(eslint-config-next 포함)의 peer 범위가 ESLint 9까지입니다.
 - TypeScript는 6.0을 유지합니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
 - Next.js는 보안 릴리스 대응을 위해 정확한 버전으로 고정합니다.
@@ -218,7 +226,7 @@ npm run check    # lint + typecheck + test
   유지하지 않으며, 실제 사용하는 Base UI 상태 스타일은 `globals.css`에 정의합니다.
 - 로컬 정적 서버 `serve`가 고정한 `compression`은 메모리 누수 수정판인 1.8.2 이상으로
   override합니다. 상위 패키지에서 수정판을 사용하면 override를 제거할 수 있습니다.
-- 2026-10-15 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
+- 2026-10-19 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
   ESLint의 `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`
   경로에 높은 등급 5건(같은 원인에서 파생된 경고)이 남아 있습니다.
   [braces 보안 공지](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)에 수정 버전이 없으며,

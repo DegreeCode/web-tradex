@@ -22,10 +22,10 @@ export const API_BASE_URL = (
  * `@other.host/x` or `//other.host/x` cannot turn into a request elsewhere.
  */
 export function apiAssetUrl(path: string | null | undefined): string | null {
-  if (!path || !/^\/(?![/\\])[^\s]*$/.test(path)) return null;
   // Instrument icons are the only server-relative asset this client renders.
-  // Keep the resolver from turning a crafted value into an arbitrary API GET.
-  if (!path.startsWith("/api/v1/market/icons/")) return null;
+  // Only an opaque ID is valid: URL normalization must not turn dot segments,
+  // encoded separators or a backslash into a different authenticated API GET.
+  if (!path || !/^\/api\/v1\/market\/icons\/[A-Za-z0-9_-]+$/.test(path)) return null;
   return `${API_BASE_URL}${path}`;
 }
 
@@ -138,7 +138,7 @@ export function isApiError(error: unknown, code?: string): error is ApiError {
   return error instanceof ApiError && (code ? error.code === code : true);
 }
 
-export function readCookie(name: string): string | null {
+function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const target = `${name}=`;
   for (const cookie of document.cookie.split(";")) {
@@ -158,7 +158,7 @@ export function csrfToken(): string | null {
   return readCookie("tradex_csrf");
 }
 
-export function newIdempotencyKey(): string {
+function newIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -320,7 +320,10 @@ export async function apiData<T>(path: string, options?: RequestOptions): Promis
 
 export async function apiPage<T>(path: string, options?: RequestOptions): Promise<Page<T>> {
   const payload = (await request(path, options)) as Page<T>;
-  if (!Array.isArray(payload.data) || !payload.page || typeof payload.page.has_more !== "boolean") {
+  const page = payload.page;
+  if (!Array.isArray(payload.data) || !page || typeof page.has_more !== "boolean" ||
+      !(page.next_cursor === null || typeof page.next_cursor === "string") ||
+      (page.has_more && !page.next_cursor)) {
     throw new ApiError(200, "INVALID_RESPONSE", "서버 페이지 응답 형식이 올바르지 않아요");
   }
   return payload;

@@ -20,7 +20,7 @@ import {
   useMarkNotificationRead,
   useMarkNotificationsRead,
   useNotifications,
-} from "@/lib/hooks";
+} from "@/lib/hooks/notifications";
 import {
   presentNotification,
   TONE_STYLES,

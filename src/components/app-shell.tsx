@@ -8,15 +8,12 @@ import { cn } from "cn";
 
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { useAuth } from "@/components/auth-provider";
-import {
-  useLogout,
-  useDisclosureStream,
-  useMarketStateStream,
-  usePrivateStream,
-  useSymbolMetadataSync,
-  useTickerStream,
-  useUnreadNotifications,
-} from "@/lib/hooks";
+import { useLogout } from "@/lib/hooks/session";
+import { useDisclosureStream } from "@/lib/hooks/disclosures";
+import { useMarketStateStream, useTickerStream } from "@/lib/hooks/tickers";
+import { usePrivateStream } from "@/lib/hooks/private-stream";
+import { useSymbolMetadataSync } from "@/lib/hooks/metadata";
+import { useUnreadNotifications } from "@/lib/hooks/notifications";
 import {
   Drawer,
   DrawerContent,

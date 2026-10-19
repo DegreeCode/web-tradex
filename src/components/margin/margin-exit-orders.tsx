@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useCancelOrder, useOrders } from "@/lib/hooks";
+import { useCancelOrder, useOrders } from "@/lib/hooks/orders";
 import { errorMessage } from "@/lib/api";
 import { fmtPrice, fmtQuantity } from "@/lib/format";
 import type { MarginPosition } from "@/lib/margin";

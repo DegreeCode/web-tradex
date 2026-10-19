@@ -1,4 +1,4 @@
-export interface PageInfo {
+interface PageInfo {
   next_cursor: string | null;
   has_more: boolean;
 }
@@ -119,7 +119,7 @@ export interface MarketState {
 }
 
 export type OrderSide = "BUY" | "SELL";
-export type OrderType = "MARKET" | "TRIGGER";
+type OrderType = "MARKET" | "TRIGGER";
 export type OrderStatus =
   | "FILLED"
   | "PARTIALLY_FILLED"
@@ -209,7 +209,7 @@ export interface TriggerPolicy {
   on_slippage_exceeded?: "FAIL" | "RETRY";
 }
 
-export interface BracketRequest extends TriggerPolicy {
+interface BracketRequest extends TriggerPolicy {
   take_profit_price: string;
   stop_loss_price: string;
 }
@@ -435,7 +435,7 @@ export interface Disclosure {
   payload: Record<string, unknown>;
 }
 
-export interface NavAccount {
+interface NavAccount {
   account_id: string;
   available_credit: string;
   locked_credit: string;

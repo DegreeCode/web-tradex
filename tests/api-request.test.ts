@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { apiData, ApiError, clearIdempotencyKeys, errorMessage, postIdempotentData } from "../src/lib/api";
+import { apiData, apiPage, ApiError, clearIdempotencyKeys, errorMessage, postIdempotentData } from "../src/lib/api";
 
 test("a longer request timeout survives the default cutoff and still aborts at its deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -128,6 +128,20 @@ test("a large Retry-After cannot overflow a browser timer into an immediate retr
     );
     await assert.rejects(apiData("/api/v1/me"), (error) =>
       error instanceof ApiError && error.retryAfterMs === 2_147_483_647,
+    );
+  }
+});
+
+test("malformed pagination cannot restart a list from its first page", async (t) => {
+  for (const page of [
+    { has_more: true, next_cursor: null },
+    { has_more: true, next_cursor: "" },
+    { has_more: true, next_cursor: 123 },
+    { has_more: false },
+  ]) {
+    t.mock.method(globalThis, "fetch", async () => Response.json({ data: [], page }));
+    await assert.rejects(apiPage("/api/v1/orders"), (error) =>
+      error instanceof ApiError && error.code === "INVALID_RESPONSE",
     );
   }
 });

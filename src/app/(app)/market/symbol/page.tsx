@@ -47,17 +47,11 @@ import {
   isPositiveDecimal,
   toNumber,
 } from "@/lib/format";
-import {
-  findPosition,
-  useAccounts,
-  useCandles,
-  useInstrument,
-  usePolledSymbolTicker,
-  useOrders,
-  usePortfolio,
-  useSymbolTradeStream,
-  useSymbolTrades,
-} from "@/lib/hooks";
+import { findPosition, useAccounts, usePortfolio } from "@/lib/hooks/accounts";
+import { useCandles } from "@/lib/hooks/candles";
+import { useInstrument } from "@/lib/hooks/market";
+import { usePolledSymbolTicker, useSymbolTradeStream, useSymbolTrades } from "@/lib/hooks/trades";
+import { useOrders } from "@/lib/hooks/orders";
 import { hasDistinctLastTrade, isAtCurveCeiling } from "@/lib/instruments";
 import { updatePreferences, usePreferences } from "@/lib/preferences";
 import type { CandleInterval, Instrument } from "@/lib/types";

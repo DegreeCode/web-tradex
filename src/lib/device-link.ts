@@ -4,7 +4,7 @@ import type { LinkedPermission } from "./types";
 export const DEVICE_LINKS_PATH = "/api/v1/auth/device-links";
 export const DEVICE_LINK_CURRENT_PATH = "/api/v1/auth/device-links/current";
 
-export type DeviceLinkStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" | "CONSUMED";
+type DeviceLinkStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" | "CONSUMED";
 
 export interface DeviceLinkStart {
   link_id: string;
@@ -139,8 +139,8 @@ export const FALLBACK_SCOPE_LIMITS: DeviceScopeLimits = {
   default_idle_minutes: 120,
 };
 
-export const TTL_CHOICES = [60, 480, 1440, 10080] as const;
-export const IDLE_CHOICES = [30, 120, 480, 1440] as const;
+const TTL_CHOICES = [60, 480, 1440, 10080] as const;
+const IDLE_CHOICES = [30, 120, 480, 1440] as const;
 
 export const PERMISSION_ORDER: readonly LinkedPermission[] = ["READ", "TRADE", "TRANSFER", "MARGIN"];
 
@@ -156,7 +156,7 @@ export const PERMISSION_LABELS: Record<LinkedPermission, string> = {
  * TRADE. Applied after every toggle so the form never shows a set the server
  * would silently widen.
  */
-export function withImpliedPermissions(selected: Iterable<LinkedPermission>): LinkedPermission[] {
+function withImpliedPermissions(selected: Iterable<LinkedPermission>): LinkedPermission[] {
   const set = new Set<LinkedPermission>(selected);
   set.add("READ");
   if (set.has("MARGIN")) set.add("TRADE");

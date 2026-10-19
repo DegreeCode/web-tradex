@@ -7,7 +7,7 @@ import { ApiError } from "@/lib/api";
 import { AuthProvider } from "@/components/auth-provider";
 import { Toaster } from "@/components/ui/sonner";
 
-export function createQueryClient() {
+function createQueryClient() {
   const client = new QueryClient({
     defaultOptions: {
       queries: {

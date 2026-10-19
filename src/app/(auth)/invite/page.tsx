@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, postData } from "@/lib/api";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
-import { clearSessionCache } from "@/lib/hooks";
+import { clearSessionCache } from "@/lib/hooks/session";
 
 export default function InvitationPage() {
   const router = useRouter();

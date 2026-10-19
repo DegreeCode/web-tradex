@@ -18,7 +18,7 @@ export const CANDLE_INTERVAL_LABELS: Record<CandleInterval, string> = {
   "1y": "1년",
 };
 
-export const FALLBACK_CANDLE_INTERVALS: readonly CandleInterval[] = [
+const FALLBACK_CANDLE_INTERVALS: readonly CandleInterval[] = [
   "1m", "5m", "15m", "1h", "4h", "1d",
 ];
 

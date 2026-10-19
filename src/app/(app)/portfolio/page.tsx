@@ -30,10 +30,10 @@ import {
 import {
   useAccountPortfolioHistory,
   useAllPortfolios,
-  useInstruments,
   useNav,
   useNavHistory,
-} from "@/lib/hooks";
+} from "@/lib/hooks/accounts";
+import { useInstruments } from "@/lib/hooks/market";
 import type { NavRange } from "@/lib/types";
 
 export default function PortfolioPage() {

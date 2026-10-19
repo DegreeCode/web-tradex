@@ -24,7 +24,7 @@ import {
   useInquiry,
   useReplyInquiry,
   useResolveInquiry,
-} from "@/lib/hooks";
+} from "@/lib/hooks/support";
 import type { Inquiry, InquiryCategory, InquiryStatus } from "@/lib/types";
 import { cn } from "cn";
 

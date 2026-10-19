@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
-import { reconcileNotificationData } from "../src/lib/hooks";
+import { reconcileNotificationData } from "../src/lib/hooks/private-stream";
 import { invalidateBatched } from "../src/lib/query-batch";
 import { triggerEventQueryRoots, triggerNotificationQueryRoots } from "../src/lib/trigger-events";
 import type { Notification } from "../src/lib/types";

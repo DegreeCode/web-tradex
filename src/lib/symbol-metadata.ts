@@ -410,7 +410,7 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
 
   const nextCache: SymbolMetadataCache = {
     schema_version: SYMBOL_METADATA_SCHEMA_VERSION,
-    symbols: [...nextSymbols.values()],
+    symbols: changesBySymbol.size === 0 ? latest.symbols : [...nextSymbols.values()],
     next_since_version: cursor,
     saved_at: Date.now(),
   };

@@ -10,8 +10,8 @@ import { fmtCompactQuantity, fmtCredit, fmtQuantity } from "@/lib/format";
 import type { HoldingView } from "@/lib/holdings";
 import { symbolHref } from "@/lib/routes";
 
-// Holdings are rebuilt when any ticker moves. Keeping row props by identity
-// lets unchanged rows skip rendering while the parent list updates.
+// The parent rebuilds HoldingView objects on price updates. Compare the values
+// this row renders so unrelated ticker changes don't redraw every holding.
 export const HoldingRow = memo(function HoldingRow({ holding }: { holding: HoldingView }) {
   const { position, value, changePct } = holding;
   return (
@@ -38,4 +38,10 @@ export const HoldingRow = memo(function HoldingRow({ holding }: { holding: Holdi
       <ChevronRight className="col-start-3 row-start-1 size-4 shrink-0 sm:col-start-4 text-app-gray-300" />
     </Link>
   );
+}, (previous, next) => {
+  const before = previous.holding;
+  const after = next.holding;
+  return before.position === after.position &&
+    before.instrument?.icon_url === after.instrument?.icon_url &&
+    before.value === after.value && before.changePct === after.changePct;
 });

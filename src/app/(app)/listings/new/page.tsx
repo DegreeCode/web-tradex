@@ -22,7 +22,7 @@ import {
 } from "@/lib/exchange-info";
 import { errorMessage } from "@/lib/api";
 import { isDecimalInput, toNumber, fmtCredit, fmtPercentFromPPM } from "@/lib/format";
-import { useCreateListing } from "@/lib/hooks";
+import { useCreateListing } from "@/lib/hooks/symbols";
 import { symbolHref } from "@/lib/routes";
 
 function criteriaText(criteria: ListingEvaluationCriteria) {

@@ -41,7 +41,8 @@ import {
   isPositiveDecimal,
   scaleDecimal,
 } from "@/lib/format";
-import { findPosition, useOrderSimulation, usePlaceOrder } from "@/lib/hooks";
+import { findPosition } from "@/lib/hooks/accounts";
+import { useOrderSimulation, usePlaceOrder } from "@/lib/hooks/orders";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import type { Account, Instrument, Order, OrderRequest, OrderSimulationRequest, Portfolio } from "@/lib/types";
 import { hasTriggerOrderFields, triggerGroupRoleLabel, triggerOrderDisplayRows } from "@/lib/trigger-order";

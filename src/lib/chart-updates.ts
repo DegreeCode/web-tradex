@@ -5,14 +5,8 @@ export function canIncrementallyUpdate<T extends { time: number }>(
   if (previous.length === 0 || next.length < previous.length) return false;
   // update(..., true) can only replace an existing timestamp. A finer
   // interval or a backfill inserts historical points and needs setData.
-  // Length + endpoints catch the common live append/update case before the
-  // full scan; an unchanged timestamp in the middle still needs the scan.
-  if (previous.length === next.length) {
-    const last = previous.length - 1;
-    if (previous[0].time === next[0].time && previous[last].time === next[last].time) {
-      return true;
-    }
-  }
+  // Equal endpoints alone don't guarantee matching historical timestamps.
+  // A corrected middle bucket must go through setData too.
   return previous.every((point, index) => point.time === next[index].time);
 }
 

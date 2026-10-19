@@ -38,7 +38,7 @@ import {
   type DeviceLinkScopeRequest,
 } from "@/lib/device-link";
 import { fmtDateTime, fmtRelative } from "@/lib/format";
-import { useAccounts } from "@/lib/hooks";
+import { useAccounts } from "@/lib/hooks/accounts";
 import { noteSelfAction } from "@/lib/live-notifications";
 import type { Account, LinkedPermission } from "@/lib/types";
 import { getPasskeyAssertion, webauthnErrorMessage, type CeremonyEnvelope } from "@/lib/webauthn";

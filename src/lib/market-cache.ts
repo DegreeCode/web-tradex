@@ -15,7 +15,7 @@ import {
   writeSymbolMetadataCache,
   type SymbolMetadataCache,
 } from "./symbol-metadata";
-export { compareVersion } from "./symbol-metadata";
+
 import type {
   Instrument,
   InstrumentState,
@@ -127,7 +127,10 @@ function updateInstrumentDetail(queryClient: QueryClient, symbol: MarketSymbol, 
   );
 }
 
+const appliedMetadata = new WeakMap<QueryClient, MarketSymbol[]>();
+
 export function applySymbolMetadataCache(queryClient: QueryClient, cache: SymbolMetadataCache): void {
+  if (appliedMetadata.get(queryClient) === cache.symbols && queryClient.getQueryData(["instruments"])) return;
   reconcileDisclosureListings(queryClient, cache.symbols);
   queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
     const previous = new Map(old?.map((instrument) => [instrument.symbol, instrument]));
@@ -136,6 +139,7 @@ export function applySymbolMetadataCache(queryClient: QueryClient, cache: Symbol
       composeInstrument(symbol, tickers.get(symbol.symbol) ?? previous.get(symbol.symbol)),
     );
   });
+  appliedMetadata.set(queryClient, cache.symbols);
 }
 
 /** Pushes only the symbols that changed between two caches into mounted details. */
@@ -144,6 +148,7 @@ export function applySymbolMetadataDelta(
   previous: SymbolMetadataCache | null,
   next: SymbolMetadataCache,
 ): void {
+  if (previous?.symbols === next.symbols) return;
   reconcileDisclosureListings(queryClient, next.symbols);
   const previousBySymbol = new Map(previous?.symbols.map((symbol) => [symbol.symbol, symbol]));
   const nextSymbols = new Set(next.symbols.map((symbol) => symbol.symbol));
@@ -164,7 +169,7 @@ export function applySymbolMetadataDelta(
   }
 }
 
-export function applySymbolToQueryCaches(queryClient: QueryClient, symbol: MarketSymbol): void {
+function applySymbolToQueryCaches(queryClient: QueryClient, symbol: MarketSymbol): void {
   reconcileDisclosureListings(queryClient, [symbol]);
   const ticker = findCachedTicker(queryClient, symbol.symbol);
   queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
@@ -186,7 +191,7 @@ export function applySymbolToQueryCaches(queryClient: QueryClient, symbol: Marke
 export const lastTradingEventTimestamps = new Map<string, number>();
 
 /** Raises a symbol's (or the market's) event watermark; it never moves back. */
-export function noteTradingEventTime(key: string, time: number): void {
+function noteTradingEventTime(key: string, time: number): void {
   if (!Number.isFinite(time)) return;
   const current = lastTradingEventTimestamps.get(key);
   if (current === undefined || time > current) lastTradingEventTimestamps.set(key, time);
@@ -318,7 +323,7 @@ export function refreshSymbolMetadata(queryClient: QueryClient, rawSymbol: strin
  * Loads a symbol the local cache does not know yet. A trading notification
  * newer than the fetched row wins, since the batch can lag behind the event.
  */
-export async function refreshMissingSymbolMetadata(
+async function refreshMissingSymbolMetadata(
   queryClient: QueryClient,
   rawSymbol: string,
   targetState?: InstrumentState,

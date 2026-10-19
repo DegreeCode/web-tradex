@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient } from "@tanstack/react-query";
-import { replaceSymbolTrades } from "../src/lib/hooks";
+import { replaceSymbolTrades } from "../src/lib/hooks/trades";
 import type { Page, PublicTrade } from "../src/lib/types";
 
 const trade = (sequence: number): PublicTrade => ({

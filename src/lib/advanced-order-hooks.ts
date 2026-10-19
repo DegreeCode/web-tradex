@@ -17,7 +17,7 @@ import type {
 } from "./types";
 import type { PnLFilters } from "./pnl";
 import { pnlQueryOptions } from "./pnl-query";
-import { useSocketStatus } from "./hooks";
+import { useSocketStatus } from "./hooks/socket";
 
 export function usePnL(filters: PnLFilters) {
   return useInfiniteQuery(pnlQueryOptions(filters));
@@ -27,7 +27,7 @@ export function useOrder(orderId: string, initial?: Order) {
   return useQuery({
     queryKey: ["orders", "detail", orderId],
     queryFn: ({ signal }) =>
-      apiData<Order>(`/api/v1/orders/${orderId}`, { signal }),
+      apiData<Order>(`/api/v1/orders/${encodeURIComponent(orderId)}`, { signal }),
     initialData: initial,
     refetchOnMount: "always",
     staleTime: 10_000,
@@ -55,7 +55,7 @@ export function useAmendOrder() {
         amended: boolean;
         order: Order;
         affected_orders: Order[];
-      }>(`/api/v1/orders/${orderId}/amendment`, body),
+      }>(`/api/v1/orders/${encodeURIComponent(orderId)}/amendment`, body),
     onSettled: () => {
       invalidateBatched(client, [
         ["orders"],
@@ -88,7 +88,7 @@ export function useCreateOrderGroup() {
 export function useOrderGroup(groupId: string) {
   return useQuery({
     queryKey: ["order-groups", groupId],
-    queryFn: ({ signal }) => apiData<OrderGroup>(`/api/v1/order-groups/${groupId}`, { signal }),
+    queryFn: ({ signal }) => apiData<OrderGroup>(`/api/v1/order-groups/${encodeURIComponent(groupId)}`, { signal }),
     staleTime: 15_000,
   });
 }
@@ -97,7 +97,7 @@ export function useOrderGroupChildren(groupId: string, enabled: boolean) {
     queryKey: ["order-groups", groupId, "children"],
     queryFn: ({ pageParam, signal }) =>
       apiPage<OrderGroup>(
-        `/api/v1/order-groups/${groupId}/children${buildQuery({ limit: 20, cursor: pageParam })}`,
+        `/api/v1/order-groups/${encodeURIComponent(groupId)}/children${buildQuery({ limit: 20, cursor: pageParam })}`,
         { signal },
       ),
     initialPageParam: null as string | null,
@@ -111,7 +111,7 @@ export function useCancelOrderGroup() {
   return useMutation({
     mutationFn: (groupId: string) =>
       postIdempotentData<OrderGroup>(
-        `/api/v1/order-groups/${groupId}/cancellation`,
+        `/api/v1/order-groups/${encodeURIComponent(groupId)}/cancellation`,
         {},
       ),
     onSettled: () => {

@@ -19,7 +19,7 @@ import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { errorMessage } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
 import { fmtCredit, fmtDeadline, fmtQuantity, fmtRelative, shortId } from "@/lib/format";
-import { useTransferAction, useTransferDetails, useTransfers } from "@/lib/hooks";
+import { useTransferAction, useTransferDetails, useTransfers } from "@/lib/hooks/transfers";
 import type { Transfer } from "@/lib/types";
 
 const TransferDialog = dynamic(

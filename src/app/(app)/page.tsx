@@ -20,7 +20,8 @@ import { Segmented } from "@/components/segmented";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { changePercent, fmtCredit, fmtDateTime, fmtDecimal, fmtSigned, shortId, toNumber } from "@/lib/format";
-import { useAllPortfolios, useInstruments, useMarketState, useNav, useNavHistory } from "@/lib/hooks";
+import { useAllPortfolios, useNav, useNavHistory } from "@/lib/hooks/accounts";
+import { useInstruments, useMarketState } from "@/lib/hooks/market";
 import { buildHolding, type HoldingView } from "@/lib/holdings";
 import type { Account, NavRange } from "@/lib/types";
 

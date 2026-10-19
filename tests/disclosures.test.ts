@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { QueryClient } from "@tanstack/react-query";
-import { loadDisclosurePage, reconcileDisclosures } from "../src/lib/hooks";
+import { loadDisclosurePage, reconcileDisclosures } from "../src/lib/hooks/disclosures";
 import { applySymbolMetadataCache, cacheSymbolMetadata } from "../src/lib/market-cache";
 import type { Disclosure, MarketSymbol } from "../src/lib/types";
 

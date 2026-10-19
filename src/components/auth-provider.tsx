@@ -5,12 +5,12 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
-import { clearSessionCache, resetSessionCache, useMe } from "@/lib/hooks";
+import { clearSessionCache, resetSessionCache, useMe } from "@/lib/hooks/session";
 import { broadcastSessionChange, onSessionChange, type SessionIdentity } from "@/lib/session-sync";
 import { setSignedIn } from "@/lib/session-mode";
 import type { SessionScope, User } from "@/lib/types";
 
-export type { AuthStatus };
+
 
 interface AuthValue {
   status: AuthStatus;
@@ -50,9 +50,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () =>
       onSessionChange((identity) => {
         if (confirmedIdentity.current === identity) return;
+        setSignedIn(false);
         void queryClient.cancelQueries({ queryKey: ["me"], exact: true }).then(() => {
           void clearSessionCache(queryClient).then(() => {
-            void queryClient.invalidateQueries({ queryKey: ["me"] });
+            // Invalidation retains the previous user while /me is loading.
+            // Reset hides that identity until the new cookies are confirmed.
+            void queryClient.resetQueries({ queryKey: ["me"], exact: true });
           });
         });
       }),

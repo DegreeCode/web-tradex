@@ -20,7 +20,8 @@ import { accountLabel, resolveAccountId } from "@/lib/accounts";
 import { errorMessage } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
-import { findPosition, useAccounts, useCreateTransfer, usePortfolio } from "@/lib/hooks";
+import { findPosition, useAccounts, usePortfolio } from "@/lib/hooks/accounts";
+import { useCreateTransfer } from "@/lib/hooks/transfers";
 import { useSessionAccess } from "@/components/session-access";
 
 export function TransferDialog({

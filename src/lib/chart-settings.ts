@@ -25,6 +25,7 @@ const OLD_PREFERENCES_KEY = "tradex:preferences:v1";
 const LEGACY_INTERVAL_KEY = "tradex:candle-interval:v1";
 const LEGACY_VOLUME_KEY = "tradex:volume-pane-ratio:v1";
 let settings: ChartSettings | undefined;
+let pendingPatch: Partial<ChartSettings> = {};
 const listeners = new Set<() => void>();
 
 function isVolumePaneRatio(value: unknown): value is number {
@@ -83,7 +84,7 @@ export function migrateLegacyChartSettings(storage: Storage): ChartSettings {
 
 function loadSettings(): ChartSettings {
   try {
-    return migrateLegacyChartSettings(window.localStorage);
+    return sanitizeChartSettings({ ...migrateLegacyChartSettings(window.localStorage), ...pendingPatch });
   } catch {
     return settings ?? {};
   }
@@ -100,15 +101,19 @@ function emit() {
 }
 
 export function updateChartSettings(patch: Partial<ChartSettings>): void {
-  const next: ChartSettings = { ...readChartSettings(), ...patch };
+  // A control can save while no chart is mounted to receive storage events.
+  // Merge the latest record so another tab's settings are preserved.
+  const next: ChartSettings = { ...loadSettings(), ...patch };
   for (const key of Object.keys(next) as (keyof ChartSettings)[]) {
     if (next[key] === undefined) delete next[key];
   }
   settings = sanitizeChartSettings(next);
   try {
     window.localStorage.setItem(CHART_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    pendingPatch = {};
   } catch {
     // Keep controls usable when browser storage is unavailable.
+    pendingPatch = { ...pendingPatch, ...patch };
   }
   emit();
 }
@@ -116,7 +121,10 @@ export function updateChartSettings(patch: Partial<ChartSettings>): void {
 function subscribe(onChange: () => void) {
   // Every chart reads these settings. A shared browser listener prevents each
   // storage event from notifying all React subscribers once per chart.
-  if (listeners.size === 0) window.addEventListener("storage", onStorage);
+  if (listeners.size === 0) {
+    window.addEventListener("storage", onStorage);
+    settings = loadSettings();
+  }
   listeners.add(onChange);
   return () => {
     listeners.delete(onChange);
@@ -131,7 +139,7 @@ function onStorage(event: StorageEvent) {
   } catch {
     return;
   }
-  settings = sanitizeChartSettings(parseRecord(event.newValue));
+  settings = sanitizeChartSettings({ ...parseRecord(event.newValue), ...pendingPatch });
   emit();
 }
 
