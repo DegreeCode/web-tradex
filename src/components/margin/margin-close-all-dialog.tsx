@@ -36,6 +36,7 @@ import {
   canRetryMarginClosure,
   classifyMarginClosureReturn,
   executeMarginClosures,
+  MAX_MARGIN_CLOSURE_ROUNDS,
   marginClosureSummary,
   prepareMarginClosures,
   reconcileMarginClosures,
@@ -237,14 +238,19 @@ function MarginCloseAllFlow({ accountId, accountName, authenticated, initialResu
 
   function rememberResults(attempts: MarginClosureAttempt[], inFlightId?: string) {
     onResultsChange(attempts.map((attempt) => {
-      if (attempt.state !== "pending") return attempt;
       const inFlight = attempt.position.position_id === inFlightId;
+      if (inFlight) {
+        return {
+          ...attempt,
+          state: "unknown" as const,
+          error: new Error("계좌를 전환해 요청 결과를 확인하지 못했어요"),
+        };
+      }
+      if (attempt.state !== "pending") return attempt;
       return {
         ...attempt,
-        state: inFlight ? "unknown" : "skipped",
-        error: new Error(inFlight
-          ? "계좌를 전환해 요청 결과를 확인하지 못했어요"
-          : "요청을 실행하기 전에 작업이 중단됐어요"),
+        state: "skipped",
+        error: new Error("요청을 실행하기 전에 작업이 중단됐어요"),
       };
     }));
   }
@@ -438,7 +444,8 @@ function MarginCloseAllFlow({ accountId, accountName, authenticated, initialResu
                 <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
                 <p className="leading-relaxed">
                   선택한 방향·종목·손익 조건에 모두 맞는 포지션의 남은 수량 전체를 순서대로 시장가 정산해요. 서버 기본 슬리피지를 적용하고, 수수료와 이자를 제외한 Credit을 이 계좌로 돌려받아요.
-                  일부만 체결되거나 실패한 포지션은 남을 수 있어요. 전체 종료된 포지션의 예약 종료 주문은 자동 취소돼요.
+                  일부만 체결되면 남은 수량을 새 현재가 기준으로 최대 {MAX_MARGIN_CLOSURE_ROUNDS}회까지 자동 재정산해요. 이 때문에 최종 평균 정산 가격이 시작 시점 가격보다 불리할 수 있어요.
+                  유동성·풀 재고·Credit 한도 등으로 수량이 줄지 않으면 남은 포지션은 일부 종료로 남을 수 있어요. 전체 종료된 포지션의 예약 종료 주문은 자동 취소돼요.
                 </p>
               </div>
             </div>
@@ -466,9 +473,10 @@ function MarginCloseAllFlow({ accountId, accountName, authenticated, initialResu
 }
 
 function resultLabel(attempt: MarginClosureAttempt): string {
+  const rounds = attempt.rounds && attempt.rounds > 1 ? attempt.rounds : null;
   switch (attempt.state) {
-    case "closed": return "전체 종료";
-    case "partial": return `일부 종료 · 잔여 ${fmtQuantity(attempt.result?.quantity)}주`;
+    case "closed": return rounds ? `전체 종료 · ${rounds}회에 나눠 정산` : "전체 종료";
+    case "partial": return `일부 종료 · 잔여 ${fmtQuantity(attempt.result?.quantity)}주${rounds ? ` · ${rounds}회 시도` : ""}`;
     case "open": return `보유 중 · 잔여 ${fmtQuantity(attempt.result?.quantity)}주`;
     case "system": return attempt.result?.status === "LIQUIDATING" ? "시스템 정산 중"
       : attempt.result?.status === "CUSTODY" ? "보호보관 · 시스템 정산 대기" : "시스템 정산 완료";

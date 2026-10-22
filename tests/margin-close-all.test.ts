@@ -7,6 +7,7 @@ import {
   canRetryMarginClosure,
   classifyMarginClosureReturn,
   executeMarginClosures,
+  MAX_MARGIN_CLOSURE_ROUNDS,
   marginClosureFailureState,
   marginClosureFromPosition,
   marginClosureSummary,
@@ -144,7 +145,7 @@ test("close all stops a scan after context changes without requesting the next p
   assert.equal(calls, 1);
 });
 
-test("close all executes sequentially, continues after rejection and retains the exact partial quantity", async () => {
+test("close all executes sequentially, continues after rejection and stops a partial with no progress", async () => {
   const targets = [attempt("a"), attempt("b"), attempt("c"), attempt("d")];
   const calls: string[] = [];
   const progress: MarginClosureAttempt[][] = [];
@@ -155,18 +156,142 @@ test("close all executes sequentially, continues after rejection and retains the
     if (calls.length === 1) return first;
     if (calls.length === 2) throw new ApiError(409, "SYMBOL_HALTED", "거래 정지");
     if (calls.length === 3) return { ...position("c"), quantity: "0.00000001" };
+    if (calls.length === 4) return { ...position("c"), quantity: "0.00000001" };
     return { ...position("d", "CLOSED"), quantity: "0" };
   }, targets, current, (results) => progress.push(results));
   assert.deepEqual(calls, ["mgn_a"]);
   resolveFirst({ ...position("a", "CLOSED"), quantity: "0" });
   const results = await work;
-  assert.deepEqual(calls, targets.map(({ position }) => position.position_id));
+  assert.deepEqual(calls, ["mgn_a", "mgn_b", "mgn_c", "mgn_c", "mgn_d"]);
   assert.deepEqual(results.map(({ state }) => state), ["closed", "failed", "partial", "closed"]);
   assert.equal(results[2].result?.quantity, "0.00000001");
-  assert.equal(progress.length, 4);
+  assert.equal(results[2].rounds, 2);
+  assert.equal(progress.length, 5);
   assert.deepEqual(progress[0].map(({ state }) => state), ["closed", "pending", "pending", "pending"]);
   assert.deepEqual(progress[1].map(({ state }) => state), ["closed", "failed", "pending", "pending"]);
+  assert.deepEqual(progress[2].map(({ state }) => state), ["closed", "failed", "partial", "pending"]);
+  assert.deepEqual(progress[3].map(({ state }) => state), ["closed", "failed", "partial", "pending"]);
+  assert.deepEqual(progress[4].map(({ state }) => state), ["closed", "failed", "partial", "closed"]);
   assert.ok(targets.every(({ state }) => state === "pending"));
+});
+
+test("close all retries a partial closure until closed and reports every round", async () => {
+  const progress: MarginClosureAttempt[][] = [];
+  const quantities = ["6.00000000", "2.50000000"];
+  let calls = 0;
+  const results = await executeMarginClosures(async () => {
+    calls++;
+    return calls <= quantities.length
+      ? { ...position("a"), quantity: quantities[calls - 1] }
+      : { ...position("a", "CLOSED"), quantity: "0" };
+  }, [attempt("a")], current, (attempts) => progress.push(attempts));
+  assert.equal(calls, 3);
+  assert.equal(results[0].state, "closed");
+  assert.equal(results[0].rounds, 3);
+  assert.equal(results[0].result?.status, "CLOSED");
+  assert.deepEqual(progress.map(([result]) => result.state), ["partial", "partial", "closed"]);
+  assert.deepEqual(progress.map(([result]) => result.rounds), [1, 2, 3]);
+  assert.equal(progress[0][0].result?.quantity, "6.00000000");
+});
+
+test("close all stops a partial closure when the leftover quantity does not decrease", async () => {
+  const progress: MarginClosureAttempt[][] = [];
+  let calls = 0;
+  const results = await executeMarginClosures(async () => {
+    calls++;
+    return { ...position("a"), quantity: "6.00000000" };
+  }, [attempt("a")], current, (attempts) => progress.push(attempts));
+  assert.equal(calls, 2);
+  assert.equal(results[0].state, "partial");
+  assert.equal(results[0].rounds, 2);
+  assert.equal(results[0].result?.quantity, "6.00000000");
+  assert.equal(progress.length, 2);
+  assert.equal(progress[1][0].state, "partial");
+});
+
+test("close all stops automatic retries exactly at the round cap", async () => {
+  const progress: MarginClosureAttempt[][] = [];
+  let calls = 0;
+  const results = await executeMarginClosures(async () => {
+    calls++;
+    return {
+      ...position("a"),
+      quantity: `0.${String(MAX_MARGIN_CLOSURE_ROUNDS - calls + 1).padStart(8, "0")}`,
+    };
+  }, [attempt("a")], current, (attempts) => progress.push(attempts));
+  assert.equal(calls, MAX_MARGIN_CLOSURE_ROUNDS);
+  assert.equal(results[0].state, "partial");
+  assert.equal(results[0].rounds, MAX_MARGIN_CLOSURE_ROUNDS);
+  assert.equal(results[0].result?.quantity, "0.00000001");
+  assert.equal(progress.length, MAX_MARGIN_CLOSURE_ROUNDS);
+});
+
+test("close all keeps a follow-up network failure unknown with the last partial result", async () => {
+  const error = new ApiError(0, "NETWORK_ERROR", "offline");
+  let calls = 0;
+  const results = await executeMarginClosures(async () => {
+    calls++;
+    if (calls === 1) return { ...position("a"), quantity: "6.00000000" };
+    throw error;
+  }, [attempt("a")], current, () => {});
+  assert.equal(calls, 2);
+  assert.equal(results[0].state, "unknown");
+  assert.equal(results[0].rounds, 2);
+  assert.equal(results[0].result?.quantity, "6.00000000");
+  assert.equal(results[0].error, error);
+  assert.equal(canRetryMarginClosure(results[0]), true);
+});
+
+test("close all retries an unknown follow-up through the loop from its last partial quantity", async () => {
+  const error = new ApiError(0, "NETWORK_ERROR", "offline");
+  let calls = 0;
+  const close = async () => {
+    calls++;
+    if (calls === 1) return { ...position("a"), quantity: "6.00000000" };
+    if (calls === 2) throw error;
+    return { ...position("a", "CLOSED"), quantity: "0" };
+  };
+  const first = await executeMarginClosures(close, [attempt("a")], current, () => {});
+  assert.equal(first[0].state, "unknown");
+  assert.equal(first[0].result?.quantity, "6.00000000");
+  const retried = await executeMarginClosures(close, first.map((result) => canRetryMarginClosure(result)
+    ? { ...result, state: "pending", error: undefined } : result), current, () => {});
+  assert.equal(calls, 3);
+  assert.equal(retried[0].state, "closed");
+  assert.equal(retried[0].rounds, 3);
+});
+
+test("close all keeps a definitive follow-up failure partial with the last result and error", async () => {
+  const error = new ApiError(400, "REJECTED", "rejected");
+  let calls = 0;
+  const results = await executeMarginClosures(async () => {
+    calls++;
+    if (calls === 1) return { ...position("a"), quantity: "6.00000000" };
+    throw error;
+  }, [attempt("a")], current, () => {});
+  assert.equal(calls, 2);
+  assert.equal(results[0].state, "partial");
+  assert.equal(results[0].rounds, 2);
+  assert.equal(results[0].result?.quantity, "6.00000000");
+  assert.equal(results[0].error, error);
+  assert.equal(canRetryMarginClosure(results[0]), false);
+});
+
+test("close all stops after a follow-up 429 and skips remaining positions", async () => {
+  const error = new ApiError(429, "RATE_LIMITED", "slow down");
+  const progress: MarginClosureAttempt[][] = [];
+  let calls = 0;
+  await assert.rejects(executeMarginClosures(async () => {
+    calls++;
+    if (calls === 1) return { ...position("a"), quantity: "6.00000000" };
+    throw error;
+  }, [attempt("a"), attempt("b")], current, (attempts) => progress.push(attempts)), (caught) => caught === error);
+  assert.equal(calls, 2);
+  assert.equal(progress.length, 2);
+  assert.deepEqual(progress[1].map(({ state }) => state), ["partial", "skipped"]);
+  assert.equal(progress[1][0].result?.quantity, "6.00000000");
+  assert.equal(progress[1][0].error, error);
+  assert.equal(progress[1][1].error, error);
 });
 
 for (const error of [
@@ -184,7 +309,7 @@ for (const error of [
     const close = async (target: MarginPosition) => {
       calls.push(target.position_id);
       if (calls.length === 1) throw error;
-      return target.position_id === "mgn_b" ? { ...target, quantity: "1.00000000" } : { ...target, status: "CLOSED" as const, quantity: "0" };
+      return target.position_id === "mgn_b" ? { ...target } : { ...target, status: "CLOSED" as const, quantity: "0" };
     };
     const results = await executeMarginClosures(close, targets, current, () => {});
     assert.deepEqual(results.map(({ state }) => state), ["unknown", "partial"]);

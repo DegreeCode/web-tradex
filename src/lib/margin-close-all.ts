@@ -7,6 +7,8 @@ export type MarginClosureAttempt = {
   state: "pending" | "skipped" | "closed" | "partial" | "failed" | "unknown" | "open" | "system";
   result?: MarginPosition;
   error?: unknown;
+  /** Number of closure requests sent for this position, including uncertain retries. */
+  rounds?: number;
   // A failed read must not change the closure's retry-key eligibility.
   reconciliationError?: unknown;
 };
@@ -81,7 +83,15 @@ export function canRetryMarginClosure(attempt: MarginClosureAttempt): boolean {
   return !(status >= 400 && status < 500 && code !== "IDEMPOTENCY_KEY_REUSED" && code !== "IDEMPOTENCY_IN_PROGRESS");
 }
 
-/** One request per pending position. Partial fills are never automatically retried. */
+export const MAX_MARGIN_CLOSURE_ROUNDS = 20;
+
+/**
+ * Close pending positions sequentially. A clipped OPEN response is retried
+ * immediately for the same position until it closes, stops making progress,
+ * reaches the round cap, or the operation is cancelled. Earlier fills survive a
+ * failed follow-up: definitive failures stay partial with the last OPEN result,
+ * while uncertain failures remain unknown for the existing retry flow.
+ */
 export async function executeMarginClosures(
   closePosition: (position: MarginPosition) => Promise<MarginPosition>,
   attempts: MarginClosureAttempt[],
@@ -93,36 +103,61 @@ export async function executeMarginClosures(
     checkCurrent(isCurrent);
     const attempt = results[index];
     if (attempt.state !== "pending") continue;
+    let rounds = attempt.rounds ?? 0;
+    let latestResult = attempt.result;
+    let previousQuantity = latestResult?.status === "OPEN" ? latestResult.quantity : attempt.position.quantity;
     let stopError: ApiError | undefined;
-    try {
-      const result = await closePosition(attempt.position);
+    while (true) {
       checkCurrent(isCurrent);
-      if (result?.position_id !== attempt.position.position_id ||
-        result.account_id !== attempt.position.account_id ||
-        (result.status !== "OPEN" && result.status !== "CLOSED")) {
-        throw new Error("청산 결과를 확인할 수 없어요");
+      let continueRound = false;
+      rounds++;
+      try {
+        const result = await closePosition(attempt.position);
+        checkCurrent(isCurrent);
+        if (result?.position_id !== attempt.position.position_id ||
+          result.account_id !== attempt.position.account_id ||
+          (result.status !== "OPEN" && result.status !== "CLOSED")) {
+          throw new Error("청산 결과를 확인할 수 없어요");
+        }
+        latestResult = result;
+        if (result.status === "CLOSED") {
+          results[index] = {
+            ...attempt, result, state: "closed", rounds,
+            error: undefined, reconciliationError: undefined,
+          };
+        } else {
+          const madeProgress = typeof result.quantity === "string" && typeof previousQuantity === "string" &&
+            compareDecimal(result.quantity, previousQuantity) < 0;
+          results[index] = {
+            ...attempt, result, state: "partial", rounds,
+            error: undefined, reconciliationError: undefined,
+          };
+          continueRound = madeProgress && rounds < MAX_MARGIN_CLOSURE_ROUNDS;
+          if (continueRound) previousQuantity = result.quantity;
+        }
+      } catch (error) {
+        checkCurrent(isCurrent);
+        const failureState = marginClosureFailureState(error);
+        // A definitive follow-up failure cannot erase the fills already observed.
+        const state = failureState === "failed" && latestResult?.status === "OPEN" ? "partial" : failureState;
+        results[index] = {
+          ...attempt, result: latestResult, state, rounds,
+          error, reconciliationError: undefined,
+        };
+        if (error instanceof ApiError && [401, 403, 429].includes(error.status)) stopError = error;
       }
-      results[index] = {
-        ...attempt, result, state: result.status === "CLOSED" ? "closed" : "partial",
-        error: undefined, reconciliationError: undefined,
-      };
-    } catch (error) {
-      checkCurrent(isCurrent);
-      results[index] = {
-        ...attempt, result: undefined, state: marginClosureFailureState(error), error, reconciliationError: undefined,
-      };
-      if (error instanceof ApiError && [401, 403, 429].includes(error.status)) stopError = error;
-    }
-    if (stopError) {
-      for (let remaining = index + 1; remaining < results.length; remaining++) {
-        if (results[remaining].state === "pending") {
-          results[remaining] = { ...results[remaining], state: "skipped", error: stopError };
+      if (stopError) {
+        for (let remaining = index + 1; remaining < results.length; remaining++) {
+          if (results[remaining].state === "pending") {
+            results[remaining] = { ...results[remaining], state: "skipped", error: stopError };
+          }
         }
       }
+      checkCurrent(isCurrent);
+      onProgress([...results]);
+      if (stopError) throw stopError;
+      if (!continueRound) break;
     }
-    checkCurrent(isCurrent);
-    onProgress([...results]);
-    if (stopError) throw stopError;
   }
   checkCurrent(isCurrent);
   return results;
