@@ -11,7 +11,7 @@ import {
 } from "./ui/dialog";
 import { OrderInput } from "./trigger-controls";
 import { useSessionAccess } from "./session-access";
-import { useAmendOrder, useOrder } from "@/lib/advanced-order-hooks";
+import { useAmendOrder, useOrder, useOrderRetry } from "@/lib/advanced-order-hooks";
 import {
   buildOrderAmendment,
   orderAmendValues,
@@ -21,7 +21,7 @@ import {
 import { ApiError, errorMessage } from "@/lib/api";
 import { ppmFromPercent } from "@/lib/format";
 import { slippageError, useExchangeInfo } from "@/lib/exchange-info";
-import type { Order } from "@/lib/types";
+import type { Order, OrderAmendment } from "@/lib/types";
 
 interface AmendForm {
   base: Order;
@@ -84,6 +84,12 @@ export function OrderAmendDialog({
     "KEEP",
   );
   const [expiry, setExpiry] = useState("");
+  // Live rebases update the displayed values, but do not create a new intent.
+  const [editVersion, setEditVersion] = useState(0);
+  const retry = useOrderRetry<{ orderId: string; body: OrderAmendment }>({
+    orderId: base.order_id, accountId: base.account_id, symbol: base.symbol,
+    editVersion, expiryMode, expiry,
+  });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const mutation = useAmendOrder();
@@ -93,9 +99,12 @@ export function OrderAmendDialog({
   const exchange = useExchangeInfo();
   const executing = base.status === "ACTIVATED";
   const terminal = base.status !== "PENDING" && !executing;
+  const closeOnly = terminal && !retry.hasPayload;
+  const canAmend = retry.hasPayload || base.status === "PENDING";
   const statusNotice = orderStatusNotice(base.status);
 
   function setValue(field: keyof AmendFormValues, value: string) {
+    setEditVersion((version) => version + 1);
     setForm((current) => ({
       ...current,
       values: { ...current.values, [field]: value },
@@ -107,25 +116,35 @@ export function OrderAmendDialog({
       !access.allowed ||
       submitting ||
       mutation.isPending ||
-      base.status !== "PENDING"
+      (!retry.hasPayload && base.status !== "PENDING")
     )
       return;
     const amountEdited = values.amount !== orderAmendValues(base).amount;
-    function amend(current: AmendForm) {
-      const { values } = current;
-      const slipError = slippageError(values.slippage, exchange.data?.trade);
-      if (slipError) throw new Error(slipError);
-      const body = buildOrderAmendment(current.base, {
-        amount: values.amount.trim(),
-        price: values.price.trim(),
-        trailingPercent: values.trailingPercent.trim(),
-        expiryMode,
-        expiresAt: expiry,
-        slippage: values.slippage.trim()
-          ? ppmFromPercent(values.slippage.trim())
-          : undefined,
+    async function amend(current: AmendForm) {
+      const request = retry.prepare(() => {
+        const { values } = current;
+        const slipError = slippageError(values.slippage, exchange.data?.trade);
+        if (slipError) throw new Error(slipError);
+        const body = buildOrderAmendment(current.base, {
+          amount: values.amount.trim(),
+          price: values.price.trim(),
+          trailingPercent: values.trailingPercent.trim(),
+          expiryMode,
+          expiresAt: expiry,
+          slippage: values.slippage.trim()
+            ? ppmFromPercent(values.slippage.trim())
+            : undefined,
+        });
+        return { orderId: current.base.order_id, body };
       });
-      return mutation.mutateAsync({ orderId: current.base.order_id, body });
+      try {
+        const data = await mutation.mutateAsync(request);
+        retry.success(request);
+        return data;
+      } catch (error) {
+        retry.failure(request, error);
+        throw error;
+      }
     }
     async function syncConflict(err: unknown) {
       if (
@@ -274,18 +293,20 @@ export function OrderAmendDialog({
           ) : null}
           <button
             type="button"
-            disabled={submitting || (!terminal && (executing || !access.allowed))}
-            title={terminal || access.allowed ? undefined : access.reason}
-            onClick={terminal ? onClose : submit}
+            disabled={submitting || (!closeOnly && (!canAmend || !access.allowed))}
+            title={closeOnly || access.allowed ? undefined : access.reason}
+            onClick={closeOnly ? onClose : submit}
             className="min-h-11 w-full rounded-xl bg-app-blue font-bold text-white disabled:opacity-50"
           >
             {submitting
               ? "정정 중…"
-              : terminal
-                ? "닫기"
-                : executing
-                  ? "체결 중…"
-                  : "주문 정정"}
+              : retry.hasPayload
+                ? "같은 내용으로 다시 정정"
+                : terminal
+                  ? "닫기"
+                  : executing
+                    ? "체결 중…"
+                    : "주문 정정"}
           </button>
         </div>
       </DialogContent>

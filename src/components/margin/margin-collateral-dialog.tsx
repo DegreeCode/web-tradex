@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrderRetry } from "@/lib/advanced-order-hooks";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -13,9 +14,11 @@ import {
 import { compareDecimal, fmtCredit, isDecimalInput } from "@/lib/format";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import {
+  buildMarginCollateralRequest,
   marginErrorMessage,
   useAddMarginCollateral,
   validateCollateralAmount,
+  type MarginAddCollateralRequest,
   type MarginPosition,
 } from "@/lib/margin";
 
@@ -34,21 +37,28 @@ export function MarginCollateralDialog({
   const inputId = useId();
   const addCollateral = useAddMarginCollateral(position?.position_id ?? "");
   const access = useSessionAccess("MARGIN");
+  const retry = useOrderRetry<MarginAddCollateralRequest>({
+    positionId: position?.position_id, accountId: position?.account_id, amount,
+  });
 
   if (!position) return null;
 
   const errorText = validateCollateralAmount(amount, availableCredit);
-  const isValid = open && access.allowed && position.status === "OPEN" && !errorText;
+  const isValid = open && access.allowed && (retry.hasPayload || (position.status === "OPEN" && !errorText));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!isValid || !position || addCollateral.isPending) return;
+    let request: MarginAddCollateralRequest | undefined;
     try {
-      await addCollateral.mutateAsync({ amount: amount.trim() });
+      request = retry.prepare(() => buildMarginCollateralRequest({ amount }));
+      await addCollateral.mutateAsync(request);
+      retry.success(request);
       toast.success("담보를 추가했어요");
       setAmount("");
       onOpenChange(false);
     } catch (err) {
+      if (request) retry.failure(request, err);
       toast.error(marginErrorMessage(err));
     }
   }
@@ -135,6 +145,9 @@ export function MarginCollateralDialog({
             ) : null}
           </div>
 
+          {retry.hasPayload && addCollateral.isError ? (
+            <p role="status" className="text-[12px] text-app-gray-500">처리 결과를 확인하지 못했어요. 다시 누르면 처음 요청과 같은 내용으로 재시도해요. 입력을 바꾸면 새 요청으로 처리해요.</p>
+          ) : null}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"

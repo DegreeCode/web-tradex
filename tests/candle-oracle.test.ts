@@ -20,42 +20,74 @@ function trade(time: number, sequence: number, price: number): PublicTrade {
   return { symbol: "ORACLE.M", side: "BUY", timestamp: iso(time), sequence,
     price: String(price), quantity: "2", credit: String(price * 2), fee: "0" };
 }
-function oracle(trades: PublicTrade[], interval: keyof typeof sizes): Candle[] {
-  const result = new Map<number, Candle>();
-  for (const t of [...trades].sort((a, b) => a.sequence - b.sequence)) {
-    const time = Math.floor((Date.parse(t.timestamp) + 32_400_000) / sizes[interval]) * sizes[interval] - 32_400_000;
-    const c = result.get(time);
-    if (!c) result.set(time, { symbol: t.symbol, interval, timestamp: iso(time), open: t.price,
-      high: t.price, low: t.price, close: t.price, volume_shares: t.quantity, volume_credit: t.credit, trade_count: 1 });
-    else {
-      c.high = String(Math.max(Number(c.high), Number(t.price)));
-      c.low = String(Math.min(Number(c.low), Number(t.price)));
-      c.close = t.price; c.volume_shares = String(Number(c.volume_shares) + 2);
-      c.volume_credit = String(Number(c.volume_credit) + Number(t.credit)); c.trade_count++;
+class ReferenceCandles {
+  readonly candles: Candle[] = [];
+  private readonly buckets = new Map<number, { candle: Candle; first: number; last: number }>();
+  private consumed = 0;
+
+  constructor(private readonly interval: keyof typeof sizes) {}
+
+  include(trades: PublicTrade[]) {
+    for (; this.consumed < trades.length; this.consumed++) {
+      const t = trades[this.consumed];
+      const time = Math.floor((Date.parse(t.timestamp) + 32_400_000) / sizes[this.interval]) * sizes[this.interval] - 32_400_000;
+      const existing = this.buckets.get(time);
+      if (!existing) {
+        const candle: Candle = { symbol: t.symbol, interval: this.interval, timestamp: iso(time), open: t.price,
+          high: t.price, low: t.price, close: t.price, volume_shares: t.quantity, volume_credit: t.credit, trade_count: 1 };
+        this.buckets.set(time, { candle, first: t.sequence, last: t.sequence });
+        const index = this.candles.findIndex(row => row.timestamp < candle.timestamp);
+        this.candles.splice(index < 0 ? this.candles.length : index, 0, candle);
+      } else {
+        const c = existing.candle;
+        c.high = String(Math.max(Number(c.high), Number(t.price)));
+        c.low = String(Math.min(Number(c.low), Number(t.price)));
+        if (t.sequence < existing.first) { c.open = t.price; existing.first = t.sequence; }
+        if (t.sequence > existing.last) { c.close = t.price; existing.last = t.sequence; }
+        c.volume_shares = String(Number(c.volume_shares) + 2);
+        c.volume_credit = String(Number(c.volume_credit) + Number(t.credit));
+        c.trade_count++;
+      }
     }
+    return this.candles;
   }
-  return [...result.values()].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+}
+
+function oracle(trades: PublicTrade[], interval: keyof typeof sizes): Candle[] {
+  // Copies keep production inputs independent of the mutable reference state.
+  return new ReferenceCandles(interval).include(trades).map(candle => ({ ...candle }));
 }
 const page = (data: Candle[]): CandlePage => ({ data, page: { has_more: true, next_cursor: "older" } });
+const references = new WeakMap<PublicTrade[], ReferenceCandles>();
+const fields = ["open", "high", "low", "close", "volume_shares", "volume_credit", "trade_count"] as const;
 function check(current: CandlePage, seen: PublicTrade[], interval: keyof typeof sizes, context: string) {
-  const expected = oracle(seen, interval);
-  const byTime = new Map(expected.map(c => [c.timestamp, c]));
+  let reference = references.get(seen);
+  if (!reference) { reference = new ReferenceCandles(interval); references.set(seen, reference); }
+  const expected = reference.include(seen);
   if (expected.length) assert.ok(current.data[0]?.timestamp >= expected[0].timestamp, `${context}: newest real candle lost`);
   assert.ok(current.data.length <= MAX_MATERIALIZED_CANDLE_BUCKETS, context);
-  for (let i = 0; i < current.data.length; i++) {
-    const c = current.data[i];
-    if (i) assert.equal(Date.parse(current.data[i - 1].timestamp) - Date.parse(c.timestamp), sizes[interval], context);
+  let expectedIndex = 0;
+  let previousTime: number | undefined;
+  // Both sides descend: one sweep finds real rows and synthetic carry-in seeds.
+  for (const c of current.data) {
+    const time = Date.parse(c.timestamp);
+    if (previousTime !== undefined) assert.equal(previousTime - time, sizes[interval], context);
+    previousTime = time;
+    while (expectedIndex < expected.length && expected[expectedIndex].timestamp > c.timestamp) expectedIndex++;
+    const real = expected[expectedIndex];
     if (c.synthetic) {
-      assert.ok(!byTime.has(c.timestamp), `${context}: synthetic hides trades at ${c.timestamp}`);
-      const previous = expected.find(real => real.timestamp < c.timestamp);
-      assert.ok(previous, `${context}: no real seed`);
-      assert.deepEqual([c.open, c.high, c.low, c.close, c.volume_shares, c.volume_credit, c.trade_count],
-        [previous.close, previous.close, previous.close, previous.close, "0", "0", 0], context);
+      assert.notEqual(real?.timestamp, c.timestamp, context);
+      assert.ok(real, context);
+      assert.equal(c.open, real.close, context);
+      assert.equal(c.high, real.close, context);
+      assert.equal(c.low, real.close, context);
+      assert.equal(c.close, real.close, context);
+      assert.equal(c.volume_shares, "0", context);
+      assert.equal(c.volume_credit, "0", context);
+      assert.equal(c.trade_count, 0, context);
     } else {
-      const real = byTime.get(c.timestamp);
-      assert.ok(real, `${context}: invented real candle`);
-      for (const field of ["open", "high", "low", "close", "volume_shares", "volume_credit", "trade_count"] as const)
-        assert.equal(String(c[field]), String(real[field]), `${context}: ${field} at ${c.timestamp}`);
+      assert.ok(real && real.timestamp === c.timestamp, context);
+      for (const field of fields) assert.equal(String(c[field]), String(real[field]), context);
     }
   }
 }
@@ -66,6 +98,8 @@ for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
       const rng = random(seed), size = sizes[interval];
       const initial = trade(origin, 0, 10);
       const seen = [initial];
+      const seenSequences = new Set([initial.sequence]);
+      const remember = (t: PublicTrade) => { seen.push(t); seenSequences.add(t.sequence); };
       let current = materializeCandlePage(page(oracle(seen, interval)), interval);
       const events: { time: number; t?: PublicTrade; kind: number }[] = [];
       for (let i = 1; i <= 240; i++) {
@@ -78,12 +112,12 @@ for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
         const to = candleSnapshotTo(current, now);
         const from = candleSnapshotFrom(current, interval);
         const covered = serverTrades.filter(t => compareTradeTimestamps(t.timestamp, to) < 0 && (!from || t.timestamp >= from));
-        for (const t of covered) if (!seen.some(known => known.sequence === t.sequence)) seen.push(t);
+        for (const t of covered) if (!seenSequences.has(t.sequence)) remember(t);
         // Delayed/reordered WS events arrive while the REST response is in
         // flight; replay includes duplicates and events on both sides of `to`.
         const pending = serverTrades.filter(t => Date.parse(t.timestamp) <= serverNow &&
-          !seen.some(known => known.sequence === t.sequence) && rng() < 0.5);
-        seen.push(...pending);
+          !seenSequences.has(t.sequence) && rng() < 0.5);
+        pending.forEach(remember);
         const replay = [...pending, ...pending.slice(0, 2), ...covered.slice(-2)].reverse();
         current = reconcileCandleSnapshot(current, page(oracle(covered, interval)), interval, to, replay, from, candleClockTimestamp(now));
       };
@@ -91,12 +125,12 @@ for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
       for (const [step, event] of events.entries()) {
         const context = `seed=${seed} interval=${interval} step=${step} kind=${event.kind}`;
         if (event.t) {
-          if (seen.some(known => known.sequence === event.t!.sequence) ||
+          if (seenSequences.has(event.t.sequence) ||
             (current.syncedThrough && compareTradeTimestamps(event.t.timestamp, current.syncedThrough) < 0)) {
             check(current, seen, interval, context);
             continue;
           }
-          seen.push(event.t);
+          remember(event.t);
           const result = applyTradeToCandlePage(current, interval, 200, event.t);
           const bucket = Math.floor((Date.parse(event.t.timestamp) + 32_400_000) / size) * size - 32_400_000;
           if (current.data.every(c => c.synthetic || Date.parse(c.timestamp) <= bucket))
@@ -115,7 +149,7 @@ for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
           snapshot(event.time + Math.floor(rng() * 4001) - 2000, event.time);
         } else {
           const older = trade(origin - (step + 1) * size, -step - 1, 5 + Math.floor(rng() * 10));
-          seen.push(older);
+          remember(older);
           current = appendCandleHistoryWithGaps(current, page(oracle([older], interval)), interval);
         }
         check(current, seen, interval, context);

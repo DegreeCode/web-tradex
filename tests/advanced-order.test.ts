@@ -5,11 +5,32 @@ import {
   buildOrderAmendment,
   orderExpiry,
   trailingDistance,
+  triggerLimitPriceError,
   type ExitOrderInput,
 } from "../src/lib/advanced-order";
 import { fmtSigned } from "../src/lib/format";
 import { pnlSourceLabel } from "../src/lib/pnl";
-import type { Order } from "../src/lib/types";
+import type { Order, OrderGroup } from "../src/lib/types";
+import { QueryClient } from "@tanstack/react-query";
+import { orderGroupChildrenQueryOptions, orderGroupQueryOptions } from "../src/lib/advanced-order-hooks";
+
+test("group and child queries poll during a private socket outage and stop when live or terminal", () => {
+  const client = new QueryClient();
+  for (const state of [undefined, "ACTIVE", "CLAIMED", "CLOSED"] as const) {
+    for (const socket of ["open", "closed", "connecting"] as const) {
+      const options = orderGroupQueryOptions("grp_a", socket);
+      const query = client.getQueryCache().build<OrderGroup, Error, OrderGroup, string[]>(client, options);
+      if (state) query.setData({ state } as NonNullable<typeof query.state.data>);
+      const interval = options.refetchInterval;
+      assert.equal(typeof interval === "function" ? interval(query) : interval,
+        socket === "open" || state === "CLOSED" ? false : 15_000);
+      const children = orderGroupChildrenQueryOptions("grp_a", true, socket, state);
+      assert.equal(children.refetchInterval, socket === "open" || state === "CLOSED" ? false : 15_000);
+      assert.equal(orderGroupChildrenQueryOptions("grp_a", false, socket, state).enabled, false);
+    }
+  }
+  client.clear();
+});
 
 const input: ExitOrderInput = {
   symbol: "ALPHA.M",
@@ -130,6 +151,38 @@ const amendment = {
   expiryMode: "KEEP" as const,
   expiresAt: "",
 };
+
+test("exit and amendment decimals use the backend decimal grammar", () => {
+  const exit = buildExitOrder({ ...input, quantity: ".5", takeProfit: "2.", stopLoss: ".5" });
+  assert.ok("group_type" in exit);
+  assert.equal(exit.quantity, "0.5");
+  assert.equal(exit.take_profit.trigger_price, "2");
+  assert.ok("trigger_price" in exit.stop_loss);
+  assert.equal(exit.stop_loss.trigger_price, "0.5");
+  const single = buildExitOrder({ ...input, margin_position_id: "mgn_a", mode: "STOP_LOSS", quantity: "1.", stopLoss: ".5" });
+  assert.ok("side" in single);
+  assert.equal(single.quantity, "1");
+  assert.equal(single.trigger_price, "0.5");
+  assert.deepEqual(buildOrderAmendment(order, { ...amendment, amount: ".5", price: "3." }), {
+    expected_revision: 4, quantity: "0.5", trigger_price: "3",
+  });
+  assert.equal(buildOrderAmendment({ ...order, requested_credit: "2" }, { ...amendment, amount: ".0000000000000001" }).credit_amount, "0.0000000000000001");
+  assert.throws(() => buildExitOrder({ ...input, quantity: "." }));
+  assert.throws(() => buildOrderAmendment(order, { ...amendment, price: "." }));
+});
+
+test("trigger price limits allow a better price beyond an LTE buy or GTE sell target", () => {
+  assert.equal(triggerLimitPriceError("BUY", "LTE", "100", "90"), null);
+  assert.equal(triggerLimitPriceError("SELL", "GTE", "100", "110"), null);
+  assert.ok(triggerLimitPriceError("BUY", "GTE", "100", "90"));
+  assert.ok(triggerLimitPriceError("SELL", "LTE", "100", "110"));
+  for (const side of ["BUY", "SELL"] as const) {
+    for (const condition of ["LTE", "GTE"] as const) {
+      assert.equal(triggerLimitPriceError(side, condition, "100", "100"), null);
+      assert.equal(triggerLimitPriceError(side, condition, "100", side === "BUY" ? "110" : "90"), null);
+    }
+  }
+});
 
 test("amendment sends residual intent and revision without changing mode, policies or expiry", () => {
   assert.deepEqual(buildOrderAmendment(order, amendment), {

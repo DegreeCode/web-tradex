@@ -3,8 +3,10 @@ import {
   fmtDecimal,
   isDecimalInput,
   isPositiveDecimal,
+  normalizeDecimalInput,
   ppmFromPercent,
 } from "./format";
+import { ApiError } from "./api";
 import type {
   OrderAmendment,
   Order,
@@ -12,6 +14,52 @@ import type {
   OrderRequest,
   TriggerPolicy,
 } from "./types";
+
+/** Live prices, balances and revisions must not change an uncertain request. */
+export function createOrderRetry<T>() {
+  let inputKey: string | undefined;
+  let remembered: { body: T } | undefined;
+  function sync(nextKey: string) {
+    if (inputKey === nextKey) return;
+    inputKey = nextKey;
+    remembered = undefined;
+  }
+  function success(body: T) {
+    if (remembered?.body === body) remembered = undefined;
+  }
+  return {
+    sync,
+    has(nextKey: string): boolean {
+      return inputKey === nextKey && remembered !== undefined;
+    },
+    prepare(nextKey: string, build: () => T): T {
+      sync(nextKey);
+      remembered ??= { body: build() };
+      return remembered.body;
+    },
+    success,
+    failure(body: T, error: unknown) {
+      if (
+        error instanceof ApiError && error.status >= 400 && error.status < 500 &&
+        error.code !== "IDEMPOTENCY_IN_PROGRESS" && error.code !== "IDEMPOTENCY_KEY_REUSED"
+      ) success(body);
+    },
+  };
+}
+
+export function triggerLimitPriceError(
+  side: "BUY" | "SELL",
+  condition: "GTE" | "LTE",
+  targetPrice: string,
+  limitPrice: string,
+): string | null {
+  // LTE buys and GTE sells can activate beyond the target at a better price.
+  if ((side === "BUY" && condition === "LTE") || (side === "SELL" && condition === "GTE"))
+    return null;
+  if (compareDecimal(limitPrice, targetPrice) * (side === "BUY" ? 1 : -1) < 0)
+    return side === "BUY" ? "매수 상한가는 목표 가격 이상이어야 해요" : "매도 하한가는 목표 가격 이하여야 해요";
+  return null;
+}
 
 export function trailingDistance(value: string): number | null {
   if (!isDecimalInput(value.trim(), 4) || !isPositiveDecimal(value.trim()))
@@ -75,7 +123,7 @@ export function buildExitOrder(
   const base = {
     symbol: input.symbol,
     account_id: input.account_id,
-    quantity: input.quantity,
+    quantity: normalizeDecimalInput(input.quantity, 8),
     ...(margin ? { margin_position_id: input.margin_position_id } : {}),
     ...(input.expires_at ? { expires_at: orderExpiry(input.expires_at) } : {}),
   };
@@ -96,10 +144,10 @@ export function buildExitOrder(
     return {
       ...base,
       group_type: "OCO",
-      take_profit: { trigger_price: input.takeProfit, ...input.policy },
+      take_profit: { trigger_price: normalizeDecimalInput(input.takeProfit, 8), ...input.policy },
       stop_loss: {
         ...(trailing === null
-          ? { trigger_price: input.stopLoss }
+          ? { trigger_price: normalizeDecimalInput(input.stopLoss, 8) }
           : { trailing_ppm: trailing }),
         ...input.policy,
       },
@@ -122,7 +170,7 @@ export function buildExitOrder(
     order_type: "TRIGGER",
     trigger_condition: short === takeProfit ? "LTE" : "GTE",
     ...(trailing === null
-      ? { trigger_price: price }
+      ? { trigger_price: normalizeDecimalInput(price, 8) }
       : { trailing_ppm: trailing }),
   };
 }
@@ -151,8 +199,8 @@ export function buildOrderAmendment(
       ? { expected_revision: order.revision }
       : {}),
     ...(creditMode
-      ? { credit_amount: values.amount }
-      : { quantity: values.amount }),
+      ? { credit_amount: normalizeDecimalInput(values.amount, 16) }
+      : { quantity: normalizeDecimalInput(values.amount, 8) }),
   };
   if (order.trailing_ppm !== undefined) {
     const trailing = trailingDistance(values.trailingPercent);
@@ -162,7 +210,7 @@ export function buildOrderAmendment(
   } else if (values.price !== order.trigger_price) {
     if (!isDecimalInput(values.price, 8) || !isPositiveDecimal(values.price))
       throw new Error("목표 가격을 입력해주세요");
-    body.trigger_price = values.price;
+    body.trigger_price = normalizeDecimalInput(values.price, 8);
   }
   if (values.slippage !== undefined && values.slippage !== order.slippage_ppm)
     body.slippage_ppm = values.slippage;

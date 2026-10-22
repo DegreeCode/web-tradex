@@ -70,9 +70,8 @@ const CANDLE_INTERVALS: readonly CandleInterval[] = [
   "1y",
 ];
 const CANDLE_ORIGIN_LOCAL_MS = Date.UTC(2000, 0, 1);
-// Bound memory and sparse-gap catch-up while allowing useful scrollback (about
-// 3.5 days at 1m). This total window is independent of the REST limit of at most
-// 500 rows per request: older pages keep extending it until this cap is reached.
+// Bound live merging and synthetic gap filling (about 3.5 days at 1m).
+// Real rows outside this window accumulate separately in history.
 export const MAX_MATERIALIZED_CANDLE_BUCKETS = 5_000;
 
 interface ZonedDateParts {
@@ -305,13 +304,12 @@ function flatCandle(previous: Candle, interval: CandleInterval, timestamp: strin
 
 interface FilledCandleData {
   data: Candle[];
-  capped: boolean;
+  history: Candle[];
 }
 
 function fillCandleGaps(
   candles: Candle[],
   interval: CandleInterval,
-  limit: number,
   throughTimestamp?: string,
 ): FilledCandleData {
   const byTimestamp = new Map<number, Candle>();
@@ -340,8 +338,7 @@ function fillCandleGaps(
     }
   }
   const sorted = [...byTimestamp].sort(([left], [right]) => left - right);
-  const safeLimit = Math.max(0, Math.min(MAX_MATERIALIZED_CANDLE_BUCKETS, Math.floor(limit)));
-  if (!sorted.length || !safeLimit) return { data: [], capped: limit > safeLimit };
+  if (!sorted.length) return { data: [], history: [] };
 
   // Retain only the oldest synthetic as a carry-in when its real predecessor
   // has rolled out. Any earlier real history supersedes that carry-in.
@@ -351,7 +348,7 @@ function fillCandleGaps(
   let cursor = Math.max(sorted[sorted.length - 1][0], requestedBucket ? parseTime(requestedBucket) : -Infinity);
   const descending: Candle[] = [];
   const step = CANDLE_FIXED_INTERVAL_MS[interval] ?? (interval === "1d" ? 86_400_000 : interval === "1w" ? 604_800_000 : undefined);
-  while (Number.isFinite(cursor) && descending.length < safeLimit) {
+  while (Number.isFinite(cursor) && descending.length < MAX_MATERIALIZED_CANDLE_BUCKETS) {
     while (seedIndex >= 0 && seeds[seedIndex][0] > cursor) seedIndex--;
     if (seedIndex < 0) break;
     const [seedTime, seed] = seeds[seedIndex];
@@ -362,30 +359,29 @@ function fillCandleGaps(
       ? cursor - step
       : parseTime(previousCandleBucketTimestamp(new Date(cursor).toISOString(), interval) ?? "");
   }
+  if (!descending.length) {
+    return { data: [], history: sorted.filter(([, candle]) => !candle.synthetic).reverse().map(([, candle]) => candle) };
+  }
+  const oldestTime = parseTime(descending[descending.length - 1].timestamp);
   return {
     data: rememberMaterializedData(descending, interval),
-    capped: cursor >= sorted[0][0],
+    history: sorted.filter(([time, candle]) => !candle.synthetic && time < oldestTime)
+      .reverse().map(([, candle]) => candle),
   };
 }
 
-/** A page is always one contiguous newest window, never real rows plus holes. */
+/** Fill a contiguous live window and archive every older real row. */
 export function materializeCandlePage(
   page: CandlePage,
   interval: CandleInterval,
   throughTimestamp?: string,
 ): CandlePage {
-  const filled = fillCandleGaps(page.data, interval, MAX_MATERIALIZED_CANDLE_BUCKETS, throughTimestamp);
-  return {
-    ...replaceCandlePageData(page, filled.data),
-    page: retireCursorAtCapacity(page, filled.data),
-  };
-}
-
-/** Retire the cursor once a single contiguous window has reached its cap. */
-function retireCursorAtCapacity(page: CandlePage, data: Candle[]): CandlePage["page"] {
-  return data.length >= MAX_MATERIALIZED_CANDLE_BUCKETS && !page.history?.length
-    ? { ...page.page, has_more: false, next_cursor: null }
-    : page.page;
+  // The newest archived real row can supersede a synthetic carry-in seed.
+  const seed = page.history?.[0];
+  const observations = seed ? [seed, ...page.data] : page.data;
+  const filled = fillCandleGaps(observations, interval, throughTimestamp);
+  const history = filled.history.length ? mergeCandles(page.history ?? [], filled.history) : page.history;
+  return { ...page, data: filled.data, history: history?.length ? history : undefined };
 }
 
 /**
@@ -398,6 +394,10 @@ export function replaceCandlePageData(
   data: Candle[],
   history = page.history,
 ): CandlePage {
+  const oldest = data.at(-1);
+  const oldestTime = oldest ? parseTime(oldest.timestamp) : -Infinity;
+  const outgoing = page.data.filter(candle => !candle.synthetic && parseTime(candle.timestamp) < oldestTime);
+  if (outgoing.length) history = mergeCandles(history ?? [], outgoing);
   return {
     ...page,
     data,
@@ -416,23 +416,8 @@ export function appendCandleHistoryWithGaps(
 ): CandlePage {
   // `older` is the first argument so the newer live overlap keeps its values.
   const merged = mergeCandles(older.data, current.data);
-  // Materialise the whole merged set so a newly loaded older row can become
-  // the carry-in price for synthetic flats at the seam.
-  const materialized = materializeCandlePage({ ...current, data: merged, history: undefined }, interval);
-  // Keep the first page complete (its rows and synthetic seam) and move only
-  // the rows beyond the live-window cap into history. The cursor is owned by
-  // the older page, so paging can continue indefinitely.
-  const oldest = materialized.data.at(-1)?.timestamp;
-  const oldestTime = oldest ? parseTime(oldest) : Number.NEGATIVE_INFINITY;
-  const olderRows = merged.filter((candle) =>
-    !candle.synthetic && parseTime(candle.timestamp) < oldestTime);
-  const history = mergeCandles(current.history ?? [], olderRows);
-  return {
-    ...materialized,
-    history: history.length > 0 ? history : undefined,
-    page: older.page,
-    historyLoaded: true,
-  };
+  const materialized = materializeCandlePage({ ...current, data: merged }, interval);
+  return { ...materialized, page: older.page, historyLoaded: true };
 }
 
 /** Clock-only changes preserve REST synchronization and never invent a seed. */
@@ -455,10 +440,7 @@ export function advanceCandlePage(
     cursor = previousCandleBucketTimestamp(cursor, interval);
   }
   const data = appended.concat(page.data.slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS - appended.length));
-  return {
-    ...replaceCandlePageData(page, rememberMaterializedData(data, interval), page.history),
-    page: retireCursorAtCapacity(page, data),
-  };
+  return replaceCandlePageData(page, rememberMaterializedData(data, interval));
 }
 
 export function isCandleInterval(value: unknown): value is CandleInterval {

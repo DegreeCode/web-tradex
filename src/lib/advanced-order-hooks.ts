@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect, useLayoutEffect, useState } from "react";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
+  queryOptions,
+  infiniteQueryOptions,
 } from "@tanstack/react-query";
 import { apiData, apiPage, buildQuery, postIdempotentData } from "./api";
 import { invalidateBatched } from "./query-batch";
@@ -18,6 +21,21 @@ import type {
 import type { PnLFilters } from "./pnl";
 import { pnlQueryOptions } from "./pnl-query";
 import { useSocketStatus } from "./hooks/socket";
+import type { WsStatus } from "./ws";
+import { createOrderRetry } from "./advanced-order";
+
+export function useOrderRetry<T>(inputs: unknown) {
+  const [retry] = useState(() => createOrderRetry<T>());
+  const inputKey = JSON.stringify(inputs);
+  // Observe every committed edit, including changing inputs away and back.
+  useLayoutEffect(() => retry.sync(inputKey), [retry, inputKey]);
+  return {
+    hasPayload: retry.has(inputKey),
+    prepare: (build: () => T) => retry.prepare(inputKey, build),
+    success: retry.success,
+    failure: retry.failure,
+  };
+}
 
 export function usePnL(filters: PnLFilters) {
   return useInfiniteQuery(pnlQueryOptions(filters));
@@ -86,14 +104,30 @@ export function useCreateOrderGroup() {
   });
 }
 export function useOrderGroup(groupId: string) {
-  return useQuery({
+  const privateStatus = useSocketStatus("private");
+  return useQuery(orderGroupQueryOptions(groupId, privateStatus));
+}
+export function orderGroupQueryOptions(groupId: string, privateStatus: WsStatus) {
+  return queryOptions({
     queryKey: ["order-groups", groupId],
     queryFn: ({ signal }) => apiData<OrderGroup>(`/api/v1/order-groups/${encodeURIComponent(groupId)}`, { signal }),
     staleTime: 15_000,
+    refetchInterval: (query) =>
+      privateStatus !== "open" && query.state.data?.state !== "CLOSED" ? 15_000 : false,
   });
 }
-export function useOrderGroupChildren(groupId: string, enabled: boolean) {
-  return useInfiniteQuery({
+export function useOrderGroupChildren(groupId: string, enabled: boolean, parentState?: OrderGroup["state"]) {
+  const privateStatus = useSocketStatus("private");
+  const client = useQueryClient();
+  useEffect(() => {
+    // Fetch the final child states before terminal groups stop polling.
+    if (parentState === "CLOSED" && enabled)
+      void client.invalidateQueries({ queryKey: ["order-groups", groupId, "children"] });
+  }, [client, groupId, enabled, parentState]);
+  return useInfiniteQuery(orderGroupChildrenQueryOptions(groupId, enabled, privateStatus, parentState));
+}
+export function orderGroupChildrenQueryOptions(groupId: string, enabled: boolean, privateStatus: WsStatus, parentState?: OrderGroup["state"]) {
+  return infiniteQueryOptions({
     queryKey: ["order-groups", groupId, "children"],
     queryFn: ({ pageParam, signal }) =>
       apiPage<OrderGroup>(
@@ -104,6 +138,8 @@ export function useOrderGroupChildren(groupId: string, enabled: boolean) {
     getNextPageParam: (last) =>
       last.page.has_more ? last.page.next_cursor : null,
     enabled,
+    // Closed children do not imply a closed bracket: more fills can add children.
+    refetchInterval: privateStatus !== "open" && parentState !== "CLOSED" ? 15_000 : false,
   });
 }
 export function useCancelOrderGroup() {

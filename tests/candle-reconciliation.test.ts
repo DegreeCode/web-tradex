@@ -281,3 +281,29 @@ test("a truncated snapshot buffered during REST recovers only an uncovered prefi
     }
   }
 });
+
+test("REST recovery keeps every real candle across more than one live window", async (t) => {
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  t.after(() => client.clear());
+  t.mock.method(Date, "now", () => base + 5_504_000);
+  const key = ["candles", "REPLAY.M", "1s", 500];
+  const current = { ...rest(apply(empty(), trade(100, 0))), page: { has_more: true, next_cursor: "earlier" } };
+  client.setQueryData(key, current);
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    const newest = 5500 - requests * 500;
+    requests++;
+    return Response.json({
+      data: Array.from({ length: 500 }, (_, index) => ({ ...current.data[0], timestamp: at((newest - index) * 1000) })),
+      page: { has_more: requests < 11, next_cursor: requests < 11 ? `page-${requests}` : null },
+    });
+  });
+  const result = await fetchCandleSnapshot(client, "REPLAY.M", "1s", 500, true, new AbortController().signal);
+  assert.equal(requests, 11);
+  assert.equal(result.data.length, 5000);
+  const real = [...result.data, ...result.history ?? []].filter(candle => !candle.synthetic);
+  assert.equal(real.length, 5501);
+  assert.equal(real.at(-1)?.timestamp, at(0));
+  assert.ok(real.some(candle => candle.timestamp === at(1000)), "the final recovery page survives");
+  assert.deepEqual(result.page, current.page, "newest-end recovery keeps the older-history cursor");
+});

@@ -25,8 +25,8 @@ import { useTheme } from "next-themes";
 import { fmtCompactQuantity, fmtPrice, fmtSigned } from "@/lib/format";
 import type { ChartHolding } from "@/lib/chart-holding";
 import type { ChartOrderLine } from "@/lib/chart-orders";
-import { formatChartTime } from "@/lib/chart-time";
-import { canIncrementallyUpdate, findChartPoint } from "@/lib/chart-updates";
+import { formatChartTickMark, formatChartTime } from "@/lib/chart-time";
+import { candleLinePoint, candleVolumePoint, canIncrementallyUpdate, findChartPoint } from "@/lib/chart-updates";
 import { calculateVolumePaneHeight, setVolumePaneRatio, useChartSettings } from "@/lib/chart-settings";
 import type { CandleInterval } from "@/lib/types";
 
@@ -359,10 +359,6 @@ function areaColors(color: string) {
   return { lineColor: color, topColor: `${color}28`, bottomColor: `${color}00` };
 }
 
-function closeLinePoint({ time, close, timestamp, closeText }: LightweightCandlePoint): LightweightLinePoint {
-  return { time, value: close, timestamp, valueText: closeText };
-}
-
 function chartThemeOptions(resolvedTheme: string | undefined) {
   const theme = resolvedTheme === "dark" ? CHART_THEMES.dark : CHART_THEMES.light;
   return {
@@ -425,6 +421,7 @@ function chartOptions(height: number) {
     },
     timeScale: {
       borderVisible: false,
+      tickMarkFormatter: formatChartTickMark,
       timeVisible: true,
       secondsVisible: true,
       rightOffset: 2,
@@ -740,16 +737,12 @@ export function LightweightCandleChart({
     if (series.seriesType() === "Area") {
       const area = series as ISeriesApi<"Area", Time>;
       area.applyOptions(areaColors(lineColor));
-      updateLineSeries(area, previousRef.current.map(closeLinePoint), data.map(closeLinePoint));
+      updateLineSeries(area, previousRef.current.map(candleLinePoint), data.map(candleLinePoint));
     } else {
       updateCandleSeries(series as ISeriesApi<"Candlestick", Time>, previousRef.current, data);
     }
     previousRef.current = data;
-    const volume = data.map((point) => ({
-      time: point.time,
-      value: point.volumeValue,
-      color: point.close >= point.open ? `${UP_COLOR}99` : `${DOWN_COLOR}99`,
-    }));
+    const volume = data.map(candleVolumePoint);
     if (volumeSeriesRef.current) {
       updateVolumeSeries(
         volumeSeriesRef.current,

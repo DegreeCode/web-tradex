@@ -6,9 +6,10 @@ import {
   useQueryClient,
   type QueryClient,
   type InfiniteData,
+  replaceEqualDeep,
 } from "@tanstack/react-query";
 import { apiPage, buildQuery } from "../api";
-import { currentDisclosures } from "../disclosure-cache";
+import { currentDisclosures, mergeDisclosurePage } from "../disclosure-cache";
 import { useSignedIn } from "../session-mode";
 import type { Disclosure, Page } from "../types";
 import { useChannelFrames } from "./socket";
@@ -26,7 +27,7 @@ export async function loadDisclosurePage(
   const page = { ...response, data: currentDisclosures(queryClient, response.data, symbol)
     .map(row => symbol && !row.symbol ? { ...row, symbol } : row) };
   if (cursor) return page;
-  const live = queryClient.getQueryData<Disclosure[]>(["public-disclosures"]) ?? [];
+  const live = currentDisclosures(queryClient, queryClient.getQueryData<Disclosure[]>(["public-disclosures"]) ?? [], symbol);
   // An empty REST page is authoritative. Only events received during this
   // request can extend it; an old socket snapshot must not fill it back in.
   return mergeDisclosurePage(queryClient, page,
@@ -53,43 +54,39 @@ export function useDisclosures(options: { symbol?: string; type?: string; limit?
   });
 }
 
-function mergeDisclosurePage(
-  queryClient: QueryClient, page: Page<Disclosure>, incoming: Disclosure[], symbol?: string, type?: string,
-): Page<Disclosure> {
-  const data = currentDisclosures(queryClient, page.data, symbol);
-  const oldest = data.at(-1)?.occurred_at;
-  const rows = new Map(data.map((row) => [row.disclosure_id, row]));
-  for (const row of currentDisclosures(queryClient, incoming, symbol)) {
-    if (symbol && row.symbol !== symbol || type && row.type !== type) continue;
-    // Older rows belong to cursor pagination, not the live head of the list.
-    if (oldest && Date.parse(row.occurred_at) < Date.parse(oldest)) continue;
-    rows.set(row.disclosure_id, row);
-  }
-  return { ...page, data: [...rows.values()].sort((a, b) =>
-    Date.parse(b.occurred_at) - Date.parse(a.occurred_at) || b.disclosure_id.localeCompare(a.disclosure_id),
-  ) };
-}
-
 export function reconcileDisclosures(queryClient: QueryClient, incoming: Disclosure[], snapshot = false) {
   // Global market-state frames have no disclosure identity and are handled separately.
   const rows = currentDisclosures(queryClient, incoming.filter((row) => row.disclosure_id && row.occurred_at));
-  queryClient.setQueryData<Disclosure[]>(["public-disclosures"], (old) =>
-    mergeDisclosurePage(queryClient, { data: [], page: { has_more: false, next_cursor: null } },
-      [...(snapshot ? [] : old ?? []), ...rows]).data.slice(0, 50),
-  );
-  for (const [key, current] of queryClient.getQueriesData<InfiniteData<Page<Disclosure>>>({ queryKey: ["disclosures"] })) {
+  const old = queryClient.getQueryData<Disclosure[]>(["public-disclosures"]);
+  const live = mergeDisclosurePage(queryClient, { data: [], page: { has_more: false, next_cursor: null } },
+    [...(snapshot ? [] : currentDisclosures(queryClient, old ?? [])), ...rows]).data.slice(0, 50);
+  const next = replaceEqualDeep(old, live);
+  if (next !== old) queryClient.setQueryData(["public-disclosures"], next);
+  const symbols = new Set(rows.map(row => row.symbol));
+  const types = new Set(rows.map(row => row.type));
+  for (const [key, current] of queryClient.getQueriesData<InfiniteData<Page<Disclosure>>>({
+    queryKey: ["disclosures"],
+    predicate: ({ queryKey }) => (queryKey[1] === "all" || symbols.has(queryKey[1] as string)) &&
+      (queryKey[2] === "all" || types.has(queryKey[2] as string)),
+  })) {
     if (!current?.pages.length) continue;
     const invalidated = queryClient.getQueryState(key)?.isInvalidated;
     const symbol = key[1] === "all" ? undefined : key[1] as string;
     const type = key[2] === "all" ? undefined : key[2] as string;
     const olderIds = new Set(current.pages.slice(1).flatMap((page) => page.data.map((row) => row.disclosure_id)));
+    const page = mergeDisclosurePage(queryClient, current.pages[0], rows.filter((row) => !olderIds.has(row.disclosure_id)), symbol, type);
+    if (page === current.pages[0]) continue;
     queryClient.setQueryData(key, {
       ...current,
-      pages: [mergeDisclosurePage(queryClient, current.pages[0], rows.filter((row) => !olderIds.has(row.disclosure_id)), symbol, type), ...current.pages.slice(1)],
+      pages: [page, ...current.pages.slice(1)],
     });
     // A partial live update cannot satisfy a requested full REST refresh.
     if (invalidated) void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: "none" });
   }
+}
+
+export function invalidateDisclosureQueries(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ["disclosures"], refetchType: "active" });
 }
 
 export function useDisclosureStream(enabled = true) {
@@ -105,6 +102,6 @@ export function useDisclosureStream(enabled = true) {
   }, () => {
     if (recoveryRequested.current) return;
     recoveryRequested.current = true;
-    void queryClient.invalidateQueries({ queryKey: ["disclosures"], refetchType: "all" });
+    void invalidateDisclosureQueries(queryClient);
   });
 }

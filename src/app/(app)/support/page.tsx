@@ -22,10 +22,12 @@ import {
   useCreateInquiry,
   useInquiries,
   useInquiry,
+  useInquiryMessages,
+  mergeInquiryMessages,
   useReplyInquiry,
   useResolveInquiry,
 } from "@/lib/hooks/support";
-import type { Inquiry, InquiryCategory, InquiryStatus } from "@/lib/types";
+import type { InquiryCategory, InquiryDetail, InquiryStatus } from "@/lib/types";
 import { cn } from "cn";
 
 const CATEGORIES: { value: InquiryCategory; label: string }[] = [
@@ -278,7 +280,9 @@ function InquiryDialog({ ticket, onClose }: { ticket: string | null; onClose: ()
   );
 }
 
-function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: string; author_user_id: string; author_acl: string; body: string; created_at: string }[] } }) {
+function InquiryThread({ inquiry }: { inquiry: InquiryDetail }) {
+  const history = useInquiryMessages(inquiry);
+  const messages = mergeInquiryMessages(inquiry.messages, history.data?.pages);
   const [reply, setReply] = useState("");
   const sendReply = useReplyInquiry(inquiry.ticket);
   const resolve = useResolveInquiry(inquiry.ticket);
@@ -311,7 +315,20 @@ function InquiryThread({ inquiry }: { inquiry: Inquiry & { messages: { id: strin
       </DialogHeader>
 
       <div className="mt-3 max-h-[45vh] space-y-2.5 overflow-y-auto">
-        {inquiry.messages.map((message) => {
+        {history.isError ? (
+          <ErrorBlock message={errorMessage(history.error)} onRetry={() => void history.refetch()} />
+        ) : null}
+        {history.hasNextPage ? (
+          <button
+            type="button"
+            onClick={() => void history.fetchNextPage()}
+            disabled={history.isFetching}
+            className="h-10 w-full rounded-xl bg-app-gray-100 text-[13px] font-semibold text-app-gray-700 disabled:opacity-40"
+          >
+            {history.isFetchingNextPage ? "불러오는 중…" : "이전 메시지 보기"}
+          </button>
+        ) : null}
+        {messages.map((message) => {
           const staff = message.author_acl !== "USER";
           return (
             <div

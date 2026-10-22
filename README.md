@@ -62,12 +62,16 @@ npm run dev                   # http://localhost:3000
 Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도 저장됩니다.
 
 3. 정적 산출물 확인(선택): `npm run build` → `out/` 생성, `npm run start`로 그대로 서빙해 확인합니다.
+   빌드 결과물의 meta CSP가 로컬 미리보기에서도 적용됩니다.
 
 ## 보안 헤더
 
-`vercel.json`은 CSP(스크립트·연결·이미지·폰트·워커), HSTS, COOP, XFO, nosniff, Referrer/Permissions
-정책과 정적 자산 캐시 헤더를 설정합니다. CSP의 `connect-src`는 배포 시 실제 API/WSS 오리진으로
-좁히세요. `npm run start`로 띄우는 로컬 `serve`에는 이 헤더가 적용되지 않습니다.
+`vercel.json`은 CSP, HSTS, COOP, XFO, nosniff, Referrer/Permissions 정책과 정적 자산 캐시
+헤더를 설정합니다. 이 헤더 CSP는 배포 기준선으로 유지하고, `npm run build`가 내보낸 모든 HTML에
+meta CSP를 추가합니다. meta CSP는 `<meta charset>` 직후에 넣고, 각 페이지 인라인 스크립트를
+sha256 해시로 허용하며(`script-src 'unsafe-inline'` 없음), `connect-src`를 `'self'`와
+`NEXT_PUBLIC_API_BASE_URL`에서 만든 API·WS 오리진으로 제한합니다. 환경 변수가 없거나 유효하지
+않으면 빌드가 실패합니다. `frame-ancestors`와 `upgrade-insecure-requests`는 헤더에만 둡니다.
 
 ## Vercel 배포 (정적)
 
@@ -79,11 +83,10 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 4. Settings → Domains 에서 커스텀 도메인(예: `app.example.com`)을 연결합니다.
 5. API 서버의 허용 오리진을 새 도메인으로 맞춥니다.
 
-`vercel.json`은 모든 경로에 CSP(인라인 부트스트랩 때문에 `script-src 'unsafe-inline'` 포함), HSTS,
-클릭재킹 차단(`frame-ancestors 'none'`·`X-Frame-Options`), `form-action 'self'`,
+`vercel.json`은 `buildCommand`로 `npm run build`를 실행하고, 모든 경로에 HSTS, 클릭재킹 차단
+(`frame-ancestors 'none'`·`X-Frame-Options`), `form-action 'self'`,
 `Cross-Origin-Opener-Policy: same-origin`, `nosniff`, Referrer/Permissions 정책과 정적 자산 캐시
-헤더를 붙입니다. 배포 전에 `connect-src`를 실제 API/WSS 오리진으로 좁히고, `Content-Security-Policy-Report-Only`로
-위반을 먼저 확인하는 것을 권장합니다.
+헤더를 붙입니다. 헤더 CSP와 meta CSP는 함께 적용됩니다.
 
 ## 화면과 사용 API
 
@@ -91,20 +94,25 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 | --- | --- | --- |
 | 홈 | `/` | `GET /market`, `/me/nav`, `/me/nav/history`, `/me/accounts`, `/me/accounts/{id}/portfolio` |
 | 마켓 | `/market` | `GET /market/tickers`(정렬 순서) + `tickers` WS |
-| 종목 상세 | `/market/symbol?symbol=…` | `GET /market/symbols/{symbol}/trades`, `/candles`, `/disclosures`, `POST /orders/simulation`, `POST /orders` |
+| 종목 상세 | `/market/symbol?symbol=…` | `GET /exchange/info`, `GET /market/symbols/{symbol}/trades`, `/candles`, `/disclosures`, `POST /orders/simulation`, `POST /orders` |
 | 주문 | `/orders` | `GET /orders`, `POST /orders/{id}/cancellation`, `GET /me/trades` |
 | 투자 | `/portfolio` | `GET /me/nav`, `/me/nav/history`, `/me/accounts/{id}/portfolio/history`, `/me/realized-pnl` |
 | 마진 | `/margin` | `GET/POST /margin/positions`, `/margin/positions/{id}/…`, `POST …/simulation` |
 | 송금 | `/transfers` | `GET/POST /transfers`, `GET /transfers/{id}` (목록에 당사자 ID가 없는 이전 백엔드에서만), `PATCH /transfers/{id}/recipient-decision`, `POST /transfers/{id}/cancellation` |
 | 계좌 | `/accounts` | `GET/POST /me/accounts`, `DELETE /me/accounts/{id}` |
-| 보안 | `/security` | `/me/passkeys*`, `/me/sessions*`, `/me/recovery-keys/rotate`, `/auth/logout` |
+| 보안 | `/security` | `/me/passkeys*`, `/me/sessions*`(limit 50 + cursor), `/me/recovery-keys/rotate`, `/auth/logout` |
 | 종목 상장 | `/listings/new` | `POST /symbols` |
 | 알림 | `/notifications` | `GET /notifications`, `POST /notifications/{id}/read`, `/read-batch`, `/read-all` |
-| 고객센터 | `/support` | `GET/POST /inquiries`, `GET /inquiries/{ticket}`, `POST /inquiries/{ticket}/messages`, `/resolution` |
+| 고객센터 | `/support` | `GET/POST /inquiries`, `GET /inquiries/{ticket}`, `GET/POST /inquiries/{ticket}/messages`, `/resolution` |
+| 기기 연결 | `/link` | `POST /auth/device-links`, `GET /auth/device-links/current`, `POST /me/device-links/lookup`, `/approve-options`, `/approve`, `/deny` |
+| 설정 | `/settings` | 업무 API 없음(로컬 환경설정만 저장) |
 | 발행사 관리 | `/market/symbol` (매니저에게만 표시) | `PATCH /symbols/{symbol}`, `GET /symbols/{symbol}/issuance-preview`, `POST /symbols/{symbol}/issuances`, `/symbols/{symbol}/manager-transfer-requests*` |
 
 종목 기본정보는 화면마다 조회하지 않고 `GET /market/symbols`(최초 1회), `/market/symbols/changes`,
 `/market/symbols/batch`로 탭 간에 공유하는 로컬 캐시를 동기화해 씁니다.
+종목 식별자는 대문자로 바꾸고 형식(영문 1~8자)을 검증한 뒤 사용하므로 소문자 공유 링크도 같은 종목으로 엽니다.
+송금은 조회 가능한 경우 `exchange/info.transfer.fee_ppm`으로 수수료를 표시하고 금액+수수료를 검증하며,
+주식 수수료는 추정값이고 추정할 수 없으면 서버 판정을 따릅니다.
 
 ## 둘러보기 (비로그인)
 
@@ -115,7 +123,8 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 비로그인 공개 API는 IP당 분당 60회로 제한되므로 둘러보기는 다음 원칙을 따릅니다.
 
 - WebSocket은 public·private 모두 열지 않습니다(SharedWorker도 띄우지 않음). 세션이 확인된 뒤에만 연결합니다.
-- 로그인 전용 API와 `GET /exchange/info`, 체결 내역(`/trades`), 공시(`/disclosures`)를 호출하지 않습니다.
+- 로그인 전용 API와 체결 내역(`/trades`), 공시(`/disclosures`)를 호출하지 않습니다. 종목 상세는
+  차트 설정을 위해 `GET /exchange/info`를 한 번 조회합니다.
   `tradex_csrf` 쿠키는 세션 쿠키와 함께 발급·삭제되므로, 이 쿠키가 없으면 `GET /me`도 보내지 않습니다.
 - 시세는 5초마다 폴링합니다(숨겨진 탭은 멈춤).
   - 마켓: `GET /market/tickers?sort=…&limit=200` 한 번으로 정렬 순서와 시세를 함께 받습니다.
@@ -134,8 +143,12 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 
 ## WebSocket (실시간)
 
-`src/lib/ws.ts`가 연결을 관리하고, `src/lib/hooks/`의 스트림 훅이 수신 프레임을 React Query 캐시에
-반영합니다. 채널 구독은 참조 카운트로 관리되며, 끊기면 1s→30s 지수 백오프로 재연결합니다.
+`ws.ts`는 SharedWorker 사용 가능 여부를 골라 탭 간 공유 소켓 또는 탭 직접 소켓을 만들고,
+`ws-transport.ts`의 `TradexSocket`이 연결·재연결을 소유합니다. SharedWorker를 쓰면 `ws-worker.ts`와
+`ws-hub.ts`가 두 소켓을 대신 운영하고, 공통 훅 정책은 `src/lib/hooks/socket.ts`에 있습니다.
+스트림 훅은 수신 프레임을 React Query 캐시에 반영합니다. 채널 구독은 참조 카운트로 관리되며,
+끊기면 1s→30s 지수 백오프로 재연결합니다. SharedWorker 프로토콜은 v2이며 private 메시지에 세션
+세대를 실어, 계정 초기화가 확인될 때까지 이전 계정의 대기 프레임 전달을 멈춥니다.
 
 | 소켓 | 채널 | 사용하는 화면 | 동작 |
 | --- | --- | --- | --- |
@@ -148,12 +161,16 @@ Chrome은 localhost를 보안 컨텍스트로 취급하므로 `Secure` 쿠키도
 | private | `transfer.updated` | 송금 | 송금·포트폴리오·NAV 무효화 |
 | private | `margin.*` | 마진 | 포지션·잔고 무효화 |
 | private | `listing.updated`, `issuance.created` | 마켓 | 해당 종목 기본정보 갱신 |
-| private | `inquiry.replied` | 고객센터 | 문의 목록·상세 무효화 |
+| private | `inquiry.replied`, `inquiry.opened` | 고객센터 | 문의 목록·상세 무효화 |
 
 두 소켓 모두 로그인 상태에서만 열리고(둘러보기는 위의 REST 폴링), private 소켓은 로그아웃 시 닫힙니다. 공개 시세·체결·시장 상태·공시는
 WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 REST snapshot으로 복구합니다.
-공개 소켓을 사용할 수 없는 동안에는 로그인 상태에서도 기존 시세 API를 5초마다 조회하고,
-소켓이 열리면 시세 폴링을 멈춥니다. 숨겨진 탭의 폴링은 중단됩니다.
+체결 sequence에 빈틈이 생기면 `trades:{symbol}`을 다시 구독해 새 스냅샷을 받고, 공개 소켓이 없는
+동안에는 로그인 상태에서도 기존 시세 API를 5초마다 조회하며 그 결과로 캔들도 갱신합니다(sequence
+중복 제거). 소켓이 열리면 시세 폴링을 멈춥니다. 숨겨진 탭의 폴링은 중단됩니다.
+private 핸드셰이크의 `AUTH_FAILED`는 일시 오류로 새 티켓으로 백오프 재시도하고, 서버가 post-auth
+ping에 응답하거나 update를 보낸 뒤에만 스트림을 open으로 봅니다. 세션 만료 판정은 REST 티켓 발급
+401 또는 `SESSION_INVALID`에서만 합니다.
 종목 기본정보는 `symbols/changes`와 `symbols/batch`로 별도 동기화합니다.
 
 같은 심볼이 재상장되면 새 상장 시각 이전의 공시 캐시를 제거하고, 공시 페이지 커서를 초기화해
@@ -172,10 +189,12 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
   불필요한 다운로드를 줄입니다. 프리페치는 업무 API를 호출하지 않습니다.
   공통 메뉴와 로딩 화면을 먼저 표시하고, 인증이 확인되면 페이지별 API 응답을 각 영역에 반영합니다.
 - **숫자 처리**: 금액·수량·가격은 문자열 고정소수점입니다. `src/lib/format.ts`는 문자열 표시 정밀도를
-  유지하고, 입력값은 검증 후 문자열 그대로 전송합니다(Credit 16자리, 수량·가격 8자리).
+  유지하고, 입력값은 전송 전에 소수점 표기를 정규화합니다(`.5`→`0.5`, `1.`→`1`, `.`은 거부;
+  Credit 16자리, 수량·가격 8자리).
 - **갱신**: WebSocket 실시간 반영 + 연결 종료/gap 시 REST 재조회. 캔들처럼 전용 stream이 없는
   데이터만 제한적으로 폴링합니다. 비공개 WS가 연결된 동안 계좌 데이터는 이벤트로 무효화되므로
-  포커스·재마운트 재조회는 60초가 지난 뒤에만 합니다.
+  포커스·재마운트 재조회는 60초가 지난 뒤에만 합니다. 열려 있는 주문 묶음과 bracket 자식은 비공개
+  소켓이 끊긴 동안에만 15초마다 확인합니다.
 - **모듈** (`src/lib`):
   - `hooks/`: 인증·계좌·주문·송금·종목 관리·고객센터·시세·캔들·공시·알림의 React Query 훅.
     각 화면은 해당 모듈을 직접 참조하며, 공통 구독·stale time 정책은 `socket.ts`에서 관리합니다
@@ -196,37 +215,42 @@ WS 연결 중 중복 폴링을 멈추고, 연결 종료나 sequence gap에서 RE
   비공개 조회 캐시는 사용자별 키가 없으므로, 로그인 상태가 끝나면 `["me"]`를 뺀 캐시를 지우고
   다른 계정으로 바뀌면 다시 조회합니다. 로그인·로그아웃·계정 전환은 `BroadcastChannel`/`storage`로
   다른 탭에 전파해 각 탭이 `/me`를 다시 확인하고 비공개 캐시를 비웁니다. 같은 전환이 두 전달 경로로
-  들어와도 한 번만 처리하고, 새 세션 확인 중에는 이전 사용자 정보를 숨깁니다.
-- **캔들 히스토리**: 최신 구간은 5,000버킷으로 제한해 실시간 병합 비용을 유지하고, 그보다 오래된
-  실제 캔들은 `history`에 무제한 누적합니다. 차트는 아래쪽으로 계속 스크롤하거나 "이전 캔들 더
-  불러오기"를 눌러 REST 페이지를 끝까지 이어서 가져올 수 있습니다.
+  들어와도 한 번만 처리하고, 새 세션 확인 중에는 이전 사용자 정보를 숨깁니다. 요청은 시작 시 세션
+  세대를 기록해 뒤늦게 도착한 이전 세션 응답이 현재 세션을 만료·차단하지 않게 하고, 패스키 성공은
+  이동 전에 다른 탭에 refresh를 전파합니다.
+- **캔들 히스토리**: 최신 구간은 5,000버킷으로 제한해 실시간 병합 비용을 유지하고, 창을 벗어난 실제
+  캔들은 `history`로 보관합니다. 서버 커서를 폐기하지 않으므로 차트는 아래쪽으로 계속 스크롤하거나
+  "이전 캔들 더 불러오기"를 눌러 오래된 REST 페이지를 계속 가져올 수 있습니다. 불변 캔들 행 기준으로
+  차트 점 변환을 캐시합니다.
 - **복구 모드**: `403 RECOVERY_RESTRICTED`는 별도 상태로 처리해 `/recover`에서 새 패스키를 등록하도록 안내합니다.
 
 ## 스크립트
 
 ```bash
 npm run dev      # 개발 서버 (next dev)
-npm run build    # 정적 빌드 → out/
+npm run build    # 정적 빌드 → out/ + 페이지별 meta CSP
 npm run start    # out/ 정적 미리보기 (serve)
 npm run lint     # ESLint
 npm run typecheck # TypeScript 검사
 npm test         # 단위 테스트 (node:test + tsx, tests/**/*.test.ts)
 npm run check    # lint + typecheck + test
+npm run check:bundle # 22개 내보낸 경로의 스크립트 용량 예산 검사
 ```
 
 ## 의존성 메모
 
-모듈별 점검·수정 내용과 검증 범위는 [리팩터링 기록](REFACTOR_REVIEW.md)을 참고하세요.
+모듈별 점검 기록은 커밋하지 않고 로컬에만 유지합니다.
 
+- TanStack React Query는 5.104.5, lucide-react는 1.61.0을 사용합니다.
 - ESLint는 9를 유지합니다. `eslint-plugin-react`(eslint-config-next 포함)의 peer 범위가 ESLint 9까지입니다.
-- TypeScript는 6.0을 유지합니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
+- TypeScript는 6.0을 유지하고 컴파일 target은 ES2022입니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
 - Next.js는 보안 릴리스 대응을 위해 정확한 버전으로 고정합니다.
 - `@types/node`는 개발 환경의 Node 24 LTS와 맞춥니다.
 - shadcn으로 생성한 UI 컴포넌트는 소스에서 관리합니다. 생성 CLI를 설치 의존성으로
   유지하지 않으며, 실제 사용하는 Base UI 상태 스타일은 `globals.css`에 정의합니다.
 - 로컬 정적 서버 `serve`가 고정한 `compression`은 메모리 누수 수정판인 1.8.2 이상으로
   override합니다. 상위 패키지에서 수정판을 사용하면 override를 제거할 수 있습니다.
-- 2026-10-19 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
+- 2026-10-22 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
   ESLint의 `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`
   경로에 높은 등급 5건(같은 원인에서 파생된 경고)이 남아 있습니다.
   [braces 보안 공지](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)에 수정 버전이 없으며,

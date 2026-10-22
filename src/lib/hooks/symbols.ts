@@ -10,6 +10,7 @@ import {
   refreshSymbolMetadata,
 } from "../market-cache";
 import { withTagList } from "../symbol-metadata";
+import { invalidateBatched } from "../query-batch";
 import type { Issuance, IssuancePreview, ListingRequest, ManagerRequest, MarketSymbol } from "../types";
 
 export function useIssuancePreview(symbol: string | undefined, deposit: string) {
@@ -52,7 +53,7 @@ export function useCreateListing() {
         composeInstrument(symbol, findCachedTicker(queryClient, symbol.symbol)),
       );
       void queryClient.invalidateQueries({ queryKey: ["instruments"] });
-      void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      invalidateBatched(queryClient, [["accounts"], ["portfolio"], ["nav"]]);
     },
   });
 }
@@ -83,7 +84,7 @@ export function useCreateIssuance(symbol: string) {
       // Instrument queries only re-read the local metadata cache, so the new
       // supply has to be fetched from the server.
       void refreshSymbolMetadata(queryClient, symbol);
-      void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      invalidateBatched(queryClient, [["accounts"], ["portfolio"], ["nav"]]);
       void queryClient.invalidateQueries({ queryKey: ["issuance-preview", symbol] });
     },
   });

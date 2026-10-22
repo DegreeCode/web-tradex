@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildTradeChartData } from "../src/lib/chart-trades";
-import { canIncrementallyUpdate, findChartPoint } from "../src/lib/chart-updates";
-import type { PublicTrade } from "../src/lib/types";
+import { buildCandleChartData, candleLinePoint, candleVolumePoint, canIncrementallyUpdate, findChartPoint } from "../src/lib/chart-updates";
+import type { Candle, PublicTrade } from "../src/lib/types";
 
 const trade = (sequence: number, timestamp: string, price = "10", quantity = "0.1"): PublicTrade => ({
   symbol: "AAA.M", side: "BUY", price, quantity, credit: "1", fee: "0", sequence, timestamp,
@@ -59,4 +59,43 @@ test("charts update incrementally only for corrections and new trailing bars", (
   assert.equal(canIncrementallyUpdate(points(60, 180), points(180, 300)), false);
   assert.equal(canIncrementallyUpdate([], points(60)), false);
   assert.equal(canIncrementallyUpdate(points(60), []), false);
+});
+
+const candle = (timestamp: string, close = "10.10"): Candle => ({
+  symbol: "AAA.M", interval: "1m", timestamp, open: "10", high: close, low: "9", close,
+  volume_shares: "2.5", volume_credit: "25", trade_count: 1,
+});
+
+test("candle conversion reuses unchanged rows and propagates last and historical corrections", () => {
+  const older = candle("2026-10-14T00:00:00Z");
+  const newer = candle("2026-10-14T00:01:00Z");
+  const first = buildCandleChartData([newer, older]);
+  const next = buildCandleChartData([{ ...newer, close: "11.12345678", volume_shares: "3" }, older]);
+  assert.equal(next.data[0], first.data[0]);
+  assert.notEqual(next.data[1], first.data[1]);
+  assert.equal(next.data[1].close, 11.12345678);
+  assert.equal(next.pricePrecision, 8);
+  assert.equal(candleLinePoint(next.data[0]), candleLinePoint(first.data[0]));
+  assert.equal(candleVolumePoint(next.data[0]), candleVolumePoint(first.data[0]));
+  assert.equal(candleLinePoint(next.data[1]).value, 11.12345678);
+  assert.equal(candleVolumePoint(next.data[1]).value, 3);
+  const corrected = buildCandleChartData([newer, { ...older, close: "7", synthetic: true }]);
+  assert.equal(corrected.data[0].close, 7);
+  assert.equal(corrected.data[0].synthetic, true);
+  assert.equal(candleLinePoint(corrected.data[0]).valueText, "7");
+  assert.equal(candleVolumePoint(corrected.data[0]).color, "#3182f699");
+  assert.equal(corrected.pricePrecision, 2, "precision can shrink after a correction");
+});
+
+test("candle conversion preserves values, precision, ordering and duplicate handling", () => {
+  const older = candle("2026-10-14T00:00:00Z");
+  const newer = candle("2026-10-14T00:01:00Z");
+  const result = buildCandleChartData([older, newer, { ...newer, close: "12" }, candle("invalid", "1.1234")]);
+  assert.deepEqual(result.data.map(point => point.close), [10.1, 12]);
+  // The fallback keeps the first duplicate encountered in the reverse walk.
+  assert.deepEqual(result.data.map(point => point.timestamp), [older.timestamp, newer.timestamp]);
+  assert.equal(result.pricePrecision, 4);
+  assert.equal(result.data[0].volumeValue, 2.5);
+  assert.equal(result.data[0].tradeCount, 1);
+  assert.deepEqual(buildCandleChartData([]), { data: [], pricePrecision: 0 });
 });

@@ -35,7 +35,7 @@ function setup(options: Partial<SharedSocketsOptions> = {}) {
   });
   const port = () => ports.at(-1)!;
   const welcome = (status: Record<"public" | "private", WsStatus> = { public: "open", private: "open" }) =>
-    port().deliver({ type: "welcome", status });
+    port().deliver({ type: "welcome", generation: 0, status });
   return { client, ports, port, welcome, errorHandlers, direct };
 }
 
@@ -81,7 +81,7 @@ test("frames, statuses and gaps from the worker reach the hooks", () => {
     welcome({ public: "open", private: "connecting" });
     assert.equal(client.socket("private").getStatus(), "connecting");
     port().deliver({ type: "frame", kind: "public", frame: { type: "snapshot", stream: "tickers", seq: 1, version: 1 } });
-    port().deliver({ type: "frame", kind: "private", frame: { type: "update", stream: "orders", seq: 1, version: 1 } });
+    port().deliver({ type: "frame", kind: "private", generation: 0, frame: { type: "update", stream: "orders", seq: 1, version: 1 } });
     port().deliver({ type: "gap", kind: "public", stream: "public" });
     port().deliver({ type: "status", kind: "public", status: "closed" });
     assert.deepEqual(events, ["status:open", "frame:tickers", "gap:public", "status:closed"]);
@@ -101,11 +101,11 @@ test("the worker gets this tab's ticket, or the refusal with its code", async ()
   try {
     welcome();
     port().take();
-    port().deliver({ type: "ticket-request", id: 7 });
+    port().deliver({ type: "ticket-request", id: 7, generation: 0 });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(port().take(), [{ op: "ticket-result", id: 7, ticket: "tkt" }]);
     refuse = true;
-    port().deliver({ type: "ticket-request", id: 8 });
+    port().deliver({ type: "ticket-request", id: 8, generation: 0 });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(port().take(), [{
       op: "ticket-result",
@@ -121,7 +121,8 @@ test("a session the worker saw rejected is reported in this tab", () => {
   let expired = 0;
   const { client, port } = setup({ onSessionExpired: () => { expired += 1; } });
   try {
-    port().deliver({ type: "session-expired" });
+    port().deliver({ type: "welcome", generation: 0, status: { public: "closed", private: "closed" } });
+    port().deliver({ type: "session-expired", generation: 0 });
     assert.equal(expired, 1);
   } finally {
     client.dispose();
@@ -295,5 +296,132 @@ test("two tabs share one connection through the worker", async () => {
   } finally {
     first.dispose();
     second.dispose();
+  }
+});
+
+test("queued private messages cannot cross a tab's session reset", () => {
+  let expired = 0;
+  const { client, port, welcome } = setup({ onSessionExpired: () => { expired += 1; } });
+  try {
+    welcome();
+    const account = client.socket("private");
+    const release = account.retain();
+    // The worker already posted these for A, but the tab has not handled them.
+    const queued = [
+      { type: "frame", kind: "private", generation: 0, frame: { type: "update", stream: "A-private", seq: 1, version: 1 } },
+      { type: "status", kind: "private", generation: 0, status: "open" },
+      { type: "gap", kind: "private", generation: 0, stream: "private" },
+      { type: "session-expired", generation: 0 },
+    ] as const;
+    client.resetPrivate();
+    release();
+    account.retain();
+    const events = watch(account);
+    for (const message of queued) port().deliver(message);
+    assert.deepEqual(events, []);
+    assert.equal(expired, 0);
+  } finally {
+    client.dispose();
+  }
+});
+
+test("only the latest reset acknowledgement resumes private delivery", () => {
+  let expired = 0;
+  const { client, port, welcome } = setup({ onSessionExpired: () => { expired += 1; } });
+  try {
+    welcome();
+    client.socket("private").retain();
+    client.resetPrivate();
+    client.resetPrivate();
+    const events = watch(client.socket("private"));
+    const emit = (generation: number) => port().deliver({ type: "frame", kind: "private", generation,
+      frame: { type: "update", stream: `account-${generation}`, seq: 1, version: 1 } });
+    port().deliver({ type: "private-reset", generation: 1, resetId: 1 });
+    emit(1);
+    port().deliver({ type: "private-reset", generation: 2 });
+    emit(2);
+    assert.deepEqual(events, [], "another tab's reset cannot acknowledge ours");
+    port().deliver({ type: "private-reset", generation: 3, resetId: 2 });
+    for (const generation of [0, 1, 2]) {
+      emit(generation);
+      port().deliver({ type: "status", kind: "private", generation, status: "open" });
+      port().deliver({ type: "gap", kind: "private", generation, stream: "private" });
+      port().deliver({ type: "session-expired", generation });
+    }
+    assert.deepEqual(events, []);
+    assert.equal(expired, 0);
+    emit(3);
+    port().deliver({ type: "status", kind: "private", generation: 3, status: "open" });
+    assert.deepEqual(events, ["frame:account-3", "status:open"]);
+  } finally {
+    client.dispose();
+  }
+});
+
+test("fallback resets detach private callbacks before closing the previous transport", () => {
+  const { client, direct } = setup({ connect: () => { throw new Error("no worker"); } });
+  try {
+    const account = client.socket("private");
+    account.retain();
+    const old = direct[1];
+    old.setStatus("open");
+    const off = account.onStatus((status) => {
+      if (status === "closed") old.emit({ type: "update", stream: "old-private", seq: 1, version: 1 });
+    });
+    const events = watch(account);
+    client.resetPrivate();
+    off();
+    old.emit({ type: "update", stream: "A-private", seq: 1, version: 1 });
+    old.gap("private");
+    old.hooks.onAuthFailure?.();
+    direct[2].emit({ type: "update", stream: "B-private", seq: 1, version: 1 });
+    assert.deepEqual(events.filter(event => event.startsWith("frame:")), ["frame:B-private"]);
+  } finally {
+    client.dispose();
+  }
+});
+
+test("snapshot requests reach the worker and direct fallback without changing reference counts", () => {
+  const shared = setup();
+  const fallback = setup({ connect: () => { throw new Error("no worker"); } });
+  try {
+    for (const { client } of [shared, fallback]) {
+      const socket = client.socket("public");
+      socket.subscribe("trades:AAA.M");
+      socket.resubscribe("trades:AAA.M");
+      socket.resubscribe("trades:unowned");
+    }
+    assert.deepEqual(shared.port().take().filter(message => message.op === "resubscribe"), [
+      { op: "resubscribe", channel: "trades:AAA.M" },
+    ]);
+    assert.deepEqual(fallback.direct[0].resubscribed, ["trades:AAA.M"]);
+    assert.equal(fallback.direct[0].channels.get("trades:AAA.M"), 1);
+  } finally {
+    shared.client.dispose();
+    fallback.client.dispose();
+  }
+});
+
+test("reset during private frame dispatch cannot add a new account to that dispatch", () => {
+  const { client, port, welcome } = setup();
+  try {
+    welcome();
+    const socket = client.socket("private");
+    socket.retain();
+    const received: string[] = [];
+    const off = socket.onFrame(() => {
+      off();
+      client.resetPrivate();
+      socket.onFrame(frame => received.push(frame.stream!));
+    });
+    port().deliver({ type: "frame", kind: "private", generation: 0,
+      frame: { type: "update", stream: "A-private", seq: 1, version: 1 } });
+    assert.deepEqual(received, []);
+    port().deliver({ type: "private-reset", generation: 1, resetId: 1 });
+    port().deliver({ type: "frame", kind: "private", generation: 1,
+      frame: { type: "update", stream: "B-private", seq: 1, version: 1 } });
+    assert.deepEqual(received, ["B-private"]);
+  } finally {
+    client.dispose();
   }
 });

@@ -6,6 +6,7 @@ import {
   applySymbolTradingState,
   applyTradePriceOverlay,
   clearTradePriceOverlay,
+  clearDeletedSymbolState,
   isMarketState,
   noteMarketStateTime,
   refreshSymbolMetadata,
@@ -22,40 +23,86 @@ export const GUEST_TICKER_POLL_MS = 5_000;
 
 type LiveTicker = Ticker & { deleted?: boolean };
 
+const TICKER_FIELDS = [
+  "symbol", "last_price", "curve_spot_price", "market_value", "holder_count", "open", "high", "low",
+  "volume_shares", "volume_credit", "change_ppm", "trade_count", "window_start",
+] as const satisfies readonly (keyof Ticker)[];
+
+function sameTicker(left: Ticker, right: Ticker): boolean {
+  return TICKER_FIELDS.every((field) => left[field] === right[field]);
+}
+
+function shareRows<T>(old: T[] | undefined, next: T[]): T[] {
+  return old?.length === next.length && old.every((row, index) => row === next[index]) ? old : next;
+}
+
+function preserveRowIdentity(queryClient: QueryClient, key: "ticker-cache" | "instruments"): void {
+  // These mergers preserve row identity themselves. Query's recursive sharing
+  // otherwise traverses every field of thousands of rows on each frame.
+  const queryKey = [key];
+  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
+  if (query) {
+    if (query.options.structuralSharing !== false) query.setOptions({ ...query.options, structuralSharing: false });
+  } else {
+    queryClient.setQueryDefaults(queryKey, { ...queryClient.getQueryDefaults(queryKey), structuralSharing: false });
+  }
+}
+
 /**
  * Writes tickers into the ticker cache and every instrument view. A snapshot
  * replaces the cache; anything else (stream updates, polled pages) merges.
  */
 export function applyTickers(queryClient: QueryClient, rows: LiveTicker[], snapshot = false): void {
   const changed = new Map(rows.map((ticker) => [ticker.symbol, ticker]));
+  preserveRowIdentity(queryClient, "ticker-cache");
+  preserveRowIdentity(queryClient, "instruments");
   queryClient.setQueryData<Ticker[]>(["ticker-cache"], (old) => {
-    if (snapshot || !old) return rows.filter((ticker) => !ticker.deleted);
-    const known = new Set<string>();
-    const next: Ticker[] = [];
-    for (const ticker of old) {
-      known.add(ticker.symbol);
-      const update = changed.get(ticker.symbol);
-      if (!update?.deleted) next.push(update ?? ticker);
+    if (snapshot || !old) {
+      const previous = new Map(old?.map((ticker) => [ticker.symbol, ticker]));
+      return shareRows(old, rows.filter((ticker) => !ticker.deleted).map((ticker) => {
+        const before = previous.get(ticker.symbol);
+        return before && sameTicker(before, ticker) ? before : ticker;
+      }));
     }
-    for (const ticker of changed.values()) if (!ticker.deleted && !known.has(ticker.symbol)) next.push(ticker);
-    return next;
+    const additions = new Set(changed.keys());
+    let next: Ticker[] | undefined;
+    old.forEach((ticker, index) => {
+      additions.delete(ticker.symbol);
+      const update = changed.get(ticker.symbol);
+      if (update?.deleted) {
+        next ??= old.slice(0, index);
+        return;
+      }
+      const row = update && !sameTicker(ticker, update) ? update : ticker;
+      if (row !== ticker) next ??= old.slice(0, index);
+      next?.push(row);
+    });
+    for (const symbol of additions) {
+      const ticker = changed.get(symbol)!;
+      if (!ticker.deleted) (next ??= old.slice()).push(ticker);
+    }
+    return next ?? old;
   });
-  // Unchanged rows keep their identity, so memoized list rows skip rendering.
-  queryClient.setQueryData<Instrument[]>(["instruments"], (old) =>
-    old?.reduce<Instrument[]>((next, instrument) => {
+  queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
+    if (!old) return old;
+    let next: Instrument[] | undefined;
+    old.forEach((instrument, index) => {
       const update = changed.get(instrument.symbol);
-      if (!update?.deleted) next.push(update ? { ...instrument, ...update } : instrument);
-      return next;
-    }, []),
-  );
-  // A tombstone always drops the detail and its price overlay.
+      if (update?.deleted) {
+        next ??= old.slice(0, index);
+        return;
+      }
+      const row = update && !sameTicker(instrument, update) ? { ...instrument, ...update } : instrument;
+      if (row !== instrument) next ??= old.slice(0, index);
+      next?.push(row);
+    });
+    return next ?? old;
+  });
   for (const ticker of rows) {
     if (!ticker.deleted) continue;
-    clearTradePriceOverlay(ticker.symbol);
+    clearDeletedSymbolState(ticker.symbol);
     queryClient.removeQueries({ queryKey: ["instrument", ticker.symbol] });
   }
-  // Visit cached details once rather than looking up a query for every ticker.
-  // Inactive details also need current prices when reopened without a refetch.
   queryClient.setQueriesData<Instrument>({ queryKey: ["instrument"] }, (old) => {
     const ticker = old && changed.get(old.symbol);
     return old && ticker && !ticker.deleted ? applyTradePriceOverlay({ ...old, ...ticker }) : old;

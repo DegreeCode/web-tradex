@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+
+import { consumeLinkCode } from "@/lib/navigation";
 import { AlertTriangle, Check } from "lucide-react";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { toast } from "sonner";
@@ -63,6 +65,16 @@ function LinkApproval() {
     const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     return fragment.get("code") ?? searchParams.get("code") ?? "";
   });
+  useEffect(() => {
+    let cancelled = false;
+    // Defer the hand-off until mount commits; a discarded render must not consume it.
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const saved = consumeLinkCode();
+      if (saved) setCodeInput((current) => current || saved);
+    });
+    return () => { cancelled = true; };
+  }, []);
   // A short-lived credential should not linger in the address bar or history.
   useEffect(() => {
     if (typeof window === "undefined") return;

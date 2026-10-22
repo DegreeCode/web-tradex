@@ -15,13 +15,13 @@ import {
   TriggerPolicyFields,
 } from "./trigger-controls";
 import { ScopeNotice, useSessionAccess } from "./session-access";
-import { useCreateOrderGroup } from "@/lib/advanced-order-hooks";
+import { useCreateOrderGroup, useOrderRetry } from "@/lib/advanced-order-hooks";
 import { usePlaceOrder } from "@/lib/hooks/orders";
 import { buildExitOrder, type ExitOrderInput } from "@/lib/advanced-order";
 import { errorMessage } from "@/lib/api";
 import { compareDecimal, fmtQuantity, ppmFromPercent } from "@/lib/format";
 import { slippageError, useExchangeInfo } from "@/lib/exchange-info";
-import type { OrderWarning, TriggerPolicy } from "@/lib/types";
+import type { OrderGroupRequest, OrderRequest, OrderWarning, TriggerPolicy } from "@/lib/types";
 
 export function ExitOrderDialog({
   open,
@@ -57,42 +57,53 @@ export function ExitOrderDialog({
   const orderMutation = usePlaceOrder();
   const exchange = useExchangeInfo();
   const pending = groupMutation.isPending || orderMutation.isPending;
+  const retry = useOrderRetry<OrderRequest | OrderGroupRequest>({
+    symbol, accountId, marginPositionId, marginSide, quantity, mode,
+    takeProfit, stopLoss, trailing, distance, expiry, slippage, policy,
+  });
   function submit() {
     if (!access.allowed || pending || submitted) return;
     setError("");
     try {
-      const slipError = slippageError(slippage, exchange.data?.trade);
-      if (slipError) throw new Error(slipError);
-      const body = buildExitOrder({
-        symbol,
-        account_id: accountId,
-        quantity: quantity.trim(),
-        mode,
-        takeProfit: takeProfit.trim(),
-        stopLoss: stopLoss.trim(),
-        ...(trailing && mode !== "TAKE_PROFIT"
-          ? { trailingPercent: distance }
-          : {}),
-        ...(expiry ? { expires_at: expiry } : {}),
-        margin_position_id: marginPositionId,
-        margin_side: marginSide,
-        policy: {
-          ...policy,
-          ...(slippage.trim()
-            ? { slippage_ppm: ppmFromPercent(slippage.trim()) }
+      const body = retry.prepare(() => {
+        const slipError = slippageError(slippage, exchange.data?.trade);
+        if (slipError) throw new Error(slipError);
+        const body = buildExitOrder({
+          symbol,
+          account_id: accountId,
+          quantity: quantity.trim(),
+          mode,
+          takeProfit: takeProfit.trim(),
+          stopLoss: stopLoss.trim(),
+          ...(trailing && mode !== "TAKE_PROFIT"
+            ? { trailingPercent: distance }
             : {}),
-        },
+          ...(expiry ? { expires_at: expiry } : {}),
+          margin_position_id: marginPositionId,
+          margin_side: marginSide,
+          policy: {
+            ...policy,
+            ...(slippage.trim()
+              ? { slippage_ppm: ppmFromPercent(slippage.trim()) }
+              : {}),
+          },
+        });
+        if (compareDecimal(quantity, maxQuantity) > 0)
+          throw new Error("주문 수량이 현재 주문 가능한 수량을 넘어요");
+        return body;
       });
-      if (compareDecimal(quantity, maxQuantity) > 0)
-        throw new Error("주문 수량이 현재 주문 가능한 수량을 넘어요");
       const options = {
         onSuccess: (data: { warnings?: OrderWarning[] }) => {
+          retry.success(body);
           setSubmitted(true);
           setWarnings(data.warnings);
           toast.success("익절·손절 주문을 접수했어요");
           if (!data.warnings?.length) onOpenChange(false);
         },
-        onError: (err: unknown) => setError(errorMessage(err)),
+        onError: (err: unknown) => {
+          retry.failure(body, err);
+          setError(errorMessage(err));
+        },
       };
       if ("group_type" in body) groupMutation.mutate(body, options);
       else orderMutation.mutate(body, options);

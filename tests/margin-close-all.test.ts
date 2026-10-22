@@ -211,13 +211,13 @@ test("close all offers retries only when the existing API helper retains the ide
     new ApiError(0, "NETWORK_ERROR", "offline"),
     new ApiError(500, "INTERNAL_ERROR", "failure"),
     new ApiError(409, "IDEMPOTENCY_KEY_REUSED", "reused"),
+    new ApiError(409, "IDEMPOTENCY_IN_PROGRESS", "busy"),
     new ApiError(200, "INVALID_RESPONSE", "missing data envelope"),
   ]) {
     assert.equal(canRetryMarginClosure({ ...attempt("a"), state: "unknown", error }), true);
     assert.equal(canRetryMarginClosure({ ...attempt("a"), state: "failed", error }), false);
   }
   for (const error of [
-    new ApiError(409, "IDEMPOTENCY_IN_PROGRESS", "busy"),
     new ApiError(400, "INVALID_RESPONSE", "bad response"),
     new Error("malformed successful position response"),
   ]) {
@@ -229,6 +229,7 @@ for (const [status, code] of [
   [0, "NETWORK_ERROR"],
   [500, "INTERNAL_ERROR"],
   [409, "IDEMPOTENCY_KEY_REUSED"],
+  [409, "IDEMPOTENCY_IN_PROGRESS"],
   [200, "INVALID_RESPONSE"],
 ] as const) {
   test(`close all reuses the shared client's exact request and key after ${status} ${code}`, async (t) => {
@@ -378,7 +379,7 @@ test("close all checks only unknown positions sequentially, continues after fail
   assert.deepEqual(progress[0].map(({ state }) => state), ["closed", "closed", "unknown", "unknown", "partial"]);
   assert.equal(checked[2].error, originalError);
   assert.equal(checked[2].reconciliationError, readError);
-  assert.equal(canRetryMarginClosure(checked[2]), false);
+  assert.equal(canRetryMarginClosure(checked[2]), true);
   assert.equal(targets[0].state, "unknown");
   assert.equal(targets[2].reconciliationError, undefined);
 
@@ -466,4 +467,11 @@ test("close all summary distinguishes current holdings and system settlement fro
   ];
   assert.equal(marginClosureSummary(checked),
     "전체 종료 0건 · 일부 종료 0건 · 보유 중 1건 · 시스템 정산 중/완료 2건 · 실패 0건 · 결과 미확인 0건 · 미실행 0건");
+});
+
+test("close all treats a closure response from another account as unknown", async () => {
+  const results = await executeMarginClosures(async () => ({ ...position("a", "CLOSED"), account_id: "acc_other" }),
+    [attempt("a")], current, () => {});
+  assert.equal(results[0].state, "unknown");
+  assert.equal(results[0].result, undefined);
 });

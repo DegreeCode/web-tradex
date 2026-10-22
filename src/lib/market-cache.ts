@@ -31,9 +31,8 @@ const GLOBAL_EVENT_KEY = "__GLOBAL__";
 
 /** Symbols are stored with the `.M` suffix; links and events may omit it. */
 export function canonicalSymbol(symbol: string | undefined): string | undefined {
-  const trimmed = symbol?.trim();
-  if (!trimmed) return undefined;
-  return trimmed.endsWith(".M") ? trimmed : `${trimmed}.M`;
+  const base = symbol?.trim().toUpperCase().replace(/\.M$/, "");
+  return base && /^[A-Z]{1,8}$/.test(base) ? `${base}.M` : undefined;
 }
 
 export function isMarketState(value: unknown): value is MarketState {
@@ -84,6 +83,20 @@ export function composeInstrument(symbol: MarketSymbol, ticker?: Ticker): Instru
   };
 }
 
+// Ticker merges supply row sharing directly; metadata writes must preserve it too.
+function retainInstrument(previous: Instrument | undefined, next: Instrument): Instrument {
+  if (!previous) return next;
+  const keys = Object.keys(next) as (keyof Instrument)[];
+  if (keys.length !== Object.keys(previous).length) return next;
+  return keys.every((key) => key === "tags"
+    ? previous.tags.length === next.tags.length && previous.tags.every((tag, index) => tag === next.tags[index])
+    : previous[key] === next[key]) ? previous : next;
+}
+
+function retainInstrumentRows(previous: Instrument[] | undefined, next: Instrument[]): Instrument[] {
+  return previous?.length === next.length && previous.every((row, index) => row === next[index]) ? previous : next;
+}
+
 function tickersBySymbol(queryClient: QueryClient): Map<string, Ticker> {
   const tickers = queryClient.getQueryData<Ticker[]>(["ticker-cache"]) ?? [];
   return new Map(tickers.map((ticker) => [ticker.symbol, ticker]));
@@ -91,7 +104,11 @@ function tickersBySymbol(queryClient: QueryClient): Map<string, Ticker> {
 
 export function composeCachedInstruments(symbols: MarketSymbol[], queryClient: QueryClient): Instrument[] {
   const tickers = tickersBySymbol(queryClient);
-  return symbols.map((symbol) => composeInstrument(symbol, tickers.get(symbol.symbol)));
+  const old = queryClient.getQueryData<Instrument[]>(["instruments"]);
+  const previous = new Map(old?.map((row) => [row.symbol, row]));
+  return retainInstrumentRows(old, symbols.map((symbol) =>
+    retainInstrument(previous.get(symbol.symbol), composeInstrument(symbol, tickers.get(symbol.symbol))),
+  ));
 }
 
 export function findCachedTicker(queryClient: QueryClient, symbol: string): Ticker | undefined {
@@ -131,15 +148,35 @@ const appliedMetadata = new WeakMap<QueryClient, MarketSymbol[]>();
 
 export function applySymbolMetadataCache(queryClient: QueryClient, cache: SymbolMetadataCache): void {
   if (appliedMetadata.get(queryClient) === cache.symbols && queryClient.getQueryData(["instruments"])) return;
+  pruneDeletedSymbols(queryClient, cache.symbols);
   reconcileDisclosureListings(queryClient, cache.symbols);
   queryClient.setQueryData<Instrument[]>(["instruments"], (old) => {
     const previous = new Map(old?.map((instrument) => [instrument.symbol, instrument]));
     const tickers = tickersBySymbol(queryClient);
-    return cache.symbols.map((symbol) =>
-      composeInstrument(symbol, tickers.get(symbol.symbol) ?? previous.get(symbol.symbol)),
-    );
+    return retainInstrumentRows(old, cache.symbols.map((symbol) =>
+      retainInstrument(previous.get(symbol.symbol), composeInstrument(symbol, tickers.get(symbol.symbol) ?? previous.get(symbol.symbol))),
+    ));
   });
   appliedMetadata.set(queryClient, cache.symbols);
+}
+
+function pruneDeletedSymbols(queryClient: QueryClient, symbols: MarketSymbol[]): void {
+  const retained = new Set(symbols.map((symbol) => symbol.symbol));
+  for (const key of lastTradingEventTimestamps.keys()) {
+    if (key !== GLOBAL_EVENT_KEY && !retained.has(key)) lastTradingEventTimestamps.delete(key);
+  }
+  for (const key of tradePriceOverlays.keys()) {
+    if (!retained.has(key)) tradePriceOverlays.delete(key);
+  }
+  queryClient.setQueryData<Ticker[]>(["ticker-cache"], (old) =>
+    old?.some((ticker) => !retained.has(ticker.symbol))
+      ? old.filter((ticker) => retained.has(ticker.symbol))
+      : old,
+  );
+  queryClient.removeQueries({
+    predicate: (query) => query.queryKey[0] === "instrument" &&
+      typeof query.queryKey[1] === "string" && !retained.has(query.queryKey[1]),
+  });
 }
 
 /** Pushes only the symbols that changed between two caches into mounted details. */
@@ -149,12 +186,9 @@ export function applySymbolMetadataDelta(
   next: SymbolMetadataCache,
 ): void {
   if (previous?.symbols === next.symbols) return;
+  pruneDeletedSymbols(queryClient, next.symbols);
   reconcileDisclosureListings(queryClient, next.symbols);
   const previousBySymbol = new Map(previous?.symbols.map((symbol) => [symbol.symbol, symbol]));
-  const nextSymbols = new Set(next.symbols.map((symbol) => symbol.symbol));
-  for (const symbol of previous?.symbols ?? []) {
-    if (!nextSymbols.has(symbol.symbol)) queryClient.removeQueries({ queryKey: ["instrument", symbol.symbol] });
-  }
   const tickers = tickersBySymbol(queryClient);
   for (const symbol of next.symbols) {
     const before = previousBySymbol.get(symbol.symbol);
@@ -177,7 +211,7 @@ function applySymbolToQueryCaches(queryClient: QueryClient, symbol: MarketSymbol
     const index = old.findIndex((instrument) => instrument.symbol === symbol.symbol);
     if (index < 0) return [...old, applyTradePriceOverlay(composeInstrument(symbol, ticker))];
     return old.map((instrument, i) =>
-      i === index ? applyTradePriceOverlay(composeInstrument(symbol, ticker ?? instrument)) : instrument,
+      i === index ? retainInstrument(instrument, applyTradePriceOverlay(composeInstrument(symbol, ticker ?? instrument))) : instrument,
     );
   });
   updateInstrumentDetail(queryClient, symbol, ticker);
@@ -189,6 +223,11 @@ function applySymbolToQueryCaches(queryClient: QueryClient, symbol: MarketSymbol
 // ---------------------------------------------------------------------------
 
 export const lastTradingEventTimestamps = new Map<string, number>();
+
+export function clearDeletedSymbolState(symbol: string): void {
+  clearTradePriceOverlay(symbol);
+  lastTradingEventTimestamps.delete(symbol);
+}
 
 /** Raises a symbol's (or the market's) event watermark; it never moves back. */
 function noteTradingEventTime(key: string, time: number): void {

@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RecoveryKeyGrid } from "@/components/recovery-keys";
-import { ErrorBlock, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
+import { ErrorBlock, LoadMoreButton, PageHeader, SkeletonRows, Surface } from "@/components/primitives";
 import { ApiError, errorMessage, markSessionExpired, postData } from "@/lib/api";
 import { fmtDate, fmtDateTime, fmtRelative, shortId } from "@/lib/format";
 import { noteSelfAction } from "@/lib/live-notifications";
@@ -120,7 +120,7 @@ export default function SecurityPage() {
     router.replace("/login");
   }
 
-  const sessionRows = sessions.data?.sessions ?? [];
+  const sessionRows = sessions.data?.pages.flatMap((page) => page.sessions) ?? [];
 
   return (
     <div className="space-y-4">
@@ -264,6 +264,13 @@ export default function SecurityPage() {
             ))
           )}
         </div>
+        <LoadMoreButton
+          hasMore={sessions.hasNextPage}
+          loading={sessions.isFetchingNextPage}
+          onLoad={() => void sessions.fetchNextPage()}
+          label="더 보기"
+          className="mt-3"
+        />
       </Surface>
 
       {linked ? null : (

@@ -6,6 +6,8 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  infiniteQueryOptions,
+  queryOptions,
 } from "@tanstack/react-query";
 
 import {
@@ -22,10 +24,13 @@ import {
   isDecimalInput,
   isPositiveDecimal,
   multiplyDecimal,
+  normalizeDecimalInput,
   fmtCredit,
   fmtQuantity,
 } from "./format";
 import { invalidateBatched } from "./query-batch";
+import { privateStaleTime, useSocketStatus } from "./hooks/socket";
+import type { WsStatus } from "./ws";
 
 export type MarginSide = "LONG" | "SHORT";
 
@@ -150,6 +155,25 @@ export interface MarginReductionRequest {
 export interface MarginClosureRequest {
   slippage_ppm?: number;
   slippage_reference_price?: string;
+}
+
+/** Use these bodies for both simulations and mutations. */
+export function buildMarginCreateRequest(input: MarginCreateRequest): MarginCreateRequest {
+  const leverage = normalizeDecimalInput(input.leverage, 1);
+  return {
+    ...input,
+    collateral: normalizeDecimalInput(input.collateral, 16),
+    // The backend requires exactly one fractional digit for leverage.
+    leverage: leverage.includes(".") ? leverage : `${leverage}.0`,
+  };
+}
+
+export function buildMarginCollateralRequest(input: MarginAddCollateralRequest): MarginAddCollateralRequest {
+  return { ...input, amount: normalizeDecimalInput(input.amount, 16) };
+}
+
+export function buildMarginReductionRequest(input: MarginReductionRequest): MarginReductionRequest {
+  return { ...input, quantity: normalizeDecimalInput(input.quantity, 8) };
 }
 
 export interface MarginSimulation {
@@ -387,6 +411,7 @@ export function validateReductionQuantity(
   return null;
 }
 
+// Socket events do not stream continuous valuations or every partial liquidation.
 const LIVE_MARGIN_STATUSES = new Set<MarginStatus>(["OPEN", "LIQUIDATING"]);
 // LIQUIDATING and CUSTODY are still held; the system settles them.
 const ACTIVE_MARGIN_STATUSES = new Set<MarginStatus>(["OPEN", "LIQUIDATING", "CUSTODY"]);
@@ -399,8 +424,16 @@ export function isActiveMarginPosition(status: MarginStatus): boolean {
 export function useMarginPositions(
   options: { accountId?: string; limit?: number; enabled?: boolean; poll?: boolean } = {},
 ) {
+  const privateStatus = useSocketStatus("private");
+  return useInfiniteQuery(marginPositionsQueryOptions(options, privateStatus));
+}
+
+export function marginPositionsQueryOptions(
+  options: { accountId?: string; limit?: number; enabled?: boolean; poll?: boolean },
+  privateStatus: WsStatus,
+) {
   const { accountId, limit = 50, enabled = true, poll = true } = options;
-  return useInfiniteQuery({
+  return infiniteQueryOptions({
     queryKey: [...MARGIN_QUERY_KEYS.positions(accountId), limit],
     queryFn: ({ pageParam, signal }) =>
       apiData<MarginPositionsData>(
@@ -413,7 +446,8 @@ export function useMarginPositions(
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => (last.page?.has_more ? last.page.next_cursor : null),
-    // Equity and risk move with prices, so poll only while a position is live.
+    staleTime: privateStaleTime(privateStatus),
+    // Equity and risk move without socket events; keep their price refresh.
     refetchInterval: (query) =>
       poll &&
       query.state.data?.pages.some((page) =>
@@ -426,10 +460,16 @@ export function useMarginPositions(
 }
 
 export function useMarginPosition(positionId: string | null) {
-  return useQuery({
+  const privateStatus = useSocketStatus("private");
+  return useQuery(marginPositionQueryOptions(positionId, privateStatus));
+}
+
+export function marginPositionQueryOptions(positionId: string | null, privateStatus: WsStatus) {
+  return queryOptions({
     queryKey: MARGIN_QUERY_KEYS.position(positionId),
     queryFn: ({ signal }) => apiData<MarginPosition>(`/api/v1/margin/positions/${encodeURIComponent(positionId ?? "")}`, { signal }),
     enabled: Boolean(positionId),
+    staleTime: privateStaleTime(privateStatus),
     refetchInterval: (query) =>
       query.state.data && LIVE_MARGIN_STATUSES.has(query.state.data.status) ? 5_000 : false,
   });

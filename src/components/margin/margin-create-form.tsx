@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrderRetry } from "@/lib/advanced-order-hooks";
 import { useAuth } from "@/components/auth-provider";
 import { managerMarginSideBlocked, useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy, MarginInterestPolicy } from "@/components/exchange-policy";
@@ -36,6 +37,7 @@ import { useAccounts } from "@/lib/hooks/accounts";
 import { useInstrument, useInstruments, useMarketState } from "@/lib/hooks/market";
 import { noteSelfAction } from "@/lib/live-notifications";
 import {
+  buildMarginCreateRequest,
   getLeverageBounds,
   isIndefiniteMarginBlock,
   marginErrorMessage,
@@ -44,6 +46,7 @@ import {
   useCreateMarginPosition,
   validateCollateralAmount,
   validateLeverage,
+  type MarginCreateRequest,
   type MarginEligibility,
   type MarginSide,
 } from "@/lib/margin";
@@ -51,12 +54,14 @@ import {
 export function MarginCreateForm({
   eligibility,
   eligibilityPending = false,
+  active = true,
   initialSymbol,
   selectedAccountId,
   onCreated,
 }: {
   eligibility?: MarginEligibility;
   eligibilityPending?: boolean;
+  active?: boolean;
   initialSymbol?: string;
   selectedAccountId?: string;
   onCreated?: () => void;
@@ -76,7 +81,7 @@ export function MarginCreateForm({
   // Form states
   const [symbol, setSymbol] = useState(initialSymbol ?? "");
   const resolvedSymbol = symbol || initialSymbol || instruments[0]?.symbol || "";
-  const { capacity } = useMarginCapacity(resolvedSymbol);
+  const { capacity } = useMarginCapacity(resolvedSymbol, active);
   const [side, setSide] = useState<MarginSide>("LONG");
   const [sideInitialized, setSideInitialized] = useState(false);
   const [collateral, setCollateral] = useState("");
@@ -101,10 +106,13 @@ export function MarginCreateForm({
     }
   }
 
-  const selectedInstrument = useInstrument(resolvedSymbol).data;
+  const selectedInstrument = useInstrument(active ? resolvedSymbol : undefined).data;
   // A Long opens by buying, a Short by selling.
   const tradeSide = side === "LONG" ? "BUY" : "SELL";
   const createMutation = useCreateMarginPosition();
+  const retry = useOrderRetry<MarginCreateRequest>({
+    accountId: currentAccountId, symbol: resolvedSymbol, side, collateral, leverage, slippageSettings,
+  });
 
   // Active leverage cap from eligibility
   const maxLeverageStr = useMemo(() => {
@@ -139,7 +147,7 @@ export function MarginCreateForm({
   );
 
   const payload =
-    marginAccess.allowed &&
+    active && marginAccess.allowed &&
     !collateralError &&
     !leverageError &&
     currentAccount &&
@@ -150,18 +158,18 @@ export function MarginCreateForm({
     !managerSideBlocked &&
     resolvedSymbol &&
     !slippageSettingsError(slippageSettings, tradeSide, exchangeInfo?.trade)
-      ? {
+      ? buildMarginCreateRequest({
           account_id: currentAccountId,
           symbol: resolvedSymbol,
           side,
-          collateral: collateral.trim(),
+          collateral,
           leverage: resolvedLeverage,
           ...slippageRequestFields(slippageSettings),
-        }
+        })
       : null;
   const referencePrice = liveReferencePrice(slippageSettings, selectedInstrument?.curve_spot_price);
 
-  const canSubmit = Boolean(payload) && !createMutation.isPending;
+  const canSubmit = active && marginAccess.allowed && !createMutation.isPending && (retry.hasPayload || Boolean(payload));
 
   // Estimation
   const estimatedNotional = useMemo(() => {
@@ -182,14 +190,18 @@ export function MarginCreateForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const invalidSlippage = slippageSettingsError(slippageSettings, tradeSide, exchangeInfo?.trade);
-    if (invalidSlippage) { toast.error(invalidSlippage); return; }
-    if (!canSubmit || !payload) return;
+    if (!retry.hasPayload && invalidSlippage) { toast.error(invalidSlippage); return; }
+    if (!canSubmit) return;
 
     noteSelfAction("TRADE_EXECUTED", resolvedSymbol);
+    let request: MarginCreateRequest | undefined;
     try {
-      const position = await createMutation.mutateAsync(
-        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
-      );
+      request = retry.prepare(() => {
+        if (!payload) throw new Error("입력 내용을 확인해주세요");
+        return referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload;
+      });
+      const position = await createMutation.mutateAsync(request);
+      retry.success(request);
       const label = `${resolvedSymbol} ${side === "LONG" ? "롱" : "숏"} 포지션`;
       // The server clips entry to the executable collateral; the rest stays in the account.
       if (position.execution?.partially_filled) {
@@ -202,6 +214,7 @@ export function MarginCreateForm({
       setCollateral("");
       onCreated?.();
     } catch (err) {
+      if (request) retry.failure(request, err);
       toast.error(marginErrorMessage(err));
     }
   }
@@ -482,6 +495,9 @@ export function MarginCreateForm({
 
         <div className="space-y-2">
           {marginAccess.allowed ? null : <ScopeNotice reason={marginAccess.reason} />}
+          {retry.hasPayload && createMutation.isError ? (
+            <p role="status" className="text-[12px] text-app-gray-500">처리 결과를 확인하지 못했어요. 다시 누르면 처음 요청과 같은 내용으로 재시도해요. 입력을 바꾸면 새 요청으로 처리해요.</p>
+          ) : null}
           <button
             type="submit"
             disabled={!canSubmit}

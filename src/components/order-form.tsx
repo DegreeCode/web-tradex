@@ -19,7 +19,8 @@ import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
 import { ExitOrderDialog } from "@/components/exit-order-dialog";
 import { OrderInput, TriggerPolicyFields } from "@/components/trigger-controls";
-import { exitPriceError, orderExpiry, trailingDistance } from "@/lib/advanced-order";
+import { exitPriceError, orderExpiry, trailingDistance, triggerLimitPriceError } from "@/lib/advanced-order";
+import { useOrderRetry } from "@/lib/advanced-order-hooks";
 import { accountLabel } from "@/lib/accounts";
 import { errorMessage, isApiError } from "@/lib/api";
 import { noteSelfAction } from "@/lib/live-notifications";
@@ -39,6 +40,7 @@ import {
   compareDecimal,
   isDecimalInput,
   isPositiveDecimal,
+  normalizeDecimalInput,
   scaleDecimal,
 } from "@/lib/format";
 import { findPosition } from "@/lib/hooks/accounts";
@@ -114,6 +116,11 @@ export function OrderForm({
   }, [linkedPercent, side, amount, quantity, availableCredit, availableQuantity]);
 
   const trading = instrument.state === "TRADING";
+  const retry = useOrderRetry<OrderRequest>({
+    symbol: instrument.symbol, accountId: resolvedAccountId, side, orderMode,
+    amountMode, amount, quantity, linkedPercent, condition, targetPrice, expiresAt,
+    trailing, trailingPercent, triggerPolicy, bracket, takeProfit, stopLoss, slippageSettings,
+  });
 
   const inputError = useMemo(() => {
     if (!trading) return "현재 거래할 수 없는 종목이에요";
@@ -139,14 +146,12 @@ export function OrderForm({
     }
     const slippageValidation = slippageSettingsError(slippageSettings, side, exchangeInfo?.trade);
     if (slippageValidation) return slippageValidation;
-    // The order fills at the target price, so a limit on the wrong side of it can never fill.
     if (
       orderMode === "TRIGGER" &&
       !trailing &&
-      slippageSettings.mode === "PRICE_LIMIT" &&
-      compareDecimal(slippageSettings.limitPrice.trim(), targetPrice) * (side === "BUY" ? 1 : -1) < 0
+      slippageSettings.mode === "PRICE_LIMIT"
     ) {
-      return side === "BUY" ? "매수 상한가는 목표 가격 이상이어야 해요" : "매도 하한가는 목표 가격 이하여야 해요";
+      return triggerLimitPriceError(side, condition, targetPrice, slippageSettings.limitPrice.trim());
     }
     return null;
   }, [
@@ -157,6 +162,7 @@ export function OrderForm({
     orderQuantity,
     orderMode,
     targetPrice,
+    condition,
     slippageSettings,
     side,
     trailing, trailingPercent, bracket, takeProfit, stopLoss,
@@ -182,8 +188,8 @@ export function OrderForm({
       order_type: "MARKET",
       ...(resolvedAccountId ? { account_id: resolvedAccountId } : {}),
       ...(effectiveAmountMode === "CREDIT"
-        ? { credit_amount: orderAmount.trim() }
-        : { quantity: orderQuantity.trim() }),
+        ? { credit_amount: normalizeDecimalInput(orderAmount, 16) }
+        : { quantity: normalizeDecimalInput(orderQuantity, 8) }),
       ...slippageRequestFields(slippageSettings),
     };
   }, [tradeAccess.allowed, orderMode, inputError, balanceReady, instrument.symbol, side, resolvedAccountId, effectiveAmountMode, orderAmount, orderQuantity, slippageSettings]);
@@ -194,35 +200,39 @@ export function OrderForm({
 
   function submit() {
     if (placeOrder.isPending || !tradeAccess.allowed) return;
-    if (validationError) {
-      toast.error(validationError);
-      return;
-    }
-    let expiry: string | undefined;
+    let payload: OrderRequest;
     try {
-      if (orderMode === "TRIGGER" && expiresAt) expiry = orderExpiry(expiresAt);
+      payload = retry.prepare(() => {
+        if (validationError) throw new Error(validationError);
+        const payload: OrderRequest = {
+          symbol: instrument.symbol,
+          side,
+          order_type: orderMode,
+          ...slippageRequestFields(slippageSettings),
+        };
+        if (resolvedAccountId) payload.account_id = resolvedAccountId;
+        if (orderMode === "TRIGGER") {
+          Object.assign(payload, triggerPolicy);
+          payload.trigger_condition = trailing ? side === "SELL" ? "LTE" : "GTE" : condition;
+          if (trailing) payload.trailing_ppm = trailingDistance(trailingPercent)!;
+          else payload.trigger_price = normalizeDecimalInput(targetPrice, 8);
+          if (bracket && side === "BUY") payload.bracket = {
+            take_profit_price: normalizeDecimalInput(takeProfit, 8),
+            stop_loss_price: normalizeDecimalInput(stopLoss, 8),
+            ...triggerPolicy,
+            ...(payload.slippage_ppm !== undefined ? { slippage_ppm: payload.slippage_ppm } : {}),
+          };
+          if (expiresAt) payload.expires_at = orderExpiry(expiresAt);
+        }
+        if (effectiveAmountMode === "CREDIT") payload.credit_amount = normalizeDecimalInput(orderAmount, 16);
+        else payload.quantity = normalizeDecimalInput(orderQuantity, 8);
+        if (referencePrice) payload.slippage_reference_price = referencePrice;
+        return payload;
+      });
     } catch (error) {
       toast.error(errorMessage(error));
       return;
     }
-    const payload: OrderRequest = {
-      symbol: instrument.symbol,
-      side,
-      order_type: orderMode,
-      ...slippageRequestFields(slippageSettings),
-    };
-    if (resolvedAccountId) payload.account_id = resolvedAccountId;
-    if (orderMode === "TRIGGER") {
-      Object.assign(payload, triggerPolicy);
-      payload.trigger_condition = trailing ? side === "SELL" ? "LTE" : "GTE" : condition;
-      if (trailing) payload.trailing_ppm = trailingDistance(trailingPercent)!;
-      else payload.trigger_price = targetPrice.trim();
-      if (bracket && side === "BUY") payload.bracket = { take_profit_price: takeProfit.trim(), stop_loss_price: stopLoss.trim(), ...triggerPolicy, ...(payload.slippage_ppm !== undefined ? { slippage_ppm: payload.slippage_ppm } : {}) };
-      if (expiry) payload.expires_at = expiry;
-    }
-    if (effectiveAmountMode === "CREDIT") payload.credit_amount = orderAmount.trim();
-    else payload.quantity = orderQuantity.trim();
-    if (referencePrice) payload.slippage_reference_price = referencePrice;
 
     // The fill notification can beat the response. With the result dialog on it
     // would repeat the dialog; with it off the toast is the only confirmation.
@@ -231,6 +241,7 @@ export function OrderForm({
     }
     placeOrder.mutate(payload, {
       onSuccess: (order) => {
+        retry.success(payload);
         if (order.status === "PENDING" || shouldShowTradeExecutionPopup()) {
           setResult(order);
         }
@@ -240,7 +251,10 @@ export function OrderForm({
         setTargetPrice("");
         setExpiresAt("");
       },
-      onError: (error) => toast.error(errorMessage(error)),
+      onError: (error) => {
+        retry.failure(payload, error);
+        toast.error(errorMessage(error));
+      },
     });
   }
 
@@ -259,7 +273,9 @@ export function OrderForm({
   const inputValue = effectiveAmountMode === "CREDIT" ? orderAmount : orderQuantity;
   // An empty form already reads as "enter an amount"; only surface problems
   // once there is something to correct.
-  const feedback = !inputValue.trim() && !accountFeedback && trading ? null : validationError;
+  const feedback = retry.hasPayload && placeOrder.isError
+    ? "이전 주문 결과를 확인하지 못했어요. 같은 내용으로 다시 시도할 수 있어요."
+    : !inputValue.trim() && !accountFeedback && trading ? null : validationError;
 
   return (
     <>
@@ -527,7 +543,7 @@ export function OrderForm({
             <button
               type="button"
               onClick={submit}
-              disabled={!tradeAccess.allowed || placeOrder.isPending || Boolean(validationError)}
+              disabled={!tradeAccess.allowed || placeOrder.isPending || (!retry.hasPayload && Boolean(validationError))}
               className={
                 side === "BUY"
                   ? "h-12 w-full rounded-xl bg-app-red text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-40 pressable"

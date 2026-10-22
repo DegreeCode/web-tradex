@@ -145,3 +145,33 @@ test("malformed pagination cannot restart a list from its first page", async (t)
     );
   }
 });
+
+for (const [status, code, details, event] of [
+  [401, "SESSION_INVALID", undefined, "tradex:session-expired"],
+  [403, "SESSION_SCOPE_FORBIDDEN", { reason: "NETWORK_MISMATCH" }, "tradex:linked-network-changed"],
+] as const) {
+  test(`a delayed ${code} from a superseded session cannot control the current session`, async (t) => {
+    const { QueryClient } = await import("@tanstack/react-query");
+    const { refreshSession } = await import("../src/lib/hooks/session");
+    const client = new QueryClient();
+    t.after(() => client.clear());
+    const previousWindow = globalThis.window;
+    const browser = new EventTarget();
+    Object.defineProperty(globalThis, "window", { configurable: true, value: browser });
+    t.after(() => Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow }));
+    let events = 0;
+    browser.addEventListener(event, () => { events += 1; });
+    let respond!: (value: Response) => void;
+    t.mock.method(globalThis, "fetch", () => new Promise<Response>((resolve) => { respond = resolve; }));
+    const oldRequest = apiData("/api/v1/me/accounts");
+    const rejection = assert.rejects(oldRequest, (error) => error instanceof ApiError && error.code === code);
+    refreshSession(client);
+    respond(Response.json({ error: { code, details } }, { status }));
+    await rejection;
+    assert.equal(events, 0, "the old response still rejects its caller, but cannot reset session B");
+    const currentRequest = apiData("/api/v1/me/accounts");
+    respond(Response.json({ error: { code, details } }, { status }));
+    await assert.rejects(currentRequest, ApiError);
+    assert.equal(events, 1, "the current session's refusal still reaches auth");
+  });
+}

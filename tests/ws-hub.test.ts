@@ -159,7 +159,7 @@ test("resetting a private connection cancels tickets from the previous session",
   const pending = privateSocket().hooks.fetchTicket!();
   const rejected = assert.rejects(pending, (error) => error instanceof ApiError && error.code === "NETWORK_ERROR");
   const [stale] = holder.take();
-  holder.deliver({ op: "reset-private" });
+  holder.deliver({ op: "reset-private", resetId: 1 });
   holder.deliver({ op: "ticket-result", id: (stale as { id: number }).id, ticket: "old-session" });
   await rejected;
   assert.equal(holder.take().some((message) => message.type === "ticket-request"), false);
@@ -211,7 +211,7 @@ test("resetting the private stream replaces its connection and keeps the tabs ho
   const other = tab();
   holder.deliver({ op: "retain" });
   const old = privateSocket();
-  other.deliver({ op: "reset-private" });
+  other.deliver({ op: "reset-private", resetId: 1 });
   assert.equal(old.closed, true);
   assert.notEqual(privateSocket(), old);
   assert.equal(privateSocket().retains, 1);
@@ -255,5 +255,45 @@ test("a welcome carries the current status of both connections", () => {
   const port: TabPort = new FakePort();
   hub.addPort(port);
   port.deliver({ op: "hello", version: WS_PROTOCOL_VERSION, visible: true });
-  assert.deepEqual(port.take(), [{ type: "welcome", status: { public: "open", private: "closed" } }]);
+  assert.deepEqual(port.take(), [{ type: "welcome", generation: 0, status: { public: "open", private: "closed" } }]);
+});
+
+test("a tab can request a fresh snapshot only for a channel it owns", () => {
+  const { publicSocket, tab } = setup();
+  const first = tab();
+  first.deliver({ op: "subscribe", channel: "trades:AAA.M" });
+  publicSocket.emit({ type: "snapshot", stream: "trades:AAA.M", seq: 1, version: 1, data: [] });
+  first.take();
+  first.deliver({ op: "resubscribe", channel: "trades:AAA.M" });
+  first.deliver({ op: "resubscribe", channel: "trades:unowned" });
+  const second = tab();
+  second.deliver({ op: "subscribe", channel: "trades:AAA.M" });
+  assert.deepEqual(framesOf(second.take()), [], "joining tabs wait for the refreshed snapshot");
+  assert.deepEqual(publicSocket.resubscribed, ["trades:AAA.M"]);
+  publicSocket.emit({ type: "snapshot", stream: "trades:AAA.M", seq: 2, version: 2, data: [] });
+  assert.equal(framesOf(first.take()).length, 1);
+  assert.equal(framesOf(second.take()).length, 1);
+});
+
+test("private messages carry their connection generation and old auth failures are ignored", () => {
+  const { privateSocket, tab } = setup();
+  const holder = tab();
+  holder.deliver({ op: "retain" });
+  const old = privateSocket();
+  const emit = (socket: FakeTransport) => {
+    socket.emit({ type: "update", stream: "notification.created", seq: 1, version: 1 });
+    socket.setStatus("open");
+    socket.gap("private");
+    socket.hooks.onAuthFailure!();
+  };
+  emit(old);
+  const messages = holder.take();
+  assert.deepEqual(messages.map(message => message.type), ["frame", "status", "gap", "session-expired"]);
+  assert.ok(messages.every(message => "generation" in message && message.generation === 0));
+  holder.deliver({ op: "reset-private", resetId: 1 });
+  holder.take();
+  emit(old);
+  assert.deepEqual(holder.take(), []);
+  emit(privateSocket());
+  assert.ok(holder.take().every(message => "generation" in message && message.generation === 1));
 });

@@ -38,6 +38,7 @@ export function useInstruments() {
   const queryClient = useQueryClient();
   return useQuery({
     queryKey: ["instruments"],
+    structuralSharing: false,
     queryFn: async () => {
       const cache = await ensureSymbolMetadataCache();
       return composeCachedInstruments(cache.symbols, queryClient);

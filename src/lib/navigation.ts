@@ -46,3 +46,28 @@ const GUEST_ROUTES = ["/market"];
 export function isGuestRoute(pathname: string): boolean {
   return GUEST_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
+
+const LINK_CODE_KEY = "tradex:pending-link-code";
+
+/** Keep the fragment credential in this tab while the auth route group mounts. */
+export function preserveLinkCode(pathname: string, hash: string): void {
+  if (pathname !== "/link" || typeof window === "undefined") return;
+  const code = new URLSearchParams(hash.replace(/^#/, "")).get("code");
+  if (!code) return;
+  try {
+    window.sessionStorage.setItem(LINK_CODE_KEY, code);
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+}
+
+export function consumeLinkCode(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const code = window.sessionStorage.getItem(LINK_CODE_KEY);
+    window.sessionStorage.removeItem(LINK_CODE_KEY);
+    return code;
+  } catch {
+    return null;
+  }
+}

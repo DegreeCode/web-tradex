@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   SYMBOL_METADATA_CACHE_KEY,
   clearSymbolMetadataCache,
+  adoptSymbolMetadataCache,
   ensureSymbolMetadataCache,
   isMarketSymbol,
   readSymbolMetadataCache,
+  parseStoredSymbolMetadataCache,
   runSymbolMetadataSync,
   withTagList,
   writeSymbolMetadataCache,
@@ -103,4 +105,58 @@ test("bootstrap waiting keeps one timer and retries immediately when another tab
   const result = await pending;
   assert.equal(result.symbols.length, 1);
   assert.equal(timers.size, 0);
+});
+
+test("no-change sync advances freshness without serializing, writing or reparsing metadata", async (t) => {
+  clearSymbolMetadataCache();
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const storage = new Map<string, string>();
+  let writes = 0;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { writes++; storage.set(key, value); },
+    removeItem: (key: string) => storage.delete(key),
+  } } });
+  t.after(() => {
+    clearSymbolMetadataCache();
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+  const cache = { schema_version: 3 as const, symbols: [withTagList(listed)], next_since_version: "1", saved_at: 1 };
+  writeSymbolMetadataCache(cache);
+  writes = 0;
+  let serializations = 0;
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, "stringify", (value: unknown, ...args: unknown[]) => {
+    if (value && typeof value === "object" && "schema_version" in value) serializations++;
+    return stringify(value, ...args as []);
+  });
+  t.mock.method(globalThis, "fetch", async () => Response.json({ data: { changes: [], has_more: false, next_since_version: "1" } }));
+  const next = await runSymbolMetadataSync(cache);
+  assert.equal(next.symbols, cache.symbols);
+  assert.ok(next.saved_at > cache.saved_at);
+  assert.equal(writes, 0);
+  assert.equal(serializations, 0);
+  assert.equal(readSymbolMetadataCache(), next);
+});
+
+
+test("duplicate cross-tab revisions skip the full JSON parse and validation", (t) => {
+  clearSymbolMetadataCache();
+  t.after(clearSymbolMetadataCache);
+  const cache = { schema_version: 3 as const, symbols: [withTagList(listed)], next_since_version: "1", saved_at: 1 };
+  writeSymbolMetadataCache(cache);
+  const raw = JSON.stringify({ revision: "other-tab-1", ...cache });
+  const first = parseStoredSymbolMetadataCache(raw);
+  assert.ok(first);
+  adoptSymbolMetadataCache(first);
+  let parses = 0;
+  const parse = JSON.parse;
+  t.mock.method(JSON, "parse", (value: string) => { parses++; return parse(value); });
+  assert.equal(parseStoredSymbolMetadataCache(raw), first);
+  assert.equal(parseStoredSymbolMetadataCache(JSON.stringify({ revision: "other-tab-1", ...cache, saved_at: 99 })), first);
+  assert.equal(parses, 0);
+  const changed = parseStoredSymbolMetadataCache(JSON.stringify({ revision: "other-tab-2", ...cache, next_since_version: "2" }));
+  assert.equal(changed!.next_since_version, "2");
+  assert.equal(parses, 1);
 });

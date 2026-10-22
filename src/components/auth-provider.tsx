@@ -3,14 +3,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
+import { advanceSessionGeneration, onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
-import { clearSessionCache, resetSessionCache, useMe } from "@/lib/hooks/session";
+import { clearSessionCache, refreshSession, resetSessionCache, useMe } from "@/lib/hooks/session";
 import { broadcastSessionChange, onSessionChange, type SessionIdentity } from "@/lib/session-sync";
 import { setSignedIn } from "@/lib/session-mode";
 import type { SessionScope, User } from "@/lib/types";
-
-
 
 interface AuthValue {
   status: AuthStatus;
@@ -49,7 +47,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(
     () =>
       onSessionChange((identity) => {
-        if (confirmedIdentity.current === identity) return;
+        if (identity !== undefined && confirmedIdentity.current === identity) return;
+        advanceSessionGeneration();
         setSignedIn(false);
         void queryClient.cancelQueries({ queryKey: ["me"], exact: true }).then(() => {
           void clearSessionCache(queryClient).then(() => {
@@ -89,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       linkedScope: user?.session_type === "LINKED" ? user.scope ?? null : null,
       refresh: () => {
-        void queryClient.invalidateQueries({ queryKey: ["me"] });
+        refreshSession(queryClient);
       },
     };
   }, [query.data, query.error, query.isError, queryClient]);

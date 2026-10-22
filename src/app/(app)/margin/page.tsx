@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw } from "lucide-react";
@@ -188,22 +188,24 @@ function MarginContent() {
   );
 }
 
+function subscribeDesktop(onChange: () => void) {
+  const query = window.matchMedia("(min-width: 1024px)");
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+const isDesktop = () => window.matchMedia("(min-width: 1024px)").matches;
+const serverDesktop = () => false;
+
 function MarginCreateFormGate(props: React.ComponentProps<typeof MarginCreateForm> & { mobileVisible: boolean }) {
-  const [shown, setShown] = useState(props.mobileVisible);
-  if (props.mobileVisible && !shown) setShown(true);
-  useEffect(() => {
-    if (shown) return;
-    const query = window.matchMedia("(min-width: 1024px)");
-    const update = () => {
-      if (query.matches) setShown(true);
-    };
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, [shown]);
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, serverDesktop);
+  const active = props.mobileVisible || desktop;
+  const [shown, setShown] = useState(active);
+  if (active && !shown) setShown(true);
   if (!shown) return null;
   return (
     <MarginCreateForm
+      active={active}
       eligibility={props.eligibility}
       eligibilityPending={props.eligibilityPending}
       initialSymbol={props.initialSymbol}

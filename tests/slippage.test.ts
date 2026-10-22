@@ -12,6 +12,14 @@ const slippage = (value: string): SlippageSettings => ({ mode: "SLIPPAGE", slipp
 const limit = (price: string): SlippageSettings => ({ mode: "PRICE_LIMIT", slippage: "3", limitPrice: price });
 const trade = { fee_ppm: 100, default_slippage_ppm: 50000, max_slippage_ppm: 500000 };
 
+test("price references normalize typing decimals before requests", () => {
+  assert.equal(slippageRequestFields(limit(".5")).slippage_reference_price, "0.5");
+  assert.equal(slippageRequestFields(limit("1.")).slippage_reference_price, "1");
+  assert.equal(liveReferencePrice(slippage(""), ".5"), "0.5");
+  assert.equal(liveReferencePrice(slippage(""), "1."), "1");
+  assert.throws(() => slippageRequestFields(limit(".")));
+});
+
 test("slippage mode sends the typed percent and anchors it to the client's latest curve price", () => {
   assert.deepEqual(slippageRequestFields(slippage("1.5")), { slippage_ppm: 15000 });
   assert.deepEqual(slippageRequestFields(slippage(" ")), {});

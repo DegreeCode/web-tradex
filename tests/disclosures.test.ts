@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QueryClient } from "@tanstack/react-query";
-import { loadDisclosurePage, reconcileDisclosures } from "../src/lib/hooks/disclosures";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { loadDisclosurePage, reconcileDisclosures, invalidateDisclosureQueries } from "../src/lib/hooks/disclosures";
 import { applySymbolMetadataCache, cacheSymbolMetadata } from "../src/lib/market-cache";
 import type { Disclosure, MarketSymbol } from "../src/lib/types";
 
@@ -148,4 +148,45 @@ test("relisting cancels a pending REST read before it can restore the previous l
   await new Promise<void>(resolve => setImmediate(resolve));
   assert.deepEqual(client.getQueryData(key), { pages: [page([])], pageParams: [null] });
   client.clear();
+});
+
+
+test("one disclosure touches only matching symbol/type caches, and identical replays perform no writes", (t) => {
+  const client = new QueryClient();
+  t.after(() => client.clear());
+  for (let i = 0; i < 100; i++) {
+    client.setQueryData(["disclosures", `OTHER${i}.M`, "all", 10], { pages: [page([])], pageParams: [null] });
+  }
+  const key = ["disclosures", "AAA.M", "all", 10];
+  const filtered = ["disclosures", "AAA.M", "SYMBOL_RESUMED", 10];
+  for (const k of [key, filtered]) client.setQueryData(k, { pages: [page([])], pageParams: [null] });
+  const writes = t.mock.method(client, "setQueryData");
+  const event = row("new", 4);
+  reconcileDisclosures(client, [event]);
+  assert.equal(writes.mock.callCount(), 2); // live cache plus the one matching list
+  const result = client.getQueryData(key);
+  reconcileDisclosures(client, [{ ...event, payload: {} }]);
+  assert.equal(writes.mock.callCount(), 2);
+  assert.equal(client.getQueryData(key), result);
+  reconcileDisclosures(client, [row("too-old", 1)]);
+  assert.equal(writes.mock.callCount(), 3); // only the live cache
+});
+
+test("a disclosure gap invalidates all lists but refetches only active observers", async (t) => {
+  const client = new QueryClient();
+  t.after(() => client.clear());
+  const requests: string[] = [];
+  const options = (symbol: string) => ({
+    queryKey: ["disclosures", symbol, "all", 10], staleTime: Infinity,
+    queryFn: async () => { requests.push(symbol); return page([]); },
+    initialData: page([]),
+  });
+  const active = new QueryObserver(client, options("AAA.M"));
+  const unsubscribe = active.subscribe(() => {});
+  t.after(unsubscribe);
+  client.setQueryData(options("BBB.M").queryKey, page([]));
+  client.setQueryDefaults(options("BBB.M").queryKey, options("BBB.M"));
+  await invalidateDisclosureQueries(client);
+  assert.deepEqual(requests, ["AAA.M"]);
+  assert.equal(client.getQueryState(options("BBB.M").queryKey)?.isInvalidated, true);
 });

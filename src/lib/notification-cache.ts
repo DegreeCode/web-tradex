@@ -8,8 +8,9 @@ import { apiPage } from "./api";
 import type { Notification, Page, WsFrame } from "./types";
 
 type NotificationChange = (
-  page: Page<Notification>, allowInsert: boolean, laterPageIds: ReadonlySet<string>,
+  page: Page<Notification>, allowInsert: boolean, laterPageIds: ReadonlySet<string>, limit: number,
 ) => Page<Notification>;
+type NotificationPage = Page<Notification> & { liveOverflow?: true };
 const pendingReads = new WeakMap<QueryClient, Set<(change: NotificationChange) => void>>();
 
 /** Preserve events and read actions received while an older REST page is loading. */
@@ -33,7 +34,8 @@ export async function loadNotificationPage(
       : undefined;
     const laterPageIds = new Set(cached?.pages?.slice(1).flatMap((page) =>
       page.data.map((row) => row.notification_id)));
-    for (const change of changes) page = change(page, !options.cursor, laterPageIds);
+    const limit = Number(new URL(path, "http://localhost").searchParams.get("limit")) || 50;
+    for (const change of changes) page = change(page, !options.cursor, laterPageIds, limit);
     return options.unreadOnly ? { ...page, data: page.data.filter((row) => !row.read) } : page;
   } finally {
     listeners.delete(recordChange);
@@ -115,6 +117,25 @@ function notificationPages(value: unknown): Page<Notification>[] {
     Boolean(page) && typeof page === "object" && Array.isArray((page as { data?: unknown }).data));
 }
 
+export function notificationCacheNeedsRefresh(value: unknown): boolean {
+  return notificationPages(value).some((page) => (page as NotificationPage).liveOverflow);
+}
+
+/** Trimming changes the cursor boundary; recover it before loading older rows. */
+export async function fetchNextNotificationPage<T extends { data?: unknown }>(query: {
+  data?: unknown;
+  refetch: (options: { throwOnError: true }) => Promise<T>;
+  fetchNextPage: () => Promise<T>;
+}): Promise<T> {
+  if (notificationCacheNeedsRefresh(query.data)) {
+    const refreshed = await query.refetch({ throwOnError: true });
+    // More arrivals can overflow the REST page while it is loading. Leave the
+    // control available for another refresh instead of following a stale cursor.
+    if (notificationCacheNeedsRefresh(refreshed.data)) return refreshed;
+  }
+  return query.fetchNextPage();
+}
+
 /**
  * A pin change moves a row to where the server's pin order puts it, which a
  * partially loaded list can't place, so such lists are refetched instead.
@@ -132,6 +153,7 @@ export function updateNotificationCache(
   incoming: Notification,
   unreadOnly: boolean,
   allowInsert = true,
+  limit = 50,
 ): unknown {
   if (!value || typeof value !== "object") return value;
   const record = value as Record<string, unknown>;
@@ -142,11 +164,16 @@ export function updateNotificationCache(
     // A row loaded on a later page must be edited there, never also inserted
     // into the first page. Its version guards the whole list against replay.
     if (existing && incoming.version < existing.version) return value;
+    const nextPages = pages.map((page, index) => updateNotificationCache(
+      page, incoming, unreadOnly, allowInsert && index === 0 && !existing, limit,
+    ));
+    // History starts beyond the original cursor, leaving a visible gap after
+    // head trimming. Drop it until pagination refreshes that boundary.
+    const collapse = nextPages.length > 1 && notificationCacheNeedsRefresh(nextPages[0]);
     return {
       ...record,
-      pages: pages.map((page, index) => updateNotificationCache(
-        page, incoming, unreadOnly, allowInsert && index === 0 && !existing,
-      )),
+      pages: collapse ? nextPages.slice(0, 1) : nextPages,
+      ...(collapse && Array.isArray(record.pageParams) ? { pageParams: record.pageParams.slice(0, 1) } : {}),
     };
   }
   if (Array.isArray(record.data) && record.page && typeof record.page === "object") {
@@ -156,9 +183,12 @@ export function updateNotificationCache(
     // a genuinely newer row (or a new pin) may extend a truncated list head.
     const withinPage = !(record.page as Page<Notification>["page"]).has_more || !oldest ||
       incoming.pinned || createdTime(incoming) >= createdTime(oldest);
+    const data = mergeNotificationRows(rows, incoming, unreadOnly, allowInsert && withinPage);
+    const overflow = data.length > limit;
     return {
       ...record,
-      data: mergeNotificationRows(rows, incoming, unreadOnly, allowInsert && withinPage),
+      data: overflow ? data.slice(0, limit) : data,
+      ...(overflow ? { liveOverflow: true, page: { ...record.page, has_more: true } } : {}),
     };
   }
   return value;
@@ -168,8 +198,8 @@ export function updateNotificationCaches(
   queryClient: QueryClient,
   incoming: Notification,
 ): void {
-  publishNotificationChange(queryClient, (page, allowInsert, laterPageIds) =>
-    updateNotificationCache(page, incoming, false, allowInsert && !laterPageIds.has(incoming.notification_id)) as Page<Notification>);
+  publishNotificationChange(queryClient, (page, allowInsert, laterPageIds, limit) =>
+    updateNotificationCache(page, incoming, false, allowInsert && !laterPageIds.has(incoming.notification_id), limit) as Page<Notification>);
   for (const [queryKey, current] of queryClient.getQueriesData({ queryKey: ["notifications"] })) {
     if (!Array.isArray(queryKey)) continue;
     if (pinChangeNeedsRefetch(current, incoming)) {
@@ -177,7 +207,8 @@ export function updateNotificationCaches(
       continue;
     }
     const unreadOnly = queryKey[1] === "unread" || queryKey[2] === "unread";
-    queryClient.setQueryData(queryKey, updateNotificationCache(current, incoming, unreadOnly));
+    const limit = typeof queryKey[3] === "number" ? queryKey[3] : 50;
+    queryClient.setQueryData(queryKey, updateNotificationCache(current, incoming, unreadOnly, true, limit));
   }
   // A truncated unread page cannot tell how many unseen rows remain after a read.
   const unread = queryClient.getQueryData<Page<Notification>>(["notifications", "unread"]);
@@ -196,11 +227,13 @@ function mapNotificationRows(
   const mapPage = (page: unknown) => {
     if (!page || typeof page !== "object" || !Array.isArray((page as { data?: unknown }).data)) return page;
     const pageRecord = page as Page<Notification>;
-    return {
+    const next: NotificationPage = {
       ...pageRecord,
       data: map(pageRecord.data),
       page: exhausted ? { has_more: false, next_cursor: null } : pageRecord.page,
     };
+    if (exhausted) delete next.liveOverflow;
+    return next;
   };
   if (Array.isArray(record.pages)) return { ...record, pages: record.pages.map(mapPage) };
   return mapPage(value);

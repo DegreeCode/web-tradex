@@ -42,6 +42,8 @@ interface SymbolBootstrapLock {
 }
 
 let memorySymbolMetadataCache: SymbolMetadataCache | null = null;
+let storedMetadataRaw: string | null = null;
+let storedMetadataRevision: string | null = null;
 let symbolMetadataBootstrapPromise: Promise<SymbolMetadataCache> | null = null;
 let symbolMetadataInitialValidationDone = false;
 let symbolMetadataSyncPromise: Promise<SymbolMetadataCache> | null = null;
@@ -140,13 +142,26 @@ export function parseSymbolMetadataCache(value: unknown): SymbolMetadataCache | 
   };
 }
 
+/** The revision is first in the atomic record, so duplicate events need no full parse. */
+export function parseStoredSymbolMetadataCache(raw: string): SymbolMetadataCache | null {
+  const revision = /^\{"revision":"([a-zA-Z0-9-]+)"[,}]/.exec(raw)?.[1] ?? null;
+  if (memorySymbolMetadataCache && (raw === storedMetadataRaw ||
+    (revision !== null && revision === storedMetadataRevision))) return memorySymbolMetadataCache;
+  const parsed = parseSymbolMetadataCache(JSON.parse(raw));
+  if (parsed) {
+    storedMetadataRaw = raw;
+    storedMetadataRevision = revision;
+  }
+  return parsed;
+}
+
 export function readSymbolMetadataCache(): SymbolMetadataCache | null {
   if (memorySymbolMetadataCache) return memorySymbolMetadataCache;
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(SYMBOL_METADATA_CACHE_KEY);
     if (!raw) return null;
-    const parsed = parseSymbolMetadataCache(JSON.parse(raw));
+    const parsed = parseStoredSymbolMetadataCache(raw);
     if (parsed) {
       memorySymbolMetadataCache = parsed;
       return parsed;
@@ -159,11 +174,17 @@ export function readSymbolMetadataCache(): SymbolMetadataCache | null {
 }
 
 export function writeSymbolMetadataCache(cache: SymbolMetadataCache): void {
+  const previous = memorySymbolMetadataCache;
   memorySymbolMetadataCache = cache;
+  if (previous?.symbols === cache.symbols && previous.next_since_version === cache.next_since_version) return;
   if (typeof window === "undefined") return;
   try {
-    // One localStorage record keeps metadata and its exact API watermark together.
-    window.localStorage.setItem(SYMBOL_METADATA_CACHE_KEY, JSON.stringify(cache));
+    // Keep the revision and exact API watermark atomic with the symbol list.
+    const revision = crypto.randomUUID();
+    const raw = JSON.stringify({ revision, ...cache });
+    window.localStorage.setItem(SYMBOL_METADATA_CACHE_KEY, raw);
+    storedMetadataRevision = revision;
+    storedMetadataRaw = raw;
   } catch {
     // In-memory state still serves this tab when storage is unavailable.
   }
@@ -171,6 +192,8 @@ export function writeSymbolMetadataCache(cache: SymbolMetadataCache): void {
 
 export function clearSymbolMetadataCache(): void {
   memorySymbolMetadataCache = null;
+  storedMetadataRaw = null;
+  storedMetadataRevision = null;
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(SYMBOL_METADATA_CACHE_KEY);
@@ -389,6 +412,11 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
   // Another complete sync already advanced the watermark. Adopting its result
   // lets the next cadence resume there without ever moving the cursor back.
   if (latest.next_since_version !== cache.next_since_version) return latest;
+  if (changesBySymbol.size === 0) {
+    const nextCache = { ...latest, next_since_version: cursor, saved_at: Date.now() };
+    writeSymbolMetadataCache(nextCache);
+    return nextCache;
+  }
   const nextSymbols = new Map(latest.symbols.map((symbol) => [symbol.symbol, symbol]));
   for (const [symbol, change] of changesBySymbol) {
     const current = nextSymbols.get(symbol);
@@ -410,7 +438,7 @@ async function syncSymbolMetadataChanges(cache: SymbolMetadataCache): Promise<Sy
 
   const nextCache: SymbolMetadataCache = {
     schema_version: SYMBOL_METADATA_SCHEMA_VERSION,
-    symbols: changesBySymbol.size === 0 ? latest.symbols : [...nextSymbols.values()],
+    symbols: [...nextSymbols.values()],
     next_since_version: cursor,
     saved_at: Date.now(),
   };
@@ -447,6 +475,10 @@ export function runInitialSymbolMetadataValidation(cache: SymbolMetadataCache): 
 export function adoptSymbolMetadataCache(cache: SymbolMetadataCache | null): SymbolMetadataCache | null {
   const previous = memorySymbolMetadataCache;
   memorySymbolMetadataCache = cache;
+  if (!cache) {
+    storedMetadataRaw = null;
+    storedMetadataRevision = null;
+  }
   return previous;
 }
 

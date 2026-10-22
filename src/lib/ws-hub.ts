@@ -14,7 +14,6 @@ export type HubPort = PortLike<ClientMessage, HubMessage>;
 
 /** The transport the hub drives; TradexSocket in the worker. */
 export interface HubSocket extends StreamSocket {
-  resubscribe(channel: string): void;
   close(): void;
 }
 
@@ -119,6 +118,13 @@ export class SocketHub {
       case "unsubscribe":
         this.leave(tab, message.channel);
         break;
+      case "resubscribe":
+        if (tab.channels.has(message.channel)) {
+          this.snapshots.delete(message.channel);
+          this.live.delete(message.channel);
+          this.publicSocket.resubscribe(message.channel);
+        }
+        break;
       case "retain":
         if (!tab.privateHeld) {
           // retain() may synchronously ask a tab to issue its first ticket.
@@ -130,7 +136,7 @@ export class SocketHub {
         this.releasePrivate(tab);
         break;
       case "reset-private":
-        this.resetPrivate();
+        this.resetPrivate(tab, message.resetId);
         break;
       case "ticket-result":
         this.settleTicket(message.id, tab, "ticket" in message ? { ticket: message.ticket } : { error: message.error });
@@ -159,6 +165,7 @@ export class SocketHub {
     this.tabs.set(port, { port, channels: new Set(), privateHeld: false, release: null, visible, lastSeen: this.now() });
     this.post(port, {
       type: "welcome",
+      generation: this.privateGeneration,
       status: { public: this.publicSocket.getStatus(), private: this.privateSocket.getStatus() },
     });
   }
@@ -237,15 +244,22 @@ export class SocketHub {
     const generation = this.privateGeneration;
     const socket = this.createSocket("private", {
       fetchTicket: () => this.requestTicket(generation),
-      onAuthFailure: () => this.broadcast({ type: "session-expired" }),
+      onAuthFailure: () => {
+        if (generation === this.privateGeneration) this.broadcast({ type: "session-expired", generation });
+      },
     });
     const offFrame = socket.onFrame((frame) => {
+      if (generation !== this.privateGeneration) return;
       for (const tab of this.tabs.values()) {
-        if (tab.privateHeld) this.post(tab.port, { type: "frame", kind: "private", frame });
+        if (tab.privateHeld) this.post(tab.port, { type: "frame", kind: "private", generation, frame });
       }
     });
-    const offStatus = socket.onStatus((status) => this.broadcast({ type: "status", kind: "private", status }));
-    const offGap = socket.onGap((stream) => this.broadcast({ type: "gap", kind: "private", stream }));
+    const offStatus = socket.onStatus((status) => {
+      if (generation === this.privateGeneration) this.broadcast({ type: "status", kind: "private", generation, status });
+    });
+    const offGap = socket.onGap((stream) => {
+      if (generation === this.privateGeneration) this.broadcast({ type: "gap", kind: "private", generation, stream });
+    });
     return [socket, () => {
       offFrame();
       offStatus();
@@ -257,13 +271,20 @@ export class SocketHub {
    * A session ended or changed in some tab: drop the connection authenticated
    * by the old ticket. Tabs still holding the stream reconnect with a new one.
    */
-  private resetPrivate(): void {
+  private resetPrivate(requester: TabState, resetId: number): void {
     this.privateGeneration += 1;
     for (const [id, pending] of this.pendingTickets) this.settleTicket(id, pending.tab, null);
-    this.privateSocket.close();
     this.unwirePrivate();
+    this.privateSocket.close();
+    // The acknowledgement lifts the requesting tab's synchronous reset barrier.
+    for (const tab of this.tabs.values()) {
+      this.post(tab.port, {
+        type: "private-reset", generation: this.privateGeneration,
+        ...(tab === requester ? { resetId } : {}),
+      });
+    }
     [this.privateSocket, this.unwirePrivate] = this.openPrivate();
-    this.broadcast({ type: "status", kind: "private", status: this.privateSocket.getStatus() });
+    this.broadcast({ type: "status", kind: "private", generation: this.privateGeneration, status: this.privateSocket.getStatus() });
     for (const tab of this.tabs.values()) {
       if (tab.privateHeld) tab.release = this.privateSocket.retain();
     }
@@ -302,7 +323,7 @@ export class SocketHub {
     return new Promise((resolve) => {
       const timer = setTimeout(() => this.settleTicket(id, tab, null), TICKET_TIMEOUT_MS);
       this.pendingTickets.set(id, { tab, resolve, timer });
-      this.post(tab.port, { type: "ticket-request", id });
+      this.post(tab.port, { type: "ticket-request", id, generation: this.privateGeneration });
     });
   }
 

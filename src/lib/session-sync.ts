@@ -8,22 +8,30 @@ const STORAGE_KEY = "tradex:session-epoch";
 
 /** The account now signed in, or null after a sign-out. */
 export type SessionIdentity = string | null;
-type Listener = (identity: SessionIdentity) => void;
+// Undefined requests a fresh /me even when the account has not changed.
+type Listener = (identity: SessionIdentity | undefined) => void;
 const listeners = new Set<Listener>();
 let channel: BroadcastChannel | null = null;
 let started = false;
 const recentMessages = new Set<string>();
 const MAX_RECENT_MESSAGES = 64;
 
-interface SessionMessage {
+type SessionMessage = {
   type: "changed";
   userId: SessionIdentity;
   nonce?: string;
-}
+} | {
+  type: "refresh";
+  userId?: never;
+  nonce?: string;
+};
 
 function parse(data: unknown): SessionMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as Partial<SessionMessage>;
+  if (message.type === "refresh") {
+    return { type: "refresh", nonce: typeof message.nonce === "string" ? message.nonce : undefined };
+  }
   if (message.type !== "changed" ||
       !(message.userId === null || typeof message.userId === "string" && message.userId.length > 0)) return null;
   return { type: "changed", userId: message.userId, nonce: typeof message.nonce === "string" ? message.nonce : undefined };
@@ -78,10 +86,10 @@ function stop(): void {
 }
 
 /** Announces a completed session transition to every other tab. */
-export function broadcastSessionChange(userId: SessionIdentity): void {
+function broadcast(message: SessionMessage): void {
   if (typeof window === "undefined") return;
   start();
-  const message: SessionMessage = { type: "changed", userId, nonce: `${Date.now()}-${Math.random()}` };
+  message.nonce = `${Date.now()}-${Math.random()}`;
   try {
     channel?.postMessage(message);
   } catch {
@@ -96,6 +104,15 @@ export function broadcastSessionChange(userId: SessionIdentity): void {
     // BroadcastChannel still reaches tabs when storage is unavailable.
   }
   if (listeners.size === 0) stop();
+}
+
+export function broadcastSessionChange(userId: SessionIdentity): void {
+  broadcast({ type: "changed", userId });
+}
+
+/** Cookies changed before /me can identify the account, including same-account logins. */
+export function broadcastSessionRefresh(): void {
+  broadcast({ type: "refresh" });
 }
 
 /** Registers a listener for session changes made by another tab. */

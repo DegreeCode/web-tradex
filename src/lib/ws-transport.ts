@@ -30,6 +30,7 @@ export interface StreamSocket {
   onGap(handler: GapHandler): () => void;
   subscribe(channel: string): void;
   unsubscribe(channel: string): void;
+  resubscribe(channel: string): void;
   retain(): () => void;
 }
 
@@ -175,10 +176,13 @@ export class TradexSocket implements StreamSocket {
         // The ticket is kept only in this closure and is never put in the URL,
         // headers, logs, or any other client-visible protocol field.
         this.send({ op: "auth", ticket });
+        // The server reads application commands only after consuming the ticket.
+        // Its pong confirms authentication even when the account has no events.
+        this.send({ op: "ping" });
       } else {
         for (const channel of this.channels.keys()) this.send({ op: "subscribe", channel });
       }
-      this.setStatus("open");
+      if (this.kind === "public") this.setStatus("open");
     };
     socket.onmessage = (event) => {
       if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
@@ -206,25 +210,39 @@ export class TradexSocket implements StreamSocket {
       if (
         this.kind === "private" &&
         frame.type === "error" &&
-        (frame.code === "AUTH_FAILED" || frame.code === "SESSION_INVALID")
+        frame.code === "SESSION_INVALID"
       ) {
         this.handleAuthenticationFailure();
         return;
       }
+      if (this.kind === "private" && frame.type === "error" && frame.code === "AUTH_FAILED") {
+        // Ticket consumption also fails for expiry and handshake timeouts.
+        this.handleGap();
+        return;
+      }
       if (!this.acceptSequence(frame)) return;
-      for (const handler of this.frameHandlers) handler(frame);
+      if (this.kind === "private" && (frame.type === "pong" || frame.type === "update")) {
+        this.attempt = 0;
+        this.setStatus("open");
+      }
+      for (const handler of [...this.frameHandlers]) {
+        if (this.socket !== socket) break;
+        handler(frame);
+      }
     };
     socket.onclose = () => {
       if (this.socket !== socket) return;
+      const generation = this.generation;
       this.socket = null;
       const wasGapClosed = this.gapClosedSocket;
       this.gapClosedSocket = false;
       this.resetSequences();
       if (!this.stopped && !wasGapClosed) {
-        for (const handler of this.gapHandlers) handler(this.kind);
+        this.emitGap();
       }
+      if (generation !== this.generation) return;
       this.setStatus("closed");
-      this.scheduleReconnect();
+      if (generation === this.generation) this.scheduleReconnect();
     };
     socket.onerror = () => {
       if (this.socket === socket) {
@@ -310,10 +328,6 @@ export class TradexSocket implements StreamSocket {
     this.send({ op: "subscribe", channel });
   }
 
-  hasChannels(): boolean {
-    return this.channels.size > 0;
-  }
-
   private send(payload: Record<string, unknown>): void {
     try {
       this.socket?.send(JSON.stringify(payload));
@@ -325,7 +339,11 @@ export class TradexSocket implements StreamSocket {
   private setStatus(status: WsStatus): void {
     if (this.status === status) return;
     this.status = status;
-    for (const handler of this.statusHandlers) handler(status);
+    const generation = this.generation;
+    for (const handler of [...this.statusHandlers]) {
+      if (generation !== this.generation) break;
+      handler(status);
+    }
   }
 
   private scheduleReconnect(): void {
@@ -424,12 +442,22 @@ export class TradexSocket implements StreamSocket {
     return complete;
   }
 
+  private emitGap(): void {
+    const generation = this.generation;
+    for (const handler of [...this.gapHandlers]) {
+      if (generation !== this.generation) break;
+      handler(this.kind);
+    }
+  }
+
   private handleGap(): void {
     // A protocol gap closes the whole connection, so every subscribed stream
     // needs to reconcile the updates it can miss while reconnecting.
-    for (const handler of this.gapHandlers) handler(this.kind);
-    this.resetSequences();
     const socket = this.socket;
+    const generation = this.generation;
+    this.emitGap();
+    if (generation !== this.generation || this.socket !== socket) return;
+    this.resetSequences();
     if (socket && socket.readyState < WebSocket.CLOSING) {
       this.gapClosedSocket = true;
       socket.close();

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { slippageError, type ExchangeInfo } from "@/lib/exchange-info";
-import { isDecimalInput, isPositiveDecimal, ppmFromPercent } from "@/lib/format";
+import { isDecimalInput, isPositiveDecimal, normalizeDecimalInput, ppmFromPercent } from "@/lib/format";
 import { useSlippagePreference } from "@/lib/preferences";
 
 /**
@@ -53,7 +53,7 @@ export function slippageSettingsError(
 /** Request fields the user chose; the live reference price is added separately at send time. */
 export function slippageRequestFields(settings: SlippageSettings): SlippageRequestFields {
   if (settings.mode === "PRICE_LIMIT") {
-    return { slippage_ppm: 0, slippage_reference_price: settings.limitPrice.trim() };
+    return { slippage_ppm: 0, slippage_reference_price: normalizeDecimalInput(settings.limitPrice, 8) };
   }
   const slippage = settings.slippage.trim();
   return slippage ? { slippage_ppm: ppmFromPercent(slippage) } : {};
@@ -66,7 +66,7 @@ export function slippageRequestFields(settings: SlippageSettings): SlippageReque
  */
 export function liveReferencePrice(settings: SlippageSettings, curvePrice: string | undefined): string | undefined {
   if (settings.mode !== "SLIPPAGE" || !curvePrice) return undefined;
-  return isDecimalInput(curvePrice, 8) && isPositiveDecimal(curvePrice) ? curvePrice : undefined;
+  return isDecimalInput(curvePrice, 8) && isPositiveDecimal(curvePrice) ? normalizeDecimalInput(curvePrice, 8) : undefined;
 }
 
 /** Collapsed advanced-settings summary, e.g. "슬리피지 5%" or "매수 상한가 1,234". */

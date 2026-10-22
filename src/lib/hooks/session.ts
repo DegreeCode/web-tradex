@@ -1,7 +1,9 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiData, clearIdempotencyKeys, csrfToken, deleteData, postData } from "../api";
+import { infiniteQueryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { advanceSessionGeneration, apiData, buildQuery, clearIdempotencyKeys, csrfToken, deleteData, postData } from "../api";
+import { broadcastSessionRefresh } from "../session-sync";
+import { setSignedIn } from "../session-mode";
 import { updatePreferences } from "../preferences";
 import type { Passkey, SessionList, User } from "../types";
 import { closeSocket } from "../ws";
@@ -24,11 +26,29 @@ export function useMe() {
   });
 }
 
-export function useSessions() {
-  return useQuery({
+export function sessionsQueryOptions() {
+  return infiniteQueryOptions({
     queryKey: ["sessions"],
-    queryFn: ({ signal }) => apiData<SessionList>("/api/v1/me/sessions?limit=50", { signal }),
+    queryFn: ({ pageParam, signal }) =>
+      apiData<SessionList>(`/api/v1/me/sessions${buildQuery({ limit: 50, cursor: pageParam })}`, { signal }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor || null,
     staleTime: 15_000,
+  });
+}
+
+export function useSessions() {
+  return useInfiniteQuery(sessionsQueryOptions());
+}
+
+export function refreshSession(queryClient: QueryClient): void {
+  advanceSessionGeneration();
+  // Announce synchronously: navigation may unmount this provider before /me resolves.
+  broadcastSessionRefresh();
+  setSignedIn(false);
+  void queryClient.cancelQueries({ queryKey: ["me"], exact: true }).then(async () => {
+    await clearSessionCache(queryClient);
+    await queryClient.resetQueries({ queryKey: ["me"], exact: true });
   });
 }
 
@@ -120,6 +140,8 @@ export function useLogout() {
     // local cache and showing the login screen then would be a fail-open on a
     // shared device, so only a confirmed sign-out changes local state.
     onSuccess: async () => {
+      advanceSessionGeneration();
+      setSignedIn(false);
       await queryClient.cancelQueries({ queryKey: ["me"], exact: true });
       queryClient.setQueryData(["me"], null);
       updatePreferences({ selectedAccount: undefined });

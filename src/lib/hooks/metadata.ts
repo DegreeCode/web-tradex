@@ -18,7 +18,7 @@ import {
   clearSymbolMetadataCache,
   ensureSymbolMetadataCache,
   isInitialSymbolMetadataValidationDone,
-  parseSymbolMetadataCache,
+  parseStoredSymbolMetadataCache,
   readSymbolMetadataCache,
   runInitialSymbolMetadataValidation,
   runSymbolMetadataSync,
@@ -47,9 +47,10 @@ export function useSymbolMetadataSync(enabled = true) {
             adoptSymbolMetadataCache(null);
             return;
           }
-          const cache = parseSymbolMetadataCache(JSON.parse(event.newValue));
+          const cache = parseStoredSymbolMetadataCache(event.newValue);
           if (!cache) return;
           const previous = adoptSymbolMetadataCache(cache);
+          if (previous === cache) return;
           noteSymbolMetadataTimes(cache);
           applySymbolMetadataDelta(queryClient, previous, cache);
           applySymbolMetadataCache(queryClient, cache);

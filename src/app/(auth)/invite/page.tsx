@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/auth-provider";
 import { BrandLogo } from "@/components/brand-logo";
 import { LegalConsent } from "@/components/legal-consent";
 import { SiteDisclaimer } from "@/components/site-disclaimer";
@@ -13,12 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage, postData } from "@/lib/api";
-import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
-import { clearSessionCache } from "@/lib/hooks/session";
+import { invitationBody } from "../auth-contract";
 
 export default function InvitationPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const { refresh } = useAuth();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -28,17 +27,10 @@ export default function InvitationPage() {
     if (busy || !agreed || !token.trim()) return;
     setBusy(true);
     try {
-      await postData("/api/v1/auth/invitations/redemption", {
-        invitation_token: token.trim(),
-        terms_version: TERMS_VERSION,
-        privacy_version: PRIVACY_VERSION,
-        consented_at: new Date().toISOString(),
-        age_over_14: true,
-      });
+      await postData("/api/v1/auth/invitations/redemption", invitationBody(token));
       setToken("");
       // The session now belongs to the invited account.
-      await clearSessionCache(queryClient);
-      void queryClient.resetQueries({ queryKey: ["me"], exact: true });
+      refresh();
       router.replace("/recover");
     } catch (error) {
       toast.error(errorMessage(error));

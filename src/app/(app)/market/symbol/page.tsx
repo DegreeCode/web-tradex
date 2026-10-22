@@ -50,6 +50,7 @@ import {
 import { findPosition, useAccounts, usePortfolio } from "@/lib/hooks/accounts";
 import { useCandles } from "@/lib/hooks/candles";
 import { useInstrument } from "@/lib/hooks/market";
+import { canonicalSymbol as normalizeSymbol } from "@/lib/market-cache";
 import { usePolledSymbolTicker, useSymbolTradeStream, useSymbolTrades } from "@/lib/hooks/trades";
 import { useOrders } from "@/lib/hooks/orders";
 import { hasDistinctLastTrade, isAtCurveCeiling } from "@/lib/instruments";
@@ -185,7 +186,7 @@ function LineModeIcon({ rising }: { rising: boolean }) {
 
 function SymbolDetail() {
   const searchParams = useSearchParams();
-  const symbol = searchParams.get("symbol")?.trim() ?? "";
+  const symbol = normalizeSymbol(searchParams.get("symbol") ?? undefined) ?? "";
   const { user, status } = useAuth();
   const preferences = usePreferences();
   const selectedAccount = preferences?.selectedAccount;

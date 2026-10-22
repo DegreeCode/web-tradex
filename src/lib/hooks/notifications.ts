@@ -4,9 +4,11 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { apiData, buildQuery, postData } from "../api";
 import {
   isNotification,
+  fetchNextNotificationPage,
   loadNotificationPage,
   markNotificationsReadInCaches,
   notificationIdsInCaches,
+  notificationCacheNeedsRefresh,
   updateNotificationCaches,
 } from "../notification-cache";
 import type { Notification } from "../types";
@@ -14,7 +16,7 @@ import type { Notification } from "../types";
 export function useNotifications(options: { unread?: boolean; limit?: number } = {}) {
   const queryClient = useQueryClient();
   const { unread = false, limit = 30 } = options;
-  return useInfiniteQuery({
+  const notifications = useInfiniteQuery({
     queryKey: ["notifications", "list", unread ? "unread" : "all", limit],
     queryFn: ({ pageParam, signal, queryKey }) =>
       loadNotificationPage(queryClient,
@@ -33,6 +35,11 @@ export function useNotifications(options: { unread?: boolean; limit?: number } =
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+  return {
+    ...notifications,
+    hasNextPage: notifications.hasNextPage || notificationCacheNeedsRefresh(notifications.data),
+    fetchNextPage: () => fetchNextNotificationPage(notifications),
+  };
 }
 
 export function useUnreadNotifications(enabled = true) {

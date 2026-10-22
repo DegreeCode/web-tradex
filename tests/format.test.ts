@@ -8,8 +8,22 @@ import {
   fmtPrice,
   fmtQuantity,
   scaleDecimal,
+  isDecimalInput,
+  normalizeDecimalInput,
 } from "../src/lib/format";
 import { hasDistinctLastTrade, isAtCurveCeiling } from "../src/lib/instruments";
+
+test("request decimals normalize incomplete typing without losing precision", () => {
+  assert.equal(isDecimalInput(".5", 8), true);
+  assert.equal(isDecimalInput("1.", 8), true);
+  for (const [typed, expected] of [
+    [".5", "0.5"], ["1.", "1"], [" 0001.2300 ", "0001.2300"],
+    [".00000001", "0.00000001"], ["0", "0"],
+    ["9007199254740993.1234567890123456", "9007199254740993.1234567890123456"],
+  ]) assert.equal(normalizeDecimalInput(typed, 16), expected);
+  for (const invalid of ["", " ", ".", "1..", "-1", "+1", "1e2", "1 2", "1.000000001"])
+    assert.throws(() => normalizeDecimalInput(invalid, 8));
+});
 
 test("price, share and Credit units keep their full precision without number coercion", () => {
   assert.equal(fmtPrice("0.00000001"), "0.00000001");

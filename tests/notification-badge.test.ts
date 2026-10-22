@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUnreadBadge } from "../src/lib/notifications";
 import { pinChangeNeedsRefetch, updateNotificationCache } from "../src/lib/notification-cache";
+import { QueryClient } from "@tanstack/react-query";
+import { notificationCacheNeedsRefresh, updateNotificationCaches } from "../src/lib/notification-cache";
 import type { Notification, Page } from "../src/lib/types";
 
 const notification = (id: number): Notification => ({
@@ -15,10 +17,10 @@ test("REST and private updates keep the same 50+ badge, including repeated frame
   let cache: Page<Notification> = { data: Array.from({ length: 50 }, (_, i) => notification(i)), page: { has_more: true, next_cursor: "cursor" } };
   assert.equal(formatUnreadBadge(cache.data.length, cache.page.has_more), "50+");
   for (const id of [50, 51, 51]) cache = updateNotificationCache(cache, notification(id), true) as Page<Notification>;
-  assert.equal(cache.data.length, 52);
+  assert.equal(cache.data.length, 50);
   assert.equal(formatUnreadBadge(cache.data.length, cache.page.has_more), "50+");
   cache = updateNotificationCache(cache, { ...notification(51), read: true }, true) as Page<Notification>;
-  assert.equal(cache.data.length, 51);
+  assert.equal(cache.data.length, 49);
   assert.equal(formatUnreadBadge(cache.data.length, cache.page.has_more), "50+");
 });
 
@@ -62,4 +64,22 @@ test("pin changes refetch lists that are only partly loaded", () => {
   assert.equal(pinChangeNeedsRefetch(pages, pinned(1, 2)), true);
   assert.equal(pinChangeNeedsRefetch(partial, { ...notification(2), version: 2 }), false);
   assert.equal(pinChangeNeedsRefetch(partial, pinned(7)), false);
+});
+
+
+test("live list arrivals stay bounded by the query limit and preserve a route to trimmed rows", () => {
+  const client = new QueryClient();
+  const key = ["notifications", "list", "all", 30];
+  client.setQueryData(key, {
+    pages: [{ data: Array.from({ length: 30 }, (_, i) => notification(30 - i)), page: { has_more: false, next_cursor: null } }],
+    pageParams: [null],
+  });
+  for (let id = 31; id <= 1030; id++) updateNotificationCaches(client, notification(id));
+  const cached = client.getQueryData<{ pages: Page<Notification>[] }>(key)!;
+  assert.equal(cached.pages.length, 1);
+  assert.equal(cached.pages[0].data.length, 30);
+  assert.equal(cached.pages[0].data[0].notification_id, "ntf_1030");
+  assert.equal(cached.pages[0].page.has_more, true);
+  assert.equal(notificationCacheNeedsRefresh(cached), true);
+  client.clear();
 });

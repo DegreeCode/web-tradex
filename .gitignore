@@ -67,3 +67,6 @@ docs/*
 
 # local commit/deploy guide
 /COMMIT_DEPLOY_GUIDE.md
+
+# local refactor/processing records (kept out of the repository)
+/REFACTOR_REVIEW.md

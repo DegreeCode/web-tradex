@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrderRetry } from "@/lib/advanced-order-hooks";
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
@@ -30,6 +31,7 @@ import {
   marginErrorMessage,
   marginPartialFillText,
   useCloseMarginPosition,
+  type MarginClosureRequest,
   type MarginPosition,
 } from "@/lib/margin";
 
@@ -45,9 +47,12 @@ export function MarginClosureDialog({
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
-  const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
+  const curvePrice = useInstrument(open ? position?.symbol : undefined).data?.curve_spot_price;
   const closeMutation = useCloseMarginPosition(position?.position_id ?? "");
   const access = useSessionAccess("MARGIN");
+  const retry = useOrderRetry<MarginClosureRequest>({
+    positionId: position?.position_id, accountId: position?.account_id, slippageSettings,
+  });
 
   if (!position) return null;
 
@@ -64,16 +69,22 @@ export function MarginClosureDialog({
     ? slippageRequestFields(slippageSettings)
     : null;
 
+  const canSubmit = open && access.allowed && !closeMutation.isPending && (retry.hasPayload || Boolean(payload));
+
   async function handleClose(e: React.FormEvent) {
     e.preventDefault();
     const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
-    if (invalidSlippage) { toast.error(invalidSlippage); return; }
-    if (!position || !payload || closeMutation.isPending) return;
+    if (!retry.hasPayload && invalidSlippage) { toast.error(invalidSlippage); return; }
+    if (!canSubmit || !position) return;
     noteSelfAction("TRADE_EXECUTED", position.symbol);
+    let request: MarginClosureRequest | undefined;
     try {
-      const result = await closeMutation.mutateAsync(
-        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
-      );
+      request = retry.prepare(() => {
+        if (!payload) throw new Error("입력 내용을 확인해주세요");
+        return referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload;
+      });
+      const result = await closeMutation.mutateAsync(request);
+      retry.success(request);
       // A 200 closure may settle only part of the position; the rest stays OPEN.
       if (result.status === "OPEN") {
         toast.warning("포지션을 일부만 종료했어요", {
@@ -84,6 +95,7 @@ export function MarginClosureDialog({
       }
       onOpenChange(false);
     } catch (err) {
+      if (request) retry.failure(request, err);
       toast.error(marginErrorMessage(err));
     }
   }
@@ -178,6 +190,9 @@ export function MarginClosureDialog({
             referencePrice={referencePrice}
           />
 
+          {retry.hasPayload && closeMutation.isError ? (
+            <p role="status" className="text-[12px] text-app-gray-500">처리 결과를 확인하지 못했어요. 다시 누르면 처음 요청과 같은 내용으로 재시도해요. 입력을 바꾸면 새 요청으로 처리해요.</p>
+          ) : null}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
@@ -189,7 +204,7 @@ export function MarginClosureDialog({
             </button>
             <button
               type="submit"
-              disabled={!payload || closeMutation.isPending}
+              disabled={!canSubmit}
               className="flex items-center justify-center gap-1.5 rounded-xl bg-app-red px-4 py-2.5 text-[14px] font-bold text-white hover:opacity-90 disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {closeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}

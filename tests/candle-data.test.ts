@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendCandleHistory, appendCandleHistoryWithGaps, applyTradeToCandlePage, mergeCandles, materializeCandlePage, advanceCandlePage, MAX_MATERIALIZED_CANDLE_BUCKETS } from "../src/lib/candle-data";
+import { appendCandleHistory, appendCandleHistoryWithGaps, applyTradeToCandlePage, mergeCandles, materializeCandlePage, advanceCandlePage, replaceCandlePageData, MAX_MATERIALIZED_CANDLE_BUCKETS } from "../src/lib/candle-data";
 import type { Candle, CandleInterval, PublicTrade } from "../src/lib/types";
 
 const candle = (minute: number, close = "10", synthetic = false): Candle => ({
@@ -86,7 +86,7 @@ test("sparse second candles fill the entire displayed range within the total cap
   assert.deepEqual(result.data.map((c) => Date.parse(c.timestamp) / 1_000),
     Array.from({ length: MAX_MATERIALIZED_CANDLE_BUCKETS }, (_, i) => 100_000 - i));
   assert.equal(result.data[1].close, "50001");
-  assert.equal(result.page.has_more, false);
+  assert.equal(result.page.has_more, true);
 });
 
 test("older loading retains its cursor past the live-window capacity", () => {
@@ -134,7 +134,6 @@ test("clock-only windows retain a price seed without claiming real data", () => 
   const corrected = materializeCandlePage({ ...next, data: mergeCandles(next.data, [candle(9_900, "20")]) }, "1m");
   assert.equal(corrected.data[0].close, "20");
 });
-
 
 test("REST-sized older pages continue past the live-window cap", () => {
   const restLimit = 500;
@@ -191,7 +190,7 @@ for (const interval of ["1s", "1m"] as const) {
     for (const offset of [1, 3, MAX_MATERIALIZED_CANDLE_BUCKETS + 100]) {
       const advanced = advanceCandlePage(current, interval, at(offset));
       assert.equal(advanced.data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
-      assert.equal(advanced.page.has_more, false);
+      assert.equal(advanced.page.has_more, true);
       assert.deepEqual(advanced.data.map((c) => Date.parse(c.timestamp)),
         Array.from({ length: MAX_MATERIALIZED_CANDLE_BUCKETS }, (_, i) => newest + (offset - i) * step));
       assert.deepEqual(advanced, materializeCandlePage(current, interval, at(offset)));
@@ -223,4 +222,60 @@ test("contiguous cached flats with a stale close are normalized before clock adv
   const next = advanceCandlePage(stale, "1m", candle(4).timestamp);
   assert.deepEqual(next.data.map(c => c.close), ["20", "20", "20", "20"]);
   assert.equal(next.data.at(-1)?.volume_shares, stale.data.at(-1)?.volume_shares);
+});
+
+test("initial sparse materialization archives every real row and preserves the server cursor", () => {
+  const rows = [candle(10_000, "20"), candle(0, "10")];
+  const input = page(rows);
+  const result = materializeCandlePage(input, "1m");
+  assert.equal(result.data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
+  assert.deepEqual(result.history, [rows[1]]);
+  assert.deepEqual(result.page, input.page);
+  const next = appendCandleHistoryWithGaps(result, page([candle(-10_000, "5")]), "1m");
+  assert.deepEqual(next.history, [rows[1], candle(-10_000, "5")]);
+  assert.equal(next.data.at(-1)?.close, "10", "older pages cannot overwrite a newer carry-in seed");
+  assert.equal(next.page.next_cursor, "older");
+});
+
+test("clock and live-trade rollover archive outgoing real candles without archiving flats", () => {
+  const original = candle(0);
+  const input = materializeCandlePage(page([original]), "1m");
+  const advanced = advanceCandlePage(input, "1m", candle(10_000).timestamp);
+  assert.deepEqual(advanced.history, [original]);
+  assert.deepEqual(advanced.page, input.page);
+  const next = advanceCandlePage(advanced, "1m", candle(20_000).timestamp);
+  assert.deepEqual(next.history, [original]);
+  const applied = applyTradeToCandlePage(input, "1m", 200, {
+    symbol: "AAA.M", side: "BUY", price: "20", quantity: "1", credit: "20", fee: "0",
+    timestamp: candle(10_000).timestamp, sequence: 1,
+  });
+  assert.equal(applied.status, "updated");
+  const live = replaceCandlePageData(input, applied.data!);
+  assert.deepEqual(live.history, [original]);
+  assert.deepEqual(live.page, input.page);
+  assert.equal(live.data[0].close, "20");
+});
+
+test("exact live capacity preserves a cursor even before an archive exists", () => {
+  const input = page([candle(MAX_MATERIALIZED_CANDLE_BUCKETS - 1), candle(0)]);
+  const result = materializeCandlePage(input, "1m");
+  assert.equal(result.data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
+  assert.equal(result.history, undefined);
+  assert.deepEqual(result.page, input.page);
+});
+
+
+test("an unparsable horizon bucket archives real rows when no live window can be filled", (t) => {
+  const rows = [candle(2, "20"), candle(1, "10", true), candle(0, "10")];
+  const input = page(rows);
+  const parseDate = Date.parse;
+  // A plain invalid horizon is ignored earlier; fail its normalized bucket
+  // parse to exercise the non-finite cursor and empty materialization path.
+  t.mock.method(Date, "parse", (value: string) =>
+    value === "2026-11-04T01:23:00.000Z" ? NaN : parseDate(value));
+  const result = materializeCandlePage(input, "1m", "2026-11-04T01:23:45Z");
+  assert.deepEqual(result.data, []);
+  assert.deepEqual(result.history, [rows[0], rows[2]]);
+  assert.deepEqual(result.page, input.page);
+  assert.deepEqual(input.data, rows);
 });

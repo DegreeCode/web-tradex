@@ -43,6 +43,7 @@ export function OrderGroupDialog({
   const children = useOrderGroupChildren(
     groupId,
     group?.group_type === "BRACKET",
+    group?.state,
   );
   const cancel = useCancelOrderGroup();
   const [confirmOpen, setConfirmOpen] = useState(false);

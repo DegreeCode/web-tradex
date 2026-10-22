@@ -241,6 +241,15 @@ export function isDecimalInput(value: string, maxFrac: number): boolean {
   return !fraction || fraction.length <= maxFrac;
 }
 
+/** Keep typing permissive, but send decimals with both sides of a dot filled. */
+export function normalizeDecimalInput(value: string, maxFrac: number): string {
+  const input = value.trim();
+  if (!isDecimalInput(input, maxFrac) || input === ".")
+    throw new Error("숫자를 올바르게 입력해주세요");
+  const normalized = input.startsWith(".") ? `0${input}` : input;
+  return normalized.endsWith(".") ? normalized.slice(0, -1) : normalized;
+}
+
 export function isPositiveDecimal(value: string): boolean {
   const parts = decimalParts(value);
   return Boolean(parts && !parts.negative && parts.units > 0n);

@@ -1,3 +1,4 @@
+import type { TestContext } from "node:test";
 import type { WsFrame } from "../src/lib/types";
 import type { ClientMessage, HubMessage } from "../src/lib/ws-protocol";
 import type { SocketHooks, WsKind, WsStatus } from "../src/lib/ws-transport";
@@ -110,3 +111,39 @@ export class FakePort<In, Out> {
 
 export type TabPort = FakePort<ClientMessage, HubMessage>;
 export type WorkerPort = FakePort<HubMessage, ClientMessage>;
+
+export function mockSockets(t: TestContext) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+  const instances: FakeSocket[] = [];
+  class FakeSocket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    static CLOSING = 2;
+    readyState = 1;
+    closeCount = 0;
+    deferClose = false;
+    readonly sent: unknown[] = [];
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor() { instances.push(this); }
+    send(raw: string) { this.sent.push(JSON.parse(raw)); }
+    close() {
+      this.closeCount += 1;
+      this.readyState = 3;
+      if (!this.deferClose) this.onclose?.();
+    }
+    receive(raw: string) { this.onmessage?.({ data: raw }); }
+    emitFrame(frame: unknown) { this.receive(JSON.stringify(frame)); }
+    emit(stream: string, seq: number, type = "update") {
+      this.emitFrame({ type, stream, seq, version: seq, data: [] });
+    }
+  }
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeSocket });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, "WebSocket", previous);
+    else Reflect.deleteProperty(globalThis, "WebSocket");
+  });
+  return instances;
+}

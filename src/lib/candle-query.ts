@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { apiPage, buildQuery } from "./api";
 import {
   candleClockTimestamp, candleSnapshotFrom, candleSnapshotTo, reconcileCandleSnapshot,
-  MAX_MATERIALIZED_CANDLE_BUCKETS, mergeCandles, type CandlePage,
+  mergeCandles, type CandlePage,
 } from "./candle-data";
 import { candleFetchTrades, candleTradeRuntimes, type CandleFetchBuffer } from "./candle-cache";
 import type { Candle, CandleInterval, Page } from "./types";
@@ -39,14 +39,14 @@ export async function fetchCandleSnapshot(
         })}`,
         { signal },
       );
-      // Recovery can span many REST pages after a long hidden period;
-      // only the newest bounded window can survive materialization.
-      fetched = mergeCandles(fetched, page.data).slice(0, MAX_MATERIALIZED_CANDLE_BUCKETS);
+      // Finish the recovery range so preserving the old history cursor cannot
+      // skip real rows. Materialization archives rows outside the live window.
+      fetched = mergeCandles(fetched, page.data);
       const next = from && page.page.has_more ? page.page.next_cursor ?? undefined : undefined;
       // A repeated cursor would otherwise loop forever on a bad server page.
       cursor = next && !seenCursors.has(next) ? next : undefined;
       if (next) seenCursors.add(next);
-    } while (cursor && fetched.length < MAX_MATERIALIZED_CANDLE_BUCKETS);
+    } while (cursor);
     // Keep the older-history cursor: this request only advances the newest end.
     const latest = queryClient.getQueryData<CandlePage>(queryKey);
     const result = reconcileCandleSnapshot(latest, { ...page, data: fetched }, interval,

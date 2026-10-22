@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrderRetry } from "@/lib/advanced-order-hooks";
 import { useExchangeInfo } from "@/lib/exchange-info";
 import { TradePolicy } from "@/components/exchange-policy";
 import { SlippageFields } from "@/components/slippage-fields";
@@ -32,11 +33,13 @@ import { Collapse } from "@/components/primitives";
 import { ScopeNotice, useSessionAccess } from "@/components/session-access";
 import { MarginSimulationPreview } from "./margin-simulation-preview";
 import {
+  buildMarginReductionRequest,
   isMarginRiskAtOrBelow,
   marginErrorMessage,
   marginPartialFillText,
   useReduceMarginPosition,
   validateReductionQuantity,
+  type MarginReductionRequest,
   type MarginPosition,
 } from "@/lib/margin";
 
@@ -54,9 +57,12 @@ export function MarginReductionDialog({
   const { data: exchangeInfo } = useExchangeInfo();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { settings: slippageSettings, setMode: setSlippageMode, setSlippage, setLimitPrice } = useSlippageSettings();
-  const curvePrice = useInstrument(position?.symbol).data?.curve_spot_price;
+  const curvePrice = useInstrument(open ? position?.symbol : undefined).data?.curve_spot_price;
   const reduceMutation = useReduceMarginPosition(position?.position_id ?? "");
   const access = useSessionAccess("MARGIN");
+  const retry = useOrderRetry<MarginReductionRequest>({
+    positionId: position?.position_id, accountId: position?.account_id, quantity, slippageSettings,
+  });
 
   if (!position) return null;
 
@@ -71,19 +77,25 @@ export function MarginReductionDialog({
   const referencePrice = liveReferencePrice(slippageSettings, curvePrice);
   const isValid = open && access.allowed && position.status === "OPEN" && !errorText && !belowMaintenance;
   const payload = isValid && !slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade)
-    ? { quantity: quantity.trim(), ...slippageRequestFields(slippageSettings) }
+    ? buildMarginReductionRequest({ quantity, ...slippageRequestFields(slippageSettings) })
     : null;
+
+  const canSubmit = open && access.allowed && !reduceMutation.isPending && (retry.hasPayload || Boolean(payload));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const invalidSlippage = slippageSettingsError(slippageSettings, exitSide, exchangeInfo?.trade);
-    if (invalidSlippage) { toast.error(invalidSlippage); return; }
-    if (!payload || !position || reduceMutation.isPending) return;
+    if (!retry.hasPayload && invalidSlippage) { toast.error(invalidSlippage); return; }
+    if (!canSubmit || !position) return;
     noteSelfAction("TRADE_EXECUTED", position.symbol);
+    let request: MarginReductionRequest | undefined;
     try {
-      const result = await reduceMutation.mutateAsync(
-        referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload,
-      );
+      request = retry.prepare(() => {
+        if (!payload) throw new Error("입력 내용을 확인해주세요");
+        return referencePrice ? { ...payload, slippage_reference_price: referencePrice } : payload;
+      });
+      const result = await reduceMutation.mutateAsync(request);
+      retry.success(request);
       if (result.execution?.partially_filled) {
         toast.warning("요청 수량 중 일부만 정산했어요", {
           description: `${marginPartialFillText(result.execution)}. 나머지는 자동으로 다시 주문되지 않아요.`,
@@ -94,6 +106,7 @@ export function MarginReductionDialog({
       setQuantity("");
       onOpenChange(false);
     } catch (err) {
+      if (request) retry.failure(request, err);
       toast.error(marginErrorMessage(err));
     }
   }
@@ -224,6 +237,9 @@ export function MarginReductionDialog({
             referencePrice={referencePrice}
           />
 
+          {retry.hasPayload && reduceMutation.isError ? (
+            <p role="status" className="text-[12px] text-app-gray-500">처리 결과를 확인하지 못했어요. 다시 누르면 처음 요청과 같은 내용으로 재시도해요. 입력을 바꾸면 새 요청으로 처리해요.</p>
+          ) : null}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
@@ -235,7 +251,7 @@ export function MarginReductionDialog({
             </button>
             <button
               type="submit"
-              disabled={!payload || reduceMutation.isPending}
+              disabled={!canSubmit}
               className="flex items-center justify-center gap-1.5 rounded-xl bg-app-blue px-4 py-2.5 text-[14px] font-bold text-white hover:bg-app-blue-hover disabled:bg-app-gray-200 disabled:text-app-gray-400 pressable"
             >
               {reduceMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}

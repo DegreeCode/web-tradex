@@ -5,6 +5,9 @@ import {
   tagPolicyError,
   iconPolicyError,
   transferAllowed,
+  estimateTransferCost,
+  transferCreditError,
+  transferErrorMessage,
   managerMarginSideBlocked,
   lockedSupplyPpmFromPercent,
   type ExchangeInfo,
@@ -108,4 +111,50 @@ test("typed locked ratio snaps to 0.1% steps inside the published range", () => 
   for (const text of ["", ".", "10.25", "abc", "-5", "1e1"]) {
     assert.equal(within(text), null, text);
   }
+});
+
+
+test("credit transfer costs include ceiling-rounded fees at Credit precision", () => {
+  assert.deepEqual(estimateTransferCost("CREDIT", "100", false, 10_000), { fee: "1", requiredCredit: "101" });
+  assert.deepEqual(estimateTransferCost("CREDIT", "0.0000000000000001", false, 1), {
+    fee: "0.0000000000000001", requiredCredit: "0.0000000000000002",
+  });
+  const cost = estimateTransferCost("CREDIT", "9007199254740993.0000000000000001", false, 1)!;
+  assert.equal(cost.fee, "9007199254.7409930000000001");
+  assert.equal(cost.requiredCredit, "9007208261940247.7409930000000002");
+  assert.ok(transferCreditError("100", estimateTransferCost("CREDIT", "100", false, 10_000), "CREDIT", "100"));
+  assert.equal(transferCreditError("101", estimateTransferCost("CREDIT", "100", false, 10_000), "CREDIT", "100"), null);
+});
+
+test("stock transfers require Credit for the estimated fee and own-account transfers are free", () => {
+  const cost = estimateTransferCost("STOCK", "2.5", false, 10_000, "12.34567891")!;
+  assert.equal(cost.fee, "0.30864197275");
+  assert.equal(cost.requiredCredit, cost.fee);
+  assert.ok(transferCreditError("0", cost, "STOCK", ""));
+  assert.equal(transferCreditError(cost.fee, cost, "STOCK", ""), null);
+  assert.deepEqual(estimateTransferCost("STOCK", "1", true, undefined), { fee: "0", requiredCredit: "0" });
+  assert.deepEqual(estimateTransferCost("CREDIT", "100", true, 10_000), { fee: "0", requiredCredit: "100" });
+  assert.deepEqual(estimateTransferCost("STOCK", "1", false, 0), { fee: "0", requiredCredit: "0" });
+  assert.equal(estimateTransferCost("CREDIT", "100", false, undefined), null);
+  for (const price of [undefined, "0", "invalid"]) assert.equal(estimateTransferCost("STOCK", "1", false, 1, price), null);
+  for (const value of ["", ".", "-1", "NaN"]) assert.equal(estimateTransferCost("CREDIT", value, false, 10), null);
+  assert.equal(estimateTransferCost("CREDIT", "1", false, -1), null);
+});
+
+test("transfer insufficient-credit errors explain the fee requirement", async () => {
+  const { ApiError } = await import("../src/lib/api");
+  assert.match(transferErrorMessage(new ApiError(409, "INSUFFICIENT_CREDIT", "insufficient")), /수수료/);
+  assert.equal(transferErrorMessage(new ApiError(409, "INSUFFICIENT_SHARES", "insufficient")), "보유 수량이 부족해요");
+});
+
+
+test("unknown stock transfer fees leave the Credit decision to the server", () => {
+  assert.equal(transferCreditError("0", null, "STOCK", ""), null);
+});
+
+test("unknown Credit transfer fees fall back to the original amount-only check", () => {
+  assert.equal(transferCreditError("100", null, "CREDIT", "100"), null);
+  assert.equal(transferCreditError("101", null, "CREDIT", "100"), null);
+  assert.equal(transferCreditError("99", null, "CREDIT", "100"), "Credit 잔액이 부족해요");
+  assert.equal(transferCreditError("9007199254740993", null, "CREDIT", "9007199254740993.0000000000000001"), "Credit 잔액이 부족해요");
 });

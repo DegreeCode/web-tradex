@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Segmented } from "@/components/segmented";
-import { useExchangeInfo, transferAllowed } from "@/lib/exchange-info";
+import { useExchangeInfo, transferAllowed, estimateTransferCost, transferCreditError, transferErrorMessage } from "@/lib/exchange-info";
 import { ExchangeInfoNotice } from "@/components/exchange-policy";
 import { ErrorBlock } from "@/components/primitives";
 import { accountLabel, resolveAccountId } from "@/lib/accounts";
@@ -22,6 +22,9 @@ import { noteSelfAction } from "@/lib/live-notifications";
 import { compareDecimal, fmtCredit, fmtPercentFromPPM, fmtQuantity, isDecimalInput, isPositiveDecimal } from "@/lib/format";
 import { findPosition, useAccounts, usePortfolio } from "@/lib/hooks/accounts";
 import { useCreateTransfer } from "@/lib/hooks/transfers";
+import { canonicalSymbol as normalizeSymbol } from "@/lib/market-cache";
+import { useInstrument } from "@/lib/hooks/market";
+import { usePolledSymbolTicker } from "@/lib/hooks/trades";
 import { useSessionAccess } from "@/components/session-access";
 
 export function TransferDialog({
@@ -65,6 +68,12 @@ function TransferForm({ onDone }: { onDone: () => void }) {
 
   const sameOwner = otherAccounts.some((account) => account.account_id === recipient.trim());
   const allowed = transferAllowed(asset, sameOwner, exchangeInfo?.transfer.asset_policy);
+  const feeSymbol = asset === "STOCK" && !sameOwner && (exchangeInfo?.transfer.fee_ppm ?? 0) > 0
+    ? canonicalSymbol : undefined;
+  const instrument = useInstrument(feeSymbol);
+  usePolledSymbolTicker(feeSymbol);
+  const cost = estimateTransferCost(asset, asset === "CREDIT" ? amount : quantity, sameOwner,
+    exchangeInfo?.transfer.fee_ppm, instrument.data?.curve_spot_price);
 
   function submit() {
     if (createTransfer.isPending || !transferAccess.allowed || !accountId || !portfolio.data) return;
@@ -83,12 +92,8 @@ function TransferForm({ onDone }: { onDone: () => void }) {
         toast.error("보낼 금액을 입력해주세요");
         return;
       }
-      if (compareDecimal(amount, availableCredit) > 0) {
-        toast.error("Credit 잔액이 부족해요");
-        return;
-      }
     } else {
-      if (!/^[A-Za-z]{1,8}(?:\.M)?$/.test(symbol.trim())) {
+      if (!canonicalSymbol) {
         toast.error("심볼을 영문 1~8자 또는 .M 형식으로 입력해주세요");
         return;
       }
@@ -101,6 +106,9 @@ function TransferForm({ onDone }: { onDone: () => void }) {
         return;
       }
     }
+
+    const creditError = transferCreditError(availableCredit, cost, asset, amount);
+    if (creditError) { toast.error(creditError); return; }
 
     noteSelfAction("transfer.updated");
     createTransfer.mutate(
@@ -119,7 +127,7 @@ function TransferForm({ onDone }: { onDone: () => void }) {
           );
           onDone();
         },
-        onError: (error) => toast.error(errorMessage(error)),
+        onError: (error) => toast.error(transferErrorMessage(error)),
       },
     );
   }
@@ -259,6 +267,13 @@ function TransferForm({ onDone }: { onDone: () => void }) {
           </div>
         )}
 
+        {cost ? (
+          <div className="break-all text-[12px] leading-5 text-app-gray-500" aria-live="polite">
+            <p>{asset === "STOCK" && !sameOwner ? "예상 수수료" : "수수료"} {fmtCredit(cost.fee)} Credit · 필요한 Credit {fmtCredit(cost.requiredCredit)}</p>
+            {asset === "STOCK" && !sameOwner ? <p>실제 수수료는 요청 시점의 곡선 가격으로 정해져요.</p> : null}
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={submit}
@@ -270,9 +285,4 @@ function TransferForm({ onDone }: { onDone: () => void }) {
       </div>
     </>
   );
-}
-
-function normalizeSymbol(value: string): string {
-  const upper = value.trim().toUpperCase();
-  return upper && !upper.endsWith(".M") ? `${upper}.M` : upper;
 }

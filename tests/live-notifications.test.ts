@@ -151,3 +151,12 @@ test("trigger failures and expirations keep their existing orders action", () =>
     );
   }
 });
+
+
+test("a trigger activation toast reports an attempt rather than a successful execution", () => {
+  const popup = liveToastFor(notification("AAA.M TRIGGER_ACTIVATED"), NOW);
+  assert.equal(popup?.tone, "info");
+  assert.equal(popup?.title, "예약 주문 실행을 시도해요");
+  assert.match(popup?.description ?? "", /체결을 시도해요/);
+  assert.deepEqual(popup?.action, { label: "주문 보기", href: "/orders" });
+});

@@ -20,9 +20,11 @@ import {
   useMarkNotificationRead,
   useMarkNotificationsRead,
   useNotifications,
+  useUnreadNotifications,
 } from "@/lib/hooks/notifications";
 import {
   presentNotification,
+  formatUnreadBadge,
   TONE_STYLES,
 } from "@/lib/notifications";
 import type { Notification } from "@/lib/types";
@@ -34,6 +36,8 @@ export default function NotificationsPage() {
   const markRead = useMarkNotificationRead();
   const markBatch = useMarkNotificationsRead();
   const markAll = useMarkAllNotificationsRead();
+  const unread = useUnreadNotifications();
+  const unreadBadge = unread.data ? formatUnreadBadge(unread.data.data.length, unread.data.page.has_more) : null;
 
   const rows = useMemo(() => notifications.data?.pages.flatMap((page) => page.data) ?? [], [notifications.data]);
   const unreadRows = useMemo(() => rows.filter((row) => !row.read), [rows]);
@@ -96,7 +100,7 @@ export default function NotificationsPage() {
         onChange={setFilter}
         options={[
           { value: "ALL", label: "전체" },
-          { value: "UNREAD", label: `안 읽음${unreadRows.length > 0 ? ` ${unreadRows.length}` : ""}` },
+          { value: "UNREAD", label: `안 읽음${unreadBadge ? ` ${unreadBadge}` : ""}` },
         ]}
       />
 
@@ -111,7 +115,7 @@ export default function NotificationsPage() {
         />
       ) : rows.length === 0 ? (
         <EmptyState
-          title={filter === "UNREAD" ? "안 읽은 알림이 없어요" : "알림이 없어요"}
+          title={notifications.hasNextPage ? "이전 알림을 더 불러올 수 있어요" : filter === "UNREAD" ? "안 읽은 알림이 없어요" : "알림이 없어요"}
           description="체결·송금·공지가 생기면 이곳에 도착해요"
           icon={<Bell aria-hidden="true" className="size-6" />}
         />
@@ -120,14 +124,13 @@ export default function NotificationsPage() {
           {rows.map((item) => (
             <NotificationCard key={item.notification_id} item={item} onOpen={handleOpen} />
           ))}
-          <LoadMoreButton
-            hasMore={notifications.hasNextPage}
-            loading={notifications.isFetchingNextPage}
-            onLoad={() => void notifications.fetchNextPage()}
-            className="xl:col-span-2"
-          />
         </div>
       )}
+      <LoadMoreButton
+        hasMore={notifications.hasNextPage}
+        loading={notifications.isFetching}
+        onLoad={() => void notifications.fetchNextPage().catch((error) => toast.error(errorMessage(error)))}
+      />
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-2xl">

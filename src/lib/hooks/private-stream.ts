@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invalidateMarginQueries } from "../margin";
 import {
@@ -52,7 +52,7 @@ export function reconcileNotificationData(
     }
     keys.add("icon-requests");
   }
-  if (event === "inquiry.replied") {
+  if (event === "inquiry.replied" || event === "inquiry.opened") {
     keys.add("inquiries");
     keys.add("inquiry");
   }
@@ -109,71 +109,67 @@ export function resyncPrivateStreamGaps(
   };
 }
 
+export function applyPrivateStreamFrame(queryClient: QueryClient, frame: WsFrame): void {
+  const stream = frame.stream;
+  if (!stream) return;
+  if (stream === "notification.created" || stream === "notification.updated") {
+    const notification = notificationFromPrivateFrame(frame);
+    if (!notification) return;
+    updateNotificationCaches(queryClient, notification);
+    // Updates (e.g. read state) carry no new domain event to reconcile.
+    if (stream === "notification.created") {
+      applyTradingNotification(queryClient, notification);
+      reconcileNotificationData(queryClient, notification);
+    }
+    return;
+  }
+  // Private trade.executed is not delivered; fills arrive as notifications.
+  // Domain streams below share one batched refetch with their notification.
+  if (stream === "trigger.activated" || stream === "trigger.updated" || stream === "trigger.group_updated") {
+    invalidateNotificationKeys(queryClient, triggerEventQueryRoots(stream, frame.data));
+    return;
+  }
+  if (stream === "transfer.updated") {
+    invalidateNotificationKeys(queryClient, ["transfers", "transfer", "portfolio", "accounts", "nav"]);
+    return;
+  }
+  if (stream.startsWith("margin.")) {
+    const marginData = frame.data as { position_id?: string } | undefined;
+    invalidateMarginQueries(queryClient, {
+      positionId: marginData?.position_id,
+      balances: stream !== "margin.warning",
+    });
+    return;
+  }
+  if (stream === "listing.updated" || stream === "issuance.created") {
+    const symbol = (frame.data as { symbol?: string } | undefined)?.symbol;
+    if (symbol) {
+      void refreshSymbolMetadata(queryClient, symbol);
+    } else {
+      const cache = readSymbolMetadataCache();
+      // Apply the result too: the periodic sync would see an already
+      // fresh cache and never push this delta into mounted queries.
+      if (cache) {
+        void runSymbolMetadataSync(cache).then((next) => {
+          applySymbolMetadataDelta(queryClient, cache, next);
+          applySymbolMetadataCache(queryClient, next);
+        }, () => undefined);
+      }
+    }
+    return;
+  }
+  if (stream === "inquiry.replied" || stream === "inquiry.opened") {
+    invalidateNotificationKeys(queryClient, ["inquiries", "inquiry"]);
+  }
+}
+
 export function usePrivateStream(enabled: boolean) {
   const queryClient = useQueryClient();
-  const handlerRef = useRef<(frame: WsFrame) => void>(() => {});
-
-  useEffect(() => {
-    handlerRef.current = (frame) => {
-      const stream = frame.stream;
-      if (!stream) return;
-      if (stream === "notification.created" || stream === "notification.updated") {
-        const notification = notificationFromPrivateFrame(frame);
-        if (!notification) return;
-        updateNotificationCaches(queryClient, notification);
-        // Updates (e.g. read state) carry no new domain event to reconcile.
-        if (stream === "notification.created") {
-          applyTradingNotification(queryClient, notification);
-          reconcileNotificationData(queryClient, notification);
-        }
-        return;
-      }
-      // Private trade.executed is not delivered; fills arrive as notifications.
-      // Domain streams below share one batched refetch with their notification.
-      if (stream === "trigger.activated" || stream === "trigger.updated" || stream === "trigger.group_updated") {
-        invalidateNotificationKeys(queryClient, triggerEventQueryRoots(stream, frame.data));
-        return;
-      }
-      if (stream === "transfer.updated") {
-        invalidateNotificationKeys(queryClient, ["transfers", "transfer", "portfolio", "accounts", "nav"]);
-        return;
-      }
-      if (stream.startsWith("margin.")) {
-        const marginData = frame.data as { position_id?: string } | undefined;
-        invalidateMarginQueries(queryClient, {
-          positionId: marginData?.position_id,
-          balances: stream !== "margin.warning",
-        });
-        return;
-      }
-      if (stream === "listing.updated" || stream === "issuance.created") {
-        const symbol = (frame.data as { symbol?: string } | undefined)?.symbol;
-        if (symbol) {
-          void refreshSymbolMetadata(queryClient, symbol);
-        } else {
-          const cache = readSymbolMetadataCache();
-          // Apply the result too: the periodic sync would see an already
-          // fresh cache and never push this delta into mounted queries.
-          if (cache) {
-            void runSymbolMetadataSync(cache).then((next) => {
-              applySymbolMetadataDelta(queryClient, cache, next);
-              applySymbolMetadataCache(queryClient, next);
-            }, () => undefined);
-          }
-        }
-        return;
-      }
-      if (stream === "inquiry.replied") {
-        invalidateNotificationKeys(queryClient, ["inquiries", "inquiry"]);
-      }
-    };
-  }, [queryClient]);
-
   useEffect(() => {
     if (!enabled) return;
     const socket = getSocket("private");
     const release = socket.retain();
-    const off = socket.onFrame((frame) => handlerRef.current(frame));
+    const off = socket.onFrame((frame) => applyPrivateStreamFrame(queryClient, frame));
     const offResync = resyncPrivateStreamGaps(socket, () => {
       invalidateMarginQueries(queryClient);
       invalidateNotificationKeys(queryClient, [

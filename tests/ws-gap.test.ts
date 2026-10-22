@@ -1,44 +1,10 @@
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { ApiError } from "../src/lib/api";
 import { closeSocket, getSocket, TradexSocket } from "../src/lib/ws";
+import { mockSockets } from "./ws-fakes";
 import type { WsFrame } from "../src/lib/types";
 
-function mockSockets(t: TestContext) {
-  const previous = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
-  const instances: FakeSocket[] = [];
-  class FakeSocket {
-    static OPEN = 1;
-    static CONNECTING = 0;
-    static CLOSING = 2;
-    readyState = 1;
-    closeCount = 0;
-    deferClose = false;
-    readonly sent: unknown[] = [];
-    onopen: (() => void) | null = null;
-    onmessage: ((event: { data: string }) => void) | null = null;
-    onclose: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor() { instances.push(this); }
-    send(raw: string) { this.sent.push(JSON.parse(raw)); }
-    close() {
-      this.closeCount += 1;
-      this.readyState = 3;
-      if (!this.deferClose) this.onclose?.();
-    }
-    receive(raw: string) { this.onmessage?.({ data: raw }); }
-    emitFrame(frame: unknown) { this.receive(JSON.stringify(frame)); }
-    emit(stream: string, seq: number, type = "update") {
-      this.emitFrame({ type, stream, seq, version: seq, data: [] });
-    }
-  }
-  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeSocket });
-  t.after(() => {
-    if (previous) Object.defineProperty(globalThis, "WebSocket", previous);
-    else Reflect.deleteProperty(globalThis, "WebSocket");
-  });
-  return instances;
-}
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -190,7 +156,7 @@ test("a released pending ticket cannot authenticate the next private connection"
   await settle();
   const transport = instances[0];
   transport.onopen?.();
-  assert.deepEqual(transport.sent, [{ op: "auth", ticket: "current-session" }]);
+  assert.deepEqual(transport.sent, [{ op: "auth", ticket: "current-session" }, { op: "ping" }]);
   const lateOpen = transport.onopen;
   socket.close();
   assert.equal(transport.onopen, null);
@@ -228,4 +194,85 @@ test("additional subscriptions wait for socket closure and respect reconnect bac
   instances[2].onopen?.();
   lateClose?.();
   assert.equal(socket.getStatus(), "open", "an old close callback cannot reset the replacement connection");
+});
+
+test("expired private tickets retry with fresh tickets and consecutive handshake failures back off", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const instances = mockSockets(t);
+  let tickets = 0;
+  let expired = 0;
+  const socket = new TradexSocket("private", {
+    fetchTicket: async () => `ticket-${++tickets}`,
+    onAuthFailure: () => { expired += 1; },
+  });
+  t.after(() => socket.close());
+  socket.retain();
+  await settle();
+  instances[0].onopen?.();
+  instances[0].emitFrame({ type: "error", code: "AUTH_FAILED" });
+  assert.equal(expired, 0);
+  t.mock.timers.tick(1400);
+  await settle();
+  assert.equal(tickets, 2);
+  instances[1].onopen?.();
+  assert.deepEqual(instances[1].sent[0], { op: "auth", ticket: "ticket-2" });
+  instances[1].emitFrame({ type: "error", code: "AUTH_FAILED" });
+  t.mock.timers.tick(1999);
+  await settle();
+  assert.equal(tickets, 2, "second failure uses at least two seconds of backoff");
+  t.mock.timers.tick(401);
+  await settle();
+  assert.equal(tickets, 3);
+  instances[2].onopen?.();
+  instances[2].emitFrame({ type: "pong" });
+  assert.equal(socket.getStatus(), "open");
+  instances[2].emit("notification.created", 1);
+  assert.equal(expired, 0);
+});
+
+test("queued direct private frames and auth errors cannot reach the next session", async (t) => {
+  const instances = mockSockets(t);
+  let expired = 0;
+  const socket = new TradexSocket("private", {
+    fetchTicket: async () => "ticket", onAuthFailure: () => { expired += 1; },
+  });
+  t.after(() => socket.close());
+  const release = socket.retain();
+  await settle();
+  const oldMessage = instances[0].onmessage!;
+  socket.close();
+  release();
+  socket.retain();
+  const frames: WsFrame[] = [];
+  socket.onFrame(frame => frames.push(frame));
+  await settle();
+  oldMessage({ data: JSON.stringify({ type: "update", stream: "A-private", seq: 1, version: 1 }) });
+  oldMessage({ data: JSON.stringify({ type: "error", code: "SESSION_INVALID" }) });
+  assert.equal(frames.length, 0);
+  assert.equal(expired, 0);
+  instances[1].onopen?.();
+  instances[1].emitFrame({ type: "update", stream: "B-private", seq: 1, version: 1 });
+  assert.deepEqual(frames.map(frame => frame.stream), ["B-private"]);
+});
+
+test("private SESSION_INVALID and REST ticket 401s still expire the session", async (t) => {
+  const instances = mockSockets(t);
+  let expired = 0;
+  const rejected = new TradexSocket("private", {
+    fetchTicket: async () => { throw new ApiError(401, "SESSION_INVALID", "expired"); },
+    onAuthFailure: () => { expired += 1; },
+  });
+  const revoked = new TradexSocket("private", {
+    fetchTicket: async () => "ticket", onAuthFailure: () => { expired += 1; },
+  });
+  t.after(() => { rejected.close(); revoked.close(); });
+  rejected.retain();
+  await settle();
+  assert.equal(expired, 1);
+  assert.equal(instances.length, 0);
+  revoked.retain();
+  await settle();
+  instances[0].emitFrame({ type: "error", code: "SESSION_INVALID" });
+  assert.equal(expired, 2);
+  assert.equal(revoked.getStatus(), "closed");
 });

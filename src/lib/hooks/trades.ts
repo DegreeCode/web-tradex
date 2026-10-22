@@ -5,6 +5,7 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { apiData, apiPage, buildQuery } from "../api";
 import {
   candleRuntime,
+  candleTradeRuntimes,
   retainCandleRuntime,
   rememberTradeSequence,
   resumeCandleClocks,
@@ -20,21 +21,33 @@ import {
   updateTradePriceOverlay,
 } from "../market-cache";
 import { useSignedIn } from "../session-mode";
-import type { Instrument, Page, PublicTrade, Ticker } from "../types";
+import type { Instrument, Page, PublicTrade, Ticker, WsFrame } from "../types";
+import { getSocket } from "../ws";
 import { useSocketStatus, useChannelFrames } from "./socket";
 import { applyTickers, GUEST_TICKER_POLL_MS } from "./tickers";
 
+export async function fetchSymbolTrades(
+  queryClient: QueryClient, symbol: string, limit: number, signal?: AbortSignal,
+): Promise<Page<PublicTrade>> {
+  const runtime = candleTradeRuntimes.get(symbol);
+  const page = await apiPage<PublicTrade>(
+    `/api/v1/market/symbols/${encodeURIComponent(symbol)}/trades${buildQuery({ limit })}`,
+    { signal },
+  );
+  if (runtime && !signal?.aborted && candleTradeRuntimes.get(symbol) === runtime && getSocket("public").getStatus() !== "open") {
+    applySymbolTradeSnapshot(queryClient, symbol, limit, page.data, runtime);
+  }
+  return page;
+}
+
 /** Signed in only: a guest's symbol view follows its polled ticker instead. */
 export function useSymbolTrades(symbol: string | undefined, limit = 150) {
+  const queryClient = useQueryClient();
   const signedIn = useSignedIn();
   const publicStatus = useSocketStatus("public");
   return useQuery({
     queryKey: ["symbol-trades", symbol, limit],
-    queryFn: ({ signal }) =>
-      apiPage<PublicTrade>(
-        `/api/v1/market/symbols/${encodeURIComponent(symbol ?? "")}/trades${buildQuery({ limit })}`,
-        { signal },
-      ),
+    queryFn: ({ signal }) => fetchSymbolTrades(queryClient, symbol ?? "", limit, signal),
     enabled: Boolean(symbol) && signedIn,
     refetchInterval: publicStatus === "open" ? false : 5_000,
     // Public snapshots/updates own this cache while connected. Focus and mount
@@ -140,9 +153,74 @@ function awaitSnapshot(queryClient: QueryClient, symbol: string, runtime: Candle
   clearTradePriceOverlay(symbol);
   runtime.snapshotReady = false;
   runtime.lastSequence = undefined;
-  runtime.seenSequences.clear();
   runtime.pendingSequences.clear();
+  const alreadyAwaiting = runtime.awaitingSnapshotRecovery;
   requestCandleRecovery(queryClient, symbol, runtime, true);
+  if (!alreadyAwaiting) getSocket("public").resubscribe(`trades:${symbol}`);
+}
+
+function applySymbolTradeSnapshot(
+  queryClient: QueryClient, symbol: string, limit: number, snapshot: PublicTrade[], runtime: CandleTradeRuntime,
+): void {
+  const trades = snapshot.filter((trade) => Number.isSafeInteger(trade.sequence));
+  const sequences = trades.map((trade) => trade.sequence);
+  runtime.lastSequence = sequences.length > 0 ? Math.max(...sequences) : undefined;
+  runtime.pendingSequences.clear();
+  // REST polls and returning socket snapshots overlap. Keep the applied sequence
+  // history through outages so that neither path adds the same volume twice.
+  const unseen = trades.filter((trade) => !runtime.seenSequences.has(trade.sequence));
+  runtime.snapshotReady = false;
+  reconcileCandleTradeSnapshot(queryClient, symbol, unseen, limit, runtime);
+  for (const trade of trades) rememberTradeSequence(runtime, trade.sequence);
+  runtime.snapshotReady = true;
+  runtime.awaitingSnapshotRecovery = false;
+  resumeCandleClocks(symbol);
+}
+
+export function applySymbolTradeFrame(
+  queryClient: QueryClient, symbol: string, limit: number, frame: WsFrame,
+): void {
+  const runtime = candleRuntime(symbol);
+  if (frame.type === "snapshot" && Array.isArray(frame.data)) {
+    const snapshot = frame.data as PublicTrade[];
+    applySymbolTradeSnapshot(queryClient, symbol, limit, snapshot, runtime);
+    replaceSymbolTrades(queryClient, symbol, limit, snapshot);
+    return;
+  }
+  if (frame.type !== "update" || !frame.data) return;
+  const trade = frame.data as PublicTrade;
+  if (!Number.isSafeInteger(trade.sequence)) return;
+  if (runtime.awaitingSnapshotRecovery) return;
+  if (!runtime.snapshotReady) {
+    runtime.pendingSequences.add(trade.sequence);
+    return;
+  }
+  if (runtime.seenSequences.has(trade.sequence)) return;
+  // A replayed or skipped sequence means trades were lost: wait for a snapshot.
+  if (runtime.lastSequence !== undefined && trade.sequence !== runtime.lastSequence + 1) {
+    awaitSnapshot(queryClient, symbol, runtime);
+    return;
+  }
+  runtime.lastSequence = trade.sequence;
+  rememberTradeSequence(runtime, trade.sequence);
+  updateTradePriceOverlay(symbol, trade);
+  queryClient.setQueryData<Instrument>(["instrument", symbol], (old) =>
+    old ? applyTradePriceOverlay(old) : old,
+  );
+  queryClient.setQueryData<Page<PublicTrade>>(["symbol-trades", symbol, limit], (old) => {
+    if (!old) return old;
+    if (old.data.some((row) => row.sequence === trade.sequence)) return old;
+    return { data: [trade, ...old.data].slice(0, 400), page: old.page };
+  });
+  const result = updateCachedCandleQueries(queryClient, symbol, trade);
+  if (result.needsRecovery) {
+    runtime.pendingSequences.add(trade.sequence);
+    // The cached page cannot safely correct an older bucket (or be merged
+    // while its REST bootstrap is in flight). Make the canonical REST page
+    // authoritative once for active observers; requestCandleRecovery clears
+    // this triggering sequence so it cannot be double-counted afterward.
+    requestCandleRecovery(queryClient, symbol, runtime);
+  }
 }
 
 export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
@@ -155,57 +233,7 @@ export function useSymbolTradeStream(symbol: string | undefined, limit = 150) {
   }, [symbol, signedIn]);
 
   useChannelFrames("public", symbol ? `trades:${symbol}` : null, (frame) => {
-    if (!symbol) return;
-    const runtime = candleRuntime(symbol);
-    if (frame.type === "snapshot" && Array.isArray(frame.data)) {
-      const snapshot = frame.data as PublicTrade[];
-      const sequences = snapshot
-        .map((trade) => trade.sequence)
-        .filter((sequence): sequence is number => Number.isSafeInteger(sequence));
-      runtime.lastSequence = sequences.length > 0 ? Math.max(...sequences) : undefined;
-      runtime.seenSequences.clear();
-      runtime.pendingSequences.clear();
-      reconcileCandleTradeSnapshot(queryClient, symbol, snapshot, limit, runtime);
-      runtime.snapshotReady = true;
-      runtime.awaitingSnapshotRecovery = false;
-      resumeCandleClocks(symbol);
-      replaceSymbolTrades(queryClient, symbol, limit, snapshot);
-      return;
-    }
-    if (frame.type !== "update" || !frame.data) return;
-    const trade = frame.data as PublicTrade;
-    if (!Number.isSafeInteger(trade.sequence)) return;
-    if (runtime.awaitingSnapshotRecovery) return;
-    if (!runtime.snapshotReady) {
-      runtime.pendingSequences.add(trade.sequence);
-      return;
-    }
-    if (runtime.seenSequences.has(trade.sequence)) return;
-    // A replayed or skipped sequence means trades were lost: wait for a snapshot.
-    if (runtime.lastSequence !== undefined && trade.sequence !== runtime.lastSequence + 1) {
-      awaitSnapshot(queryClient, symbol, runtime);
-      return;
-    }
-    runtime.lastSequence = trade.sequence;
-    rememberTradeSequence(runtime, trade.sequence);
-    updateTradePriceOverlay(symbol, trade);
-    queryClient.setQueryData<Instrument>(["instrument", symbol], (old) =>
-      old ? applyTradePriceOverlay(old) : old,
-    );
-    queryClient.setQueryData<Page<PublicTrade>>(["symbol-trades", symbol, limit], (old) => {
-      if (!old) return old;
-      if (old.data.some((row) => row.sequence === trade.sequence)) return old;
-      return { data: [trade, ...old.data].slice(0, 400), page: old.page };
-    });
-    const result = updateCachedCandleQueries(queryClient, symbol, trade);
-    if (result.needsRecovery) {
-      runtime.pendingSequences.add(trade.sequence);
-      // The cached page cannot safely correct an older bucket (or be merged
-      // while its REST bootstrap is in flight). Make the canonical REST page
-      // authoritative once for active observers; requestCandleRecovery clears
-      // this triggering sequence so it cannot be double-counted afterward.
-      requestCandleRecovery(queryClient, symbol, runtime);
-    }
+    if (symbol) applySymbolTradeFrame(queryClient, symbol, limit, frame);
   }, () => {
     if (!symbol) return;
     awaitSnapshot(queryClient, symbol, candleRuntime(symbol));

@@ -497,7 +497,7 @@ export interface Inquiry {
 export interface InquiryMessage {
   id: string;
   ticket: string;
-  author_user_id: string;
+  author_user_id?: string;
   author_acl: string;
   body: string;
   created_at: string;
@@ -505,6 +505,7 @@ export interface InquiryMessage {
 
 export interface InquiryDetail extends Inquiry {
   messages: InquiryMessage[];
+  messages_page?: PageInfo;
 }
 
 export interface WsFrame<T = unknown> {

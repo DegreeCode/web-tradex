@@ -87,3 +87,48 @@ test("ordinary trigger cancellation preserves its existing sentence", () => {
   assert.equal(view.title, "예약 주문을 취소했어요");
   assert.equal(view.body, "ALPHA.M 예약 주문을 취소했어요. 묶여 있던 Credit이나 주식은 다시 쓸 수 있어요.");
 });
+
+
+test("trigger activation reports an attempt with an informational tone, including backend prose", () => {
+  for (const [body, title] of [
+    ["ALPHA.M TRIGGER_ACTIVATED", "TRIGGER_ACTIVATED"],
+    ["ALPHA.M 발동 조건을 만족해 체결을 시도합니다. 체결 결과는 주문 상태에서 확인하세요.", "예약 주문 실행 시도"],
+  ]) {
+    const view = presentNotification(notification(body, title));
+    assert.equal(view.title, "예약 주문 실행을 시도해요");
+    assert.equal(view.symbol, "ALPHA.M");
+    assert.equal(view.tone, "info");
+    assert.equal(view.body, "ALPHA.M 예약 주문의 조건이 충족돼 체결을 시도해요. 체결 결과는 주문 상태에서 확인해주세요.");
+  }
+});
+
+test("deferred trigger retries preserve the symbol and localize the reason in token and backend prose bodies", () => {
+  for (const [body, title] of [
+    ["ALPHA.M TRIGGER_RETRY_DEFERRED: SLIPPAGE_EXCEEDED", "TRIGGER_RETRY_DEFERRED"],
+    ["ALPHA.M 허용 슬리피지를 초과해 체결을 기다립니다.: SLIPPAGE_EXCEEDED", "예약 주문 체결 대기"],
+    ["ALPHA.M TRIGGER_RETRY_DEFERRED: SLIPPAGE_EXCEEDED", "Trigger retry deferred"],
+  ]) {
+    const view = presentNotification(notification(body, title));
+    assert.equal(view.title, "예약 주문의 체결을 기다리고 있어요");
+    assert.equal(view.symbol, "ALPHA.M");
+    assert.equal(view.label, "거래");
+    assert.equal(view.tone, "info");
+    assert.match(view.body, /사유: 허용한 슬리피지를 벗어났어요$/);
+  }
+  assert.equal(eventKeyFromTitle("예약 주문 체결 대기"), "TRIGGER_RETRY_DEFERRED");
+  assert.equal(eventKeyFromTitle("Trigger retry deferred"), "TRIGGER_RETRY_DEFERRED");
+  assert.equal(presentNotification(notification("", "TRIGGER_RETRY_DEFERRED")).title, "예약 주문의 체결을 기다리고 있어요");
+  const unscoped = presentNotification(notification("TRIGGER_RETRY_DEFERRED: SLIPPAGE_EXCEEDED"));
+  assert.equal(unscoped.symbol, undefined);
+  assert.match(unscoped.body, /사유: 허용한 슬리피지를 벗어났어요$/);
+});
+
+test("administrator-opened inquiries have a localized presentation", () => {
+  for (const body of ["inquiry.opened", "An administrator opened an inquiry for you."]) {
+    const view = presentNotification(notification(body, "Inquiry opened"));
+    assert.equal(view.title, "상담원이 문의를 시작했어요");
+    assert.equal(view.body, "상담원이 문의를 시작했어요. 고객센터에서 내용을 확인하고 답변해주세요.");
+    assert.equal(view.label, "고객센터");
+    assert.equal(view.tone, "info");
+  }
+});

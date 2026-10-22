@@ -1,10 +1,33 @@
-import type { InfiniteData, QueryClient } from "@tanstack/react-query";
+import { replaceEqualDeep, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 
 import { readSymbolMetadataCache } from "./symbol-metadata";
 import type { Disclosure, MarketSymbol, Page } from "./types";
 
 type Listing = Pick<MarketSymbol, "symbol" | "listing_sequence" | "listed_at">;
 const listingsByClient = new WeakMap<QueryClient, Map<string, Listing>>();
+
+export function mergeDisclosurePage(
+  queryClient: QueryClient, page: Page<Disclosure>, incoming: Disclosure[], symbol?: string, type?: string,
+): Page<Disclosure> {
+  const data = currentDisclosures(queryClient, page.data, symbol);
+  const oldest = data.at(-1)?.occurred_at;
+  const rows = new Map(data.map((row) => [row.disclosure_id, row]));
+  let changed = data.length !== page.data.length;
+  for (const row of incoming) {
+    if (symbol && row.symbol !== symbol || type && row.type !== type) continue;
+    // Older rows belong to cursor pagination, not the live head of the list.
+    if (oldest && Date.parse(row.occurred_at) < Date.parse(oldest)) continue;
+    const existing = rows.get(row.disclosure_id);
+    const merged = replaceEqualDeep(existing, row);
+    if (merged === existing) continue;
+    rows.set(row.disclosure_id, merged);
+    changed = true;
+  }
+  if (!changed) return page;
+  return { ...page, data: [...rows.values()].sort((a, b) =>
+    Date.parse(b.occurred_at) - Date.parse(a.occurred_at) || b.disclosure_id.localeCompare(a.disclosure_id),
+  ) };
+}
 
 /** Server reads are scoped to a listing; cached socket rows must be too. */
 export function currentDisclosures(

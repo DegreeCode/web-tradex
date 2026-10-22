@@ -9,6 +9,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { apiData, apiPage, buildQuery, deleteData, postIdempotentData } from "../api";
+import { invalidateBatched } from "../query-batch";
 import type { Account, Nav, NavPoint, NavRange, Portfolio, Position } from "../types";
 import { usePrivateStaleTime, useSocketStatus, privateStaleTime } from "./socket";
 
@@ -76,7 +77,7 @@ export function useCreateAccount() {
   return useMutation({
     mutationFn: () => postIdempotentData<Account>("/api/v1/me/accounts", {}),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      invalidateBatched(queryClient, [["accounts"], ["portfolio"], ["nav"]]);
     },
   });
 }
@@ -86,8 +87,7 @@ export function useDeleteAccount() {
   return useMutation({
     mutationFn: (accountId: string) => deleteData<{ status: string }>(`/api/v1/me/accounts/${encodeURIComponent(accountId)}`),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      invalidateBatched(queryClient, [["accounts"], ["portfolio"], ["nav"]]);
     },
   });
 }

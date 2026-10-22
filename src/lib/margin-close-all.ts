@@ -78,7 +78,7 @@ export function marginClosureFailureState(error: unknown): "failed" | "unknown" 
 export function canRetryMarginClosure(attempt: MarginClosureAttempt): boolean {
   if (attempt.state !== "unknown" || !(attempt.error instanceof ApiError)) return false;
   const { status, code } = attempt.error;
-  return !(status >= 400 && status < 500 && code !== "IDEMPOTENCY_KEY_REUSED");
+  return !(status >= 400 && status < 500 && code !== "IDEMPOTENCY_KEY_REUSED" && code !== "IDEMPOTENCY_IN_PROGRESS");
 }
 
 /** One request per pending position. Partial fills are never automatically retried. */
@@ -98,6 +98,7 @@ export async function executeMarginClosures(
       const result = await closePosition(attempt.position);
       checkCurrent(isCurrent);
       if (result?.position_id !== attempt.position.position_id ||
+        result.account_id !== attempt.position.account_id ||
         (result.status !== "OPEN" && result.status !== "CLOSED")) {
         throw new Error("청산 결과를 확인할 수 없어요");
       }

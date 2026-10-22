@@ -51,6 +51,8 @@ class SocketProxy implements StreamSocket {
   readonly channels = new Map<string, number>();
   retains = 0;
   private status: WsStatus = "closed";
+  private deliveryEpoch = 0;
+  private deliverySuspended = false;
   private readonly frameHandlers = new Set<FrameHandler>();
   private readonly statusHandlers = new Set<StatusHandler>();
   private readonly gapHandlers = new Set<GapHandler>();
@@ -98,6 +100,10 @@ class SocketProxy implements StreamSocket {
     this.owner.unsubscribe(channel);
   }
 
+  resubscribe(channel: string): void {
+    if (this.kind === "public" && this.channels.has(channel)) this.owner.resubscribe(channel);
+  }
+
   retain(): () => void {
     if (this.kind !== "private") return () => {};
     this.retains += 1;
@@ -112,23 +118,46 @@ class SocketProxy implements StreamSocket {
   }
 
   emitFrame(frame: WsFrame): void {
-    for (const handler of this.frameHandlers) handler(frame);
+    if (this.deliverySuspended) return;
+    const epoch = this.deliveryEpoch;
+    for (const handler of [...this.frameHandlers]) {
+      if (epoch !== this.deliveryEpoch) break;
+      handler(frame);
+    }
   }
 
   emitGap(stream: string): void {
-    for (const handler of this.gapHandlers) handler(stream);
+    if (this.deliverySuspended) return;
+    const epoch = this.deliveryEpoch;
+    for (const handler of [...this.gapHandlers]) {
+      if (epoch !== this.deliveryEpoch) break;
+      handler(stream);
+    }
+  }
+
+  suspendDelivery(): void {
+    this.deliveryEpoch += 1;
+    this.deliverySuspended = true;
+  }
+
+  resumeDelivery(): void {
+    this.deliverySuspended = false;
   }
 
   setStatus(status: WsStatus): void {
     if (this.status === status) return;
     this.status = status;
-    for (const handler of this.statusHandlers) handler(status);
+    const epoch = this.deliveryEpoch;
+    for (const handler of [...this.statusHandlers]) {
+      if (epoch !== this.deliveryEpoch) break;
+      handler(status);
+    }
   }
 }
 
 /** This tab's own connections, used when the shared worker can't be. */
 class DirectBackend {
-  private publicSocket: DirectSocket;
+  private readonly publicSocket: DirectSocket;
   private privateSocket: DirectSocket;
   private readonly unwire: Record<WsKind, () => void> = { public: () => {}, private: () => {} };
   private privateRelease: (() => void) | null = null;
@@ -150,6 +179,10 @@ class DirectBackend {
     this.publicSocket.unsubscribe(channel);
   }
 
+  resubscribe(channel: string): void {
+    this.publicSocket.resubscribe(channel);
+  }
+
   retain(): void {
     this.privateRelease ??= this.privateSocket.retain();
   }
@@ -161,27 +194,33 @@ class DirectBackend {
 
   resetPrivate(): void {
     const held = this.privateRelease !== null;
-    this.privateSocket.close();
     this.unwire.private();
+    this.privateSocket.close();
     this.privateRelease = null;
     this.privateSocket = this.open("private");
     if (held) this.retain();
   }
 
   dispose(): void {
-    this.publicSocket.close();
-    this.privateSocket.close();
     this.unwire.public();
     this.unwire.private();
+    this.publicSocket.close();
+    this.privateSocket.close();
   }
 
   private open(kind: WsKind): DirectSocket {
-    const socket = this.createSocket(kind, kind === "private" ? this.privateHooks : {});
+    let active = true;
+    const hooks = kind === "private" ? {
+      ...this.privateHooks,
+      onAuthFailure: () => { if (active) this.privateHooks.onAuthFailure?.(); },
+    } : {};
+    const socket = this.createSocket(kind, hooks);
     const proxy = this.proxies[kind];
-    const offFrame = socket.onFrame((frame) => proxy.emitFrame(frame));
-    const offStatus = socket.onStatus((status) => proxy.setStatus(status));
-    const offGap = socket.onGap((stream) => proxy.emitGap(stream));
+    const offFrame = socket.onFrame((frame) => { if (active) proxy.emitFrame(frame); });
+    const offStatus = socket.onStatus((status) => { if (active) proxy.setStatus(status); });
+    const offGap = socket.onGap((stream) => { if (active) proxy.emitGap(stream); });
     this.unwire[kind] = () => {
+      active = false;
       offFrame();
       offStatus();
       offGap();
@@ -217,6 +256,9 @@ export class SharedSockets {
   private port: ClientPort | null = null;
   private direct: DirectBackend | null = null;
   private welcomed = false;
+  private privateGeneration: number | null = null;
+  private resetId = 0;
+  private privateSuspended = false;
   private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastTickAt: number | null = null;
@@ -245,8 +287,17 @@ export class SharedSockets {
 
   /** Drops the private connection of a session that ended; holders reconnect with a new ticket. */
   resetPrivate(): void {
-    if (this.direct) this.direct.resetPrivate();
-    else this.send({ op: "reset-private" });
+    this.privateSuspended = true;
+    this.proxies.private.suspendDelivery();
+    if (this.direct) {
+      this.direct.resetPrivate();
+      this.privateSuspended = false;
+      this.proxies.private.resumeDelivery();
+    } else {
+      this.proxies.private.setStatus("closed");
+      this.resetId += 1;
+      this.send({ op: "reset-private", resetId: this.resetId });
+    }
   }
 
   dispose(): void {
@@ -264,6 +315,11 @@ export class SharedSockets {
   unsubscribe(channel: string): void {
     if (this.direct) this.direct.unsubscribe(channel);
     else this.send({ op: "unsubscribe", channel });
+  }
+
+  resubscribe(channel: string): void {
+    if (this.direct) this.direct.resubscribe(channel);
+    else this.send({ op: "resubscribe", channel });
   }
 
   retain(): void {
@@ -287,6 +343,7 @@ export class SharedSockets {
     const port = connection.port;
     this.port = port;
     this.welcomed = false;
+    this.privateGeneration = null;
     this.awaitingPongSince = null;
     connection.onError(() => {
       if (this.port === port) this.fallBack();
@@ -303,17 +360,31 @@ export class SharedSockets {
   /** Tells the worker who this tab is and everything it is holding. */
   private introduce(): void {
     this.send({ op: "hello", version: WS_PROTOCOL_VERSION, visible: pageVisible() });
+    if (this.privateSuspended) this.send({ op: "reset-private", resetId: this.resetId });
     for (const channel of this.proxies.public.channels.keys()) this.send({ op: "subscribe", channel });
     if (this.proxies.private.retains > 0) this.send({ op: "retain" });
   }
 
   private receive(message: HubMessage): void {
+    if (("kind" in message && message.kind === "private") ||
+        message.type === "session-expired" || message.type === "ticket-request") {
+      if (this.privateSuspended || message.generation !== this.privateGeneration) return;
+    }
     switch (message.type) {
       case "welcome":
         this.welcomed = true;
         this.clearWelcomeTimer();
         this.proxies.public.setStatus(message.status.public);
-        this.proxies.private.setStatus(message.status.private);
+        this.privateGeneration = message.generation;
+        if (!this.privateSuspended) this.proxies.private.setStatus(message.status.private);
+        break;
+      case "private-reset":
+        if (this.privateGeneration !== null && message.generation < this.privateGeneration) break;
+        this.privateGeneration = message.generation;
+        if (message.resetId === this.resetId) this.privateSuspended = false;
+        this.proxies.private.suspendDelivery();
+        this.proxies.private.setStatus("closed");
+        if (!this.privateSuspended) this.proxies.private.resumeDelivery();
         break;
       case "incompatible":
         this.fallBack();
@@ -346,11 +417,12 @@ export class SharedSockets {
 
   private async issueTicket(id: number): Promise<void> {
     const port = this.port;
+    const generation = this.privateGeneration;
     try {
       const ticket = await this.requestTicket();
-      if (this.port === port) this.send({ op: "ticket-result", id, ticket });
+      if (this.port === port && this.privateGeneration === generation && !this.privateSuspended) this.send({ op: "ticket-result", id, ticket });
     } catch (error) {
-      if (this.port === port) this.send({ op: "ticket-result", id, error: ticketError(error) });
+      if (this.port === port && this.privateGeneration === generation && !this.privateSuspended) this.send({ op: "ticket-result", id, error: ticketError(error) });
     }
   }
 
@@ -379,6 +451,8 @@ export class SharedSockets {
       onAuthFailure: this.onSessionExpired,
     });
     this.direct = direct;
+    this.privateSuspended = false;
+    this.proxies.private.resumeDelivery();
     for (const channel of this.proxies.public.channels.keys()) direct.subscribe(channel);
     if (this.proxies.private.retains > 0) direct.retain();
   }

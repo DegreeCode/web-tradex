@@ -1,8 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiData } from "./api";
-import { fmtPercentFromPPM, isDecimalInput, ppmFromPercent } from "./format";
+import { ApiError, apiData, errorMessage } from "./api";
+import { addDecimal, compareDecimal, divideDecimal, fmtPercentFromPPM, isDecimalInput, isPositiveDecimal, multiplyDecimal, ppmFromPercent } from "./format";
+import { isQuotedPrice } from "./instruments";
 import { useSignedIn } from "./session-mode";
 
 export interface ListingEvaluationCriteria {
@@ -138,6 +139,59 @@ export function transferAllowed(
   return (
     sameOwner || !policy || policy === "BOTH" || policy === `${asset}_ONLY`
   );
+}
+
+export interface TransferCost {
+  fee: string;
+  requiredCredit: string;
+}
+
+/** Stock quotes are rounded public prices; the server uses its exact curve spot. */
+export function estimateTransferCost(
+  asset: "CREDIT" | "STOCK",
+  value: string,
+  sameOwner: boolean,
+  feePpm: number | undefined,
+  spotPrice?: string,
+): TransferCost | null {
+  if (!isDecimalInput(value, asset === "CREDIT" ? 16 : 8) || !isPositiveDecimal(value)) return null;
+  const rate = sameOwner ? 0 : feePpm;
+  if (rate === undefined || !Number.isSafeInteger(rate) || rate < 0) return null;
+  let fee = "0";
+  if (rate > 0) {
+    const precision = (text: string) => text.split(".")[1]?.length ?? 0;
+    let base = value;
+    if (asset === "STOCK") {
+      if (!isQuotedPrice(spotPrice)) return null;
+      base = multiplyDecimal(value, spotPrice, precision(value) + precision(spotPrice));
+    }
+    const numerator = multiplyDecimal(base, String(rate), precision(base));
+    fee = divideDecimal(numerator, "1000000", 16);
+    // The backend rounds fees upward to the next 10^-16 Credit atom.
+    if (compareDecimal(multiplyDecimal(fee, "1000000", 16), numerator) < 0) {
+      fee = addDecimal(fee, "0.0000000000000001");
+    }
+  }
+  return { fee, requiredCredit: asset === "CREDIT" ? addDecimal(value, fee) : fee };
+}
+
+export function transferCreditError(
+  available: string,
+  cost: TransferCost | null,
+  asset: "CREDIT" | "STOCK",
+  amount: string,
+): string | null {
+  if (!cost) {
+    // Fee estimates are advisory; unavailable quotes must not block transfers.
+    return asset === "CREDIT" && compareDecimal(amount, available) > 0 ? "Credit 잔액이 부족해요" : null;
+  }
+  return compareDecimal(cost.requiredCredit, available) > 0 ? "송금 수수료를 포함한 Credit 잔액이 부족해요" : null;
+}
+
+export function transferErrorMessage(error: unknown): string {
+  return error instanceof ApiError && error.code === "INSUFFICIENT_CREDIT"
+    ? "송금 수수료를 포함한 Credit 잔액이 부족해요"
+    : errorMessage(error);
 }
 
 export function iconPolicyError(

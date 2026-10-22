@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
   loadNotificationPage,
+  notificationCacheNeedsRefresh,
   markNotificationsReadInCaches,
   notificationIdsInCaches,
   updateNotificationCaches,
@@ -138,5 +139,18 @@ test("a read-all snapshot preserves notifications that arrive after the request 
   updateNotificationCaches(client, notification(4));
   markNotificationsReadInCaches(client, ids);
   assert.deepEqual(client.getQueryData<Page<Notification>>(["notifications", "unread"])?.data.map((row) => row.notification_id), ["ntf_4"]);
+  client.clear();
+});
+
+
+test("read-all clears overflow recovery as well as unread rows", () => {
+  const client = new QueryClient();
+  const key = ["notifications", "list", "unread", 2];
+  client.setQueryData(key, infinite(page([notification(2), notification(1)])));
+  updateNotificationCaches(client, notification(3));
+  markNotificationsReadInCaches(client, "all");
+  const result = client.getQueryData<InfiniteData<Page<Notification>>>(key)!;
+  assert.deepEqual(result.pages, [page([])]);
+  assert.equal(notificationCacheNeedsRefresh(result), false);
   client.clear();
 });

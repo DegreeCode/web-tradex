@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { UTCTimestamp } from "lightweight-charts";
-import { formatChartTime } from "../src/lib/chart-time";
+import type { TickMarkType, UTCTimestamp } from "lightweight-charts";
+import { formatChartTime, formatChartTickMark } from "../src/lib/chart-time";
 import type { CandleInterval } from "../src/lib/types";
 
+// lightweight-charts is ESM-only; keep the harness free of its browser runtime.
+const tickTypes = { Year: 0, Month: 1, DayOfMonth: 2, Time: 3, TimeWithSeconds: 4 } satisfies Record<string, TickMarkType>;
 const timestamp = (value: string) => Date.parse(value) / 1_000 as UTCTimestamp;
 const time = timestamp("2026-10-14T01:02:03Z");
 
@@ -55,3 +57,19 @@ test("invalid times keep the existing placeholder", () => {
     assert.equal(formatChartTime(invalid, "1y"), "-");
   }
 });
+
+for (const [instant, labels] of [
+  ["2026-10-13T14:59:59Z", ["2026년", "10월", "13일", "23:59", "23:59:59"]],
+  ["2026-10-13T15:00:00Z", ["2026년", "10월", "14일", "00:00", "00:00:00"]],
+  ["2026-10-31T14:59:59Z", ["2026년", "10월", "31일", "23:59", "23:59:59"]],
+  ["2026-10-31T15:00:00Z", ["2026년", "11월", "1일", "00:00", "00:00:00"]],
+  ["2026-12-31T14:59:59Z", ["2026년", "12월", "31일", "23:59", "23:59:59"]],
+  ["2026-12-31T15:00:00Z", ["2027년", "1월", "1일", "00:00", "00:00:00"]],
+] as const) {
+  test(`axis tick types follow Seoul calendar at ${instant}`, () => {
+    for (const [index, type] of [tickTypes.Year, tickTypes.Month, tickTypes.DayOfMonth,
+      tickTypes.Time, tickTypes.TimeWithSeconds].entries()) {
+      assert.equal(formatChartTickMark(timestamp(instant), type), labels[index]);
+    }
+  });
+}

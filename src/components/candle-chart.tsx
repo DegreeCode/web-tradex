@@ -5,9 +5,9 @@ import { useMemo } from "react";
 import {
   type ChartSeriesType,
   LightweightCandleChart,
-  type LightweightCandlePoint,
 } from "@/components/lightweight-chart";
-import { decimalPrecision, toNumber } from "@/lib/format";
+import { decimalPrecision } from "@/lib/format";
+import { buildCandleChartData } from "@/lib/chart-updates";
 import type { ChartHolding } from "@/lib/chart-holding";
 import type { ChartOrderLine } from "@/lib/chart-orders";
 import type { Candle, CandleInterval } from "@/lib/types";
@@ -35,51 +35,9 @@ export function CandleChart({
   orders?: ChartOrderLine[];
   curvePrice?: string;
 }) {
-  const { data, pricePrecision } = useMemo(() => {
-    let precision = Math.max(
-      decimalPrecision(curvePrice),
-      ...(orders ?? []).map((order) => decimalPrecision(order.price)),
-    );
-    // Candle pages are newest-first; the chart needs oldest-first. Convert in
-    // one pass without sorting, since candle-data guarantees the order.
-    const data: LightweightCandlePoint[] = [];
-    for (let index = candles.length - 1; index >= 0; index -= 1) {
-      const candle = candles[index];
-      precision = Math.max(
-        precision,
-        decimalPrecision(candle.open),
-        decimalPrecision(candle.high),
-        decimalPrecision(candle.low),
-        decimalPrecision(candle.close),
-      );
-      const time = Math.floor(Date.parse(candle.timestamp) / 1_000);
-      if (!Number.isFinite(time)) continue;
-      data.push({
-        time: time as LightweightCandlePoint["time"],
-        timestamp: candle.timestamp,
-        open: toNumber(candle.open),
-        high: toNumber(candle.high),
-        low: toNumber(candle.low),
-        close: toNumber(candle.close),
-        volume: candle.volume_shares,
-        volumeValue: toNumber(candle.volume_shares),
-        tradeCount: candle.trade_count,
-        openText: candle.open,
-        highText: candle.high,
-        lowText: candle.low,
-        closeText: candle.close,
-        synthetic: candle.synthetic,
-      });
-    }
-    // The chart throws on out-of-order or repeated times. Pages are already
-    // ordered, so this check is a single scan and the sort a rare fallback.
-    const ordered = data.every((point, index) => index === 0 || point.time > data[index - 1].time);
-    if (!ordered) data.sort((left, right) => left.time - right.time);
-    return {
-      data: ordered ? data : data.filter((point, index) => index === 0 || point.time !== data[index - 1].time),
-      pricePrecision: precision,
-    };
-  }, [candles, orders, curvePrice]);
+  const { data, pricePrecision: candlePrecision } = useMemo(() => buildCandleChartData(candles), [candles]);
+  const pricePrecision = Math.max(candlePrecision, decimalPrecision(curvePrice),
+    ...(orders ?? []).map(order => decimalPrecision(order.price)));
 
   return (
     <LightweightCandleChart

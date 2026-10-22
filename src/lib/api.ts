@@ -2,6 +2,13 @@ import type { Page } from "./types";
 
 const SESSION_EXPIRED_EVENT = "tradex:session-expired";
 const LINKED_NETWORK_CHANGED_EVENT = "tradex:linked-network-changed";
+let sessionGeneration = 0;
+
+/** Old requests may reject their callers, but cannot control a newer session. */
+export function advanceSessionGeneration(): void {
+  sessionGeneration += 1;
+}
+
 const MAX_TIMER_MS = 2_147_483_647;
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
@@ -195,6 +202,7 @@ interface ErrorEnvelope {
 }
 
 async function request(path: string, options: RequestOptions = {}): Promise<unknown> {
+  const generation = sessionGeneration;
   const method = options.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json" };
   const hasBody = options.body !== undefined;
@@ -246,10 +254,11 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
     // AUTH_FAILED is a rejected proof (passkey step-up, device-link approval,
     // recovery key), not an ended session; signing out on it would drop a
     // valid session after a cancelled prompt.
-    if (response.status === 401 && code === "SESSION_INVALID" && typeof window !== "undefined") {
-      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    if (generation === sessionGeneration && response.status === 401 && code === "SESSION_INVALID") {
+      markSessionExpired();
     }
     if (
+      generation === sessionGeneration &&
       response.status === 403 &&
       code === "SESSION_SCOPE_FORBIDDEN" &&
       envelope.error?.details?.reason === "NETWORK_MISMATCH" &&
@@ -307,6 +316,7 @@ export function onLinkedNetworkChanged(handler: () => void): () => void {
 
 /** Notify the authenticated shell that an authenticated transport was rejected. */
 export function markSessionExpired(): void {
+  advanceSessionGeneration();
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 

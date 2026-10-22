@@ -261,11 +261,18 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
     tone: "neutral",
   },
   TRIGGER_ACTIVATED: {
-    title: "예약 주문이 실행됐어요",
+    title: "예약 주문 실행을 시도해요",
     label: "거래",
-    body: (symbol) => `${symbolPrefix(symbol)}예약 주문의 조건이 충족돼 주문을 실행했어요.`,
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문의 조건이 충족돼 체결을 시도해요. 체결 결과는 주문 상태에서 확인해주세요.`,
     icon: ArrowRight,
-    tone: "success",
+    tone: "info",
+  },
+  TRIGGER_RETRY_DEFERRED: {
+    title: "예약 주문의 체결을 기다리고 있어요",
+    label: "거래",
+    body: (symbol) => `${symbolPrefix(symbol)}예약 주문의 체결을 기다리고 있어요. 조건이 맞으면 다시 시도해요.`,
+    icon: CalendarClock,
+    tone: "info",
   },
   "margin.warning": {
     title: "마진 포지션이 위험해요",
@@ -288,6 +295,13 @@ export const EVENT_CONFIG: Record<string, NotificationEventConfig> = {
     body: (symbol) => `${symbolPrefix(symbol)}포지션의 강제청산이 끝났어요. 마진 화면에서 정산 결과를 확인해보세요.`,
     icon: ShieldCheck,
     tone: "danger",
+  },
+  "inquiry.opened": {
+    title: "상담원이 문의를 시작했어요",
+    label: "고객센터",
+    body: () => "상담원이 문의를 시작했어요. 고객센터에서 내용을 확인하고 답변해주세요.",
+    icon: LifeBuoy,
+    tone: "info",
   },
   "inquiry.replied": {
     title: "문의에 답변이 달렸어요",
@@ -406,6 +420,12 @@ const TITLE_EVENT_KEYS: Record<string, string> = {
   "symbol resumed": "SYMBOL_RESUMED",
   "trade executed": "TRADE_EXECUTED",
   "trigger amended": "TRIGGER_AMENDED",
+  "trigger_activated": "TRIGGER_ACTIVATED",
+  "trigger_retry_deferred": "TRIGGER_RETRY_DEFERRED",
+  "trigger retry deferred": "TRIGGER_RETRY_DEFERRED",
+  "예약 주문 체결 대기": "TRIGGER_RETRY_DEFERRED",
+  "예약 주문 실행 시도": "TRIGGER_ACTIVATED",
+  "예약 주문이 실행됐어요": "TRIGGER_ACTIVATED",
   "owner trade disclosure": "OWNER_TRADE",
   "owner stock transfer disclosure": "OWNER_STOCK_TRANSFER",
   "transfer updated": "transfer.updated",
@@ -418,6 +438,7 @@ const TITLE_EVENT_KEYS: Record<string, string> = {
   "delist cancelled": "DELIST_CANCELED",
   "symbol delisted": "DELISTED",
   "inquiry reply": "inquiry.replied",
+  "inquiry opened": "inquiry.opened",
   // Titles earlier app versions showed, which may still come back as titles.
   "종목 아이콘 게시가 중단됐어요": "ICON_REVOKED",
   "종목 아이콘 승인이 거절됐어요": "ICON_REJECTED",
@@ -491,6 +512,17 @@ export function notificationEventConfig(event: string | undefined): Notification
 
 export function parseNotificationBody(body: string): ParsedNotificationBody {
   const trimmed = body.trim();
+  // These backend events use prose instead of an event token in the body.
+  const attempt = /^(?:(?<symbol>[^\s:]+)\s+)?발동 조건을 만족해 체결을 시도합니다\. 체결 결과는 주문 상태에서 확인하세요\.(?:\s*:\s*(?<reason>.+))?$/.exec(trimmed);
+  const deferred = /^(?:(?<symbol>[^\s:]+)\s+)?허용 슬리피지를 초과해 체결을 기다립니다\.(?:\s*:\s*(?<reason>.+))?$/.exec(trimmed);
+  if (attempt || deferred) {
+    const groups = (attempt ?? deferred)?.groups;
+    return {
+      eventKey: attempt ? "TRIGGER_ACTIVATED" : "TRIGGER_RETRY_DEFERRED",
+      symbol: groups?.symbol,
+      reason: groups?.reason?.trim() ?? (deferred ? "SLIPPAGE_EXCEEDED" : undefined),
+    };
+  }
   // "TRIGGER_FAILED: INSUFFICIENT_CREDIT" has no symbol; without this the
   // general pattern below reads the event as the symbol and the reason as the event.
   const unscoped = /^(?<event>[A-Za-z][A-Za-z0-9_.-]*)\s*:\s*(?<reason>.+)$/.exec(trimmed);

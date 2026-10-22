@@ -116,7 +116,9 @@ test("mounted guest clock schedules boundaries, pauses hidden, catches up and cl
     h.clock.hide(false);
     assert.equal(h.data().data.length, MAX_MATERIALIZED_CANDLE_BUCKETS);
     assert.equal(h.data().data[0].timestamp, new Date(h.clock.time - CANDLE_CLOCK_GRACE_MS).toISOString());
-    assert.equal(h.data().page.has_more, false);
+    assert.equal(h.data().page.has_more, true);
+    assert.equal(h.data().history?.length, 1);
+    assert.equal(h.data().history?.[0].timestamp, "2026-10-14T00:00:00.000Z");
     assert.equal(h.fetches(), 0);
   } finally { h.cleanup(); }
   assert.equal(h.clock.timer, undefined);
