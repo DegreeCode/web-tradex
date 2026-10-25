@@ -42,6 +42,8 @@ const CHART_THEMES = {
 const DEFAULT_PRICE_PRECISION = 8;
 const VOLUME_PRECISION = 8;
 
+type PrimarySeries = ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time>;
+
 export interface LightweightLinePoint {
   time: UTCTimestamp;
   value: number;
@@ -88,14 +90,14 @@ interface LineChartProps {
 }
 
 function useCurvePriceLine(
-  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  seriesRef: React.RefObject<PrimarySeries | null>,
   hasData: boolean,
   height: number,
   curvePrice: string | undefined,
   seriesType?: ChartSeriesType,
 ) {
   const lineRef = useRef<{
-    series: ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time>;
+    series: PrimarySeries;
     line: IPriceLine;
   } | null>(null);
   useEffect(() => {
@@ -126,14 +128,14 @@ function useCurvePriceLine(
 }
 
 function useHoldingPriceLine(
-  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  seriesRef: React.RefObject<PrimarySeries | null>,
   hasData: boolean,
   height: number,
   averagePrice: string | undefined,
   seriesType?: ChartSeriesType,
 ) {
   const lineRef = useRef<{
-    series: ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time>;
+    series: PrimarySeries;
     line: IPriceLine;
   } | null>(null);
   useEffect(() => {
@@ -157,14 +159,14 @@ function useHoldingPriceLine(
 }
 
 function useOrderPriceLines(
-  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  seriesRef: React.RefObject<PrimarySeries | null>,
   hasData: boolean,
   height: number,
   orders: ChartOrderLine[],
   seriesType?: ChartSeriesType,
 ) {
   const linesRef = useRef<{
-    series: ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time>;
+    series: PrimarySeries;
     lines: Map<string, IPriceLine>;
   } | null>(null);
   useEffect(() => {
@@ -384,7 +386,7 @@ function useChartTheme(
 }
 
 function useChartPriceScale(
-  seriesRef: React.RefObject<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>,
+  seriesRef: React.RefObject<PrimarySeries | null>,
   hasData: boolean,
   height: number,
   seriesType?: ChartSeriesType,
@@ -463,6 +465,58 @@ function setupVolumePaneResizeSync(
   };
 }
 
+interface MountedChart<S extends PrimarySeries> {
+  chart: IChartApi;
+  series: S;
+  volumeSeries: ISeriesApi<"Histogram", Time>;
+  dispose: () => void;
+}
+
+/**
+ * Creates a chart with a primary series and a volume pane, sized to its
+ * container. The volume pane exists even while its data is empty, so a live
+ * trade never recreates or resets the chart.
+ */
+function mountChart<S extends PrimarySeries>(
+  container: HTMLElement,
+  height: number,
+  addPrimary: (chart: IChartApi) => S,
+  onHover: (time: number | null, param: MouseEventParams<Time>, series: S) => void,
+  onPlotWidth: (width: number) => void,
+): MountedChart<S> {
+  const chart = createChart(container, chartOptions(height));
+  const series = addPrimary(chart);
+  const volumeSeries = chart.addSeries(HistogramSeries, {
+    priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
+  }, 1);
+  const cleanupVolumeSync = setupVolumePaneResizeSync(chart.panes()[1], height);
+  const crosshairHandler = (param: MouseEventParams<Time>) => {
+    const time = param.time;
+    onHover(param.point && typeof time === "number" ? time : null, param, series);
+  };
+  chart.subscribeCrosshairMove(crosshairHandler);
+  chart.timeScale().subscribeSizeChange(onPlotWidth);
+  const resize = (width: number) => chart.applyOptions({ width: Math.max(1, Math.floor(width)), height });
+  resize(container.getBoundingClientRect().width || 320);
+  const resizeObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect.width;
+    if (width) resize(width);
+  });
+  resizeObserver.observe(container);
+  return {
+    chart,
+    series,
+    volumeSeries,
+    dispose: () => {
+      cleanupVolumeSync();
+      chart.unsubscribeCrosshairMove(crosshairHandler);
+      chart.timeScale().unsubscribeSizeChange(onPlotWidth);
+      resizeObserver.disconnect();
+      chart.remove();
+    },
+  };
+}
+
 export function LightweightLineChart({
   data,
   height,
@@ -503,48 +557,28 @@ export function LightweightLineChart({
     if (!hasData) return;
     const container = containerRef.current;
     if (!container) return;
-    const chart = createChart(container, chartOptions(height));
-    const series = chart.addSeries(AreaSeries, {
-      ...areaColors(colorRef.current),
-      lineWidth: 2,
-      lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
-      ...(pricePrecisionRef.current === undefined
-        ? {}
-        : { priceFormat: priceFormat(pricePrecisionRef.current) }),
-    });
-    // Keep the volume pane on the same chart instance even while its first
-    // dataset is empty, so a live trade never recreates/reset the chart.
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
-    }, 1);
-    const cleanupVolumeSync = setupVolumePaneResizeSync(chart.panes()[1], height);
-    const crosshairHandler = (param: MouseEventParams<Time>) => {
-      const time = param.time;
-      const point = param.seriesData.get(series);
-      if (!param.point || time === undefined || !point || !("value" in point) || typeof time !== "number") {
-        setHoveredTime(null);
-        return;
-      }
-      setHoveredTime(time);
-    };
-    chart.subscribeCrosshairMove(crosshairHandler);
-    chart.timeScale().subscribeSizeChange(setPlotWidth);
-    const resize = (width: number) => chart.applyOptions({ width: Math.max(1, Math.floor(width)), height });
-    resize(container.getBoundingClientRect().width || 320);
-    const resizeObserver = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width) resize(width);
-    });
-    resizeObserver.observe(container);
+    const { chart, series, volumeSeries, dispose } = mountChart(
+      container,
+      height,
+      (created) => created.addSeries(AreaSeries, {
+        ...areaColors(colorRef.current),
+        lineWidth: 2,
+        lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
+        ...(pricePrecisionRef.current === undefined
+          ? {}
+          : { priceFormat: priceFormat(pricePrecisionRef.current) }),
+      }),
+      (time, param, primary) => {
+        const point = param.seriesData.get(primary);
+        setHoveredTime(time !== null && point && "value" in point ? time : null);
+      },
+      setPlotWidth,
+    );
     chartRef.current = chart;
     seriesRef.current = series;
     volumeSeriesRef.current = volumeSeries;
     return () => {
-      cleanupVolumeSync();
-      chart.unsubscribeCrosshairMove(crosshairHandler);
-      chart.timeScale().unsubscribeSizeChange(setPlotWidth);
-      resizeObserver.disconnect();
-      chart.remove();
+      dispose();
       chartRef.current = null;
       seriesRef.current = null;
       volumeSeriesRef.current = null;
@@ -639,7 +673,7 @@ export function LightweightCandleChart({
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | ISeriesApi<"Area", Time> | null>(null);
+  const seriesRef = useRef<PrimarySeries | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram", Time> | null>(null);
   const previousRef = useRef<LightweightCandlePoint[]>([]);
   const previousVolumeRef = useRef<LightweightVolumePoint[]>([]);
@@ -665,53 +699,33 @@ export function LightweightCandleChart({
     if (!hasData) return;
     const container = containerRef.current;
     if (!container) return;
-    const chart = createChart(container, chartOptions(height));
-    const series = seriesType === "line"
-      ? chart.addSeries(AreaSeries, {
-          ...areaColors(lineColorRef.current),
-          lineWidth: 2,
-          lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
-          priceFormat: priceFormat(pricePrecisionRef.current),
-        })
-      : chart.addSeries(CandlestickSeries, {
-          upColor: UP_COLOR,
-          downColor: DOWN_COLOR,
-          borderUpColor: UP_COLOR,
-          borderDownColor: DOWN_COLOR,
-          wickUpColor: UP_COLOR,
-          wickDownColor: DOWN_COLOR,
-          priceFormat: priceFormat(pricePrecisionRef.current),
-        });
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume", precision: VOLUME_PRECISION, minMove: 10 ** -VOLUME_PRECISION },
-    }, 1);
-    const cleanupVolumeSync = setupVolumePaneResizeSync(chart.panes()[1], height);
-    const crosshairHandler = (param: MouseEventParams<Time>) => {
-      const time = param.time;
-      if (!param.point || time === undefined || typeof time !== "number") {
-        setHoveredTime(null);
-        return;
-      }
-      setHoveredTime(time);
-    };
-    chart.subscribeCrosshairMove(crosshairHandler);
-    chart.timeScale().subscribeSizeChange(setPlotWidth);
-    const resize = (width: number) => chart.applyOptions({ width: Math.max(1, Math.floor(width)), height });
-    resize(container.getBoundingClientRect().width || 320);
-    const resizeObserver = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width) resize(width);
-    });
-    resizeObserver.observe(container);
+    const { chart, series, volumeSeries, dispose } = mountChart<PrimarySeries>(
+      container,
+      height,
+      (created) => seriesType === "line"
+        ? created.addSeries(AreaSeries, {
+            ...areaColors(lineColorRef.current),
+            lineWidth: 2,
+            lastPriceAnimation: LastPriceAnimationMode.OnDataUpdate,
+            priceFormat: priceFormat(pricePrecisionRef.current),
+          })
+        : created.addSeries(CandlestickSeries, {
+            upColor: UP_COLOR,
+            downColor: DOWN_COLOR,
+            borderUpColor: UP_COLOR,
+            borderDownColor: DOWN_COLOR,
+            wickUpColor: UP_COLOR,
+            wickDownColor: DOWN_COLOR,
+            priceFormat: priceFormat(pricePrecisionRef.current),
+          }),
+      (time) => setHoveredTime(time),
+      setPlotWidth,
+    );
     chartRef.current = chart;
     seriesRef.current = series;
     volumeSeriesRef.current = volumeSeries;
     return () => {
-      cleanupVolumeSync();
-      chart.unsubscribeCrosshairMove(crosshairHandler);
-      chart.timeScale().unsubscribeSizeChange(setPlotWidth);
-      resizeObserver.disconnect();
-      chart.remove();
+      dispose();
       chartRef.current = null;
       seriesRef.current = null;
       volumeSeriesRef.current = null;

@@ -1,10 +1,10 @@
 import { isApiError } from "./api";
 import { fmtCredit, fmtPercentFromPPM, fmtQuantity } from "./format";
 
-export type MarginCapacityDisplay = "BINARY" | "LEVEL" | "DETAILED";
-export type MarginCapacityLevel = "LOW" | "NORMAL" | "HIGH" | "UNAVAILABLE";
+type MarginCapacityDisplay = "BINARY" | "LEVEL" | "DETAILED";
+type MarginCapacityLevel = "LOW" | "NORMAL" | "HIGH" | "UNAVAILABLE";
 export type MarginCapacitySide = "LONG" | "SHORT";
-export type MarginCapacityTone = "available" | "low" | "unavailable" | "unknown";
+type MarginCapacityTone = "available" | "low" | "unavailable" | "unknown";
 
 const LEVEL_LABELS = {
   LOW: "적음",
@@ -22,9 +22,9 @@ const REASON_LABELS = {
   CAP_REACHED: "한도에 도달했어요",
 } as const;
 
-export type MarginCapacityReason = keyof typeof REASON_LABELS;
+type MarginCapacityReason = keyof typeof REASON_LABELS;
 
-export interface MarginCapacityDetail {
+interface MarginCapacityDetail {
   remainingText: string | null;
   capacityText: string | null;
   notionalText: string | null;

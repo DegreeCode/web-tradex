@@ -80,6 +80,7 @@ const MESSAGES: Record<string, string> = {
   ORIGIN_INVALID: "허용되지 않은 접근이에요",
   ORIGIN_FORBIDDEN: "허용되지 않은 접근이에요",
   CSRF_INVALID: "보안 토큰이 만료됐어요. 새로고침 후 다시 시도해주세요",
+  STEP_UP_REQUIRED: "보안을 위해 패스키로 다시 인증해주세요",
   RECOVERY_RESTRICTED: "복구 모드에서는 사용할 수 없어요",
   DEVICE_LINK_INVALID: "연결 요청을 찾을 수 없어요. 새 코드를 받아주세요",
   DEVICE_LINK_EXPIRED: "코드가 만료됐어요. 새 코드를 받아주세요",
@@ -134,6 +135,9 @@ export function errorMessage(error: unknown): string {
     return "접속 위치가 바뀌어 이 연결을 더 이상 쓸 수 없어요";
   }
   if (error instanceof ApiError) {
+    if (error.code === "INVALID_REQUEST" && error.details?.field === "deposit_credit" && error.details.reason === "too_large") {
+      return "예치 금액이 발행 가능한 주식 수량 한도를 넘어요. 금액을 줄여주세요";
+    }
     const message = Object.hasOwn(MESSAGES, error.code) ? MESSAGES[error.code] : undefined;
     return message || error.message || "요청을 처리하지 못했어요";
   }
@@ -166,10 +170,10 @@ export function csrfToken(): string | null {
 }
 
 function newIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  // randomUUID needs a secure context; getRandomValues does not, and both are
+  // unpredictable, unlike Math.random.
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function buildQuery(params: Record<string, string | number | undefined | null>): string {
@@ -201,7 +205,49 @@ interface ErrorEnvelope {
   };
 }
 
+type StepUpHandler = () => Promise<void>;
+
+const STEP_UP_PATH = "/api/v1/auth/step-up/";
+let stepUpHandler: StepUpHandler | null = null;
+let pendingStepUp: Promise<void> | null = null;
+
+/**
+ * Installs the passkey re-authentication run when the server answers
+ * STEP_UP_REQUIRED. The refused request is then sent once more: the server
+ * checks step-up before claiming an idempotency key, so the retry keeps its key.
+ */
+export function configureStepUp(handler: StepUpHandler | null): () => void {
+  stepUpHandler = handler;
+  return () => {
+    if (stepUpHandler === handler) stepUpHandler = null;
+  };
+}
+
+/** Concurrent refusals share one passkey prompt. */
+function stepUp(handler: StepUpHandler): Promise<void> {
+  pendingStepUp ??= handler().finally(() => {
+    pendingStepUp = null;
+  });
+  return pendingStepUp;
+}
+
 async function request(path: string, options: RequestOptions = {}): Promise<unknown> {
+  try {
+    return await requestOnce(path, options);
+  } catch (error) {
+    const handler = stepUpHandler;
+    if (!handler || !isApiError(error, "STEP_UP_REQUIRED") || path.startsWith(STEP_UP_PATH)) throw error;
+    try {
+      await stepUp(handler);
+    } catch (stepUpError) {
+      // A declined prompt leaves the original refusal; a server answer wins.
+      throw stepUpError instanceof ApiError ? stepUpError : error;
+    }
+    return requestOnce(path, options);
+  }
+}
+
+async function requestOnce(path: string, options: RequestOptions): Promise<unknown> {
   const generation = sessionGeneration;
   const method = options.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json" };

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { apiData, apiPage, ApiError, clearIdempotencyKeys, errorMessage, postIdempotentData } from "../src/lib/api";
+import {
+  apiData, apiPage, ApiError, clearIdempotencyKeys, configureStepUp, errorMessage, postIdempotentData,
+} from "../src/lib/api";
 
 test("a longer request timeout survives the default cutoff and still aborts at its deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -175,3 +177,53 @@ for (const [status, code, details, event] of [
     assert.equal(events, 1, "the current session's refusal still reaches auth");
   });
 }
+
+const stepUpRequired = () => Response.json(
+  { error: { code: "STEP_UP_REQUIRED", message: "passkey step-up required", details: { max_age_seconds: 300 } } },
+  { status: 403 },
+);
+
+test("concurrent step-up refusals share one prompt and resend each mutation with its key", async (t) => {
+  t.after(clearIdempotencyKeys);
+  const attempts = new Map<string, (string | undefined)[]>();
+  let stepUps = 0;
+  t.after(configureStepUp(async () => {
+    stepUps += 1;
+  }));
+  t.mock.method(globalThis, "fetch", async (url: string, options: RequestInit) => {
+    const keys = attempts.get(url) ?? [];
+    keys.push((options.headers as Record<string, string>)["Idempotency-Key"]);
+    attempts.set(url, keys);
+    return keys.length === 1 ? stepUpRequired() : Response.json({ data: { status: "ok" } });
+  });
+  await Promise.all([
+    postIdempotentData("/api/v1/transfers", { amount: "1" }),
+    apiData("/api/v1/me/recovery-keys/rotate", { method: "POST", body: {} }),
+  ]);
+  assert.equal(stepUps, 1);
+  const [transfer, rotate] = [...attempts.values()];
+  assert.equal(transfer.length, 2);
+  assert.ok(transfer[0]);
+  assert.equal(transfer[1], transfer[0]);
+  assert.equal(rotate.length, 2);
+});
+
+test("a declined step-up keeps the refusal, and step-up requests never recurse", async (t) => {
+  let stepUps = 0;
+  t.after(configureStepUp(async () => {
+    stepUps += 1;
+    throw new DOMException("cancelled", "NotAllowedError");
+  }));
+  t.mock.method(globalThis, "fetch", async () => stepUpRequired());
+  await assert.rejects(
+    apiData("/api/v1/me/passkeys/registration-options", { method: "POST", body: {} }),
+    (error) => error instanceof ApiError && error.code === "STEP_UP_REQUIRED",
+  );
+  assert.equal(stepUps, 1);
+  await assert.rejects(
+    apiData("/api/v1/auth/step-up/options", { method: "POST", body: {} }),
+    (error) => error instanceof ApiError && error.code === "STEP_UP_REQUIRED",
+  );
+  assert.equal(stepUps, 1);
+  assert.equal(errorMessage(new ApiError(403, "STEP_UP_REQUIRED", "x")), "보안을 위해 패스키로 다시 인증해주세요");
+});

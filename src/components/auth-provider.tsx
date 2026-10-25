@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { advanceSessionGeneration, onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
+import { advanceSessionGeneration, configureStepUp, onLinkedNetworkChanged, onSessionExpired } from "@/lib/api";
 import { authStatus, type AuthStatus } from "@/lib/auth-status";
 import { clearSessionCache, refreshSession, resetSessionCache, useMe } from "@/lib/hooks/session";
 import { broadcastSessionChange, onSessionChange, type SessionIdentity } from "@/lib/session-sync";
@@ -35,6 +35,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }),
     [queryClient],
+  );
+
+  // Sensitive changes may ask for a fresh passkey proof. The WebAuthn code
+  // loads only when the server first asks for one.
+  useEffect(
+    () => configureStepUp(async () => (await import("@/lib/webauthn")).passkeyStepUp()),
+    [],
   );
 
   // The account this tab last confirmed; undefined until /me first resolves.

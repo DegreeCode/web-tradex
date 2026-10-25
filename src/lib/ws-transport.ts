@@ -240,9 +240,10 @@ export class TradexSocket implements StreamSocket {
       if (!this.stopped && !wasGapClosed) {
         this.emitGap();
       }
+      // A gap handler may have closed the socket for good.
       if (generation !== this.generation) return;
       this.setStatus("closed");
-      if (generation === this.generation) this.scheduleReconnect();
+      this.scheduleReconnect();
     };
     socket.onerror = () => {
       if (this.socket === socket) {

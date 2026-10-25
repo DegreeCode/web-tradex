@@ -9,6 +9,8 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
 
+import { postData } from "./api";
+
 export interface CeremonyEnvelope<T> {
   ceremony_id: string;
   public_key: { publicKey: T };
@@ -40,6 +42,19 @@ export async function getPasskeyAssertion(
 ): Promise<AuthenticationResult> {
   const credential = await startAuthentication({ optionsJSON: envelope.public_key.publicKey });
   return { credential, ceremonyId: envelope.ceremony_id };
+}
+
+/** Re-proves the current session with a passkey before a sensitive change. */
+export async function passkeyStepUp(): Promise<void> {
+  const options = await postData<CeremonyEnvelope<PublicKeyCredentialRequestOptionsJSON>>(
+    "/api/v1/auth/step-up/options",
+    {},
+  );
+  const assertion = await getPasskeyAssertion(options);
+  await postData("/api/v1/auth/step-up/verify", {
+    ceremony_id: assertion.ceremonyId,
+    credential: assertion.credential,
+  });
 }
 
 export function webauthnErrorMessage(error: unknown): string {

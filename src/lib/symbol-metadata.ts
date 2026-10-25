@@ -119,7 +119,7 @@ export function isMarketSymbol(value: unknown): value is MarketSymbol {
   );
 }
 
-export function parseSymbolMetadataCache(value: unknown): SymbolMetadataCache | null {
+function parseSymbolMetadataCache(value: unknown): SymbolMetadataCache | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   if (

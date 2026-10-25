@@ -100,7 +100,7 @@ sha256 해시로 허용하며(`script-src 'unsafe-inline'` 없음), `connect-src
 | 마진 | `/margin` | `GET/POST /margin/positions`, `/margin/positions/{id}/…`, `POST …/simulation` |
 | 송금 | `/transfers` | `GET/POST /transfers`, `GET /transfers/{id}` (목록에 당사자 ID가 없는 이전 백엔드에서만), `PATCH /transfers/{id}/recipient-decision`, `POST /transfers/{id}/cancellation` |
 | 계좌 | `/accounts` | `GET/POST /me/accounts`, `DELETE /me/accounts/{id}` |
-| 보안 | `/security` | `/me/passkeys*`, `/me/sessions*`(limit 50 + cursor), `/me/recovery-keys/rotate`, `/auth/logout` |
+| 보안 | `/security` | `/me/passkeys*`, `/me/sessions*`(limit 50 + cursor), `/me/recovery-keys/rotate`, `/auth/logout`, `/auth/step-up/*`(필요할 때) |
 | 종목 상장 | `/listings/new` | `POST /symbols` |
 | 알림 | `/notifications` | `GET /notifications`, `POST /notifications/{id}/read`, `/read-batch`, `/read-all` |
 | 고객센터 | `/support` | `GET/POST /inquiries`, `GET /inquiries/{ticket}`, `GET/POST /inquiries/{ticket}/messages`, `/resolution` |
@@ -222,6 +222,10 @@ ping에 응답하거나 update를 보낸 뒤에만 스트림을 open으로 봅�
   캔들은 `history`로 보관합니다. 서버 커서를 폐기하지 않으므로 차트는 아래쪽으로 계속 스크롤하거나
   "이전 캔들 더 불러오기"를 눌러 오래된 REST 페이지를 계속 가져올 수 있습니다. 불변 캔들 행 기준으로
   차트 점 변환을 캐시합니다.
+- **패스키 재인증**: 서버가 송금·계좌 삭제·패스키 추가/삭제·복구키 재발급에 `403 STEP_UP_REQUIRED`를
+  보내면 `POST /auth/step-up/options`·`/verify`로 패스키를 다시 확인한 뒤 같은 요청(같은 멱등 키)을
+  한 번 다시 보냅니다. 동시에 거부된 요청은 패스키 확인 한 번을 공유하고, 취소하면 원래 거부를 그대로
+  보여줍니다. WebAuthn 코드는 처음 재인증이 필요할 때만 불러옵니다.
 - **복구 모드**: `403 RECOVERY_RESTRICTED`는 별도 상태로 처리해 `/recover`에서 새 패스키를 등록하도록 안내합니다.
 
 ## 스크립트
@@ -241,7 +245,7 @@ npm run check:bundle # 22개 내보낸 경로의 스크립트 용량 예산 검�
 
 모듈별 점검 기록은 커밋하지 않고 로컬에만 유지합니다.
 
-- TanStack React Query는 5.104.5, lucide-react는 1.61.0을 사용합니다.
+- Next.js·eslint-config-next는 16.4.3, TanStack React Query는 5.104.5, lucide-react는 1.61.0을 사용합니다.
 - ESLint는 9를 유지합니다. `eslint-plugin-react`(eslint-config-next 포함)의 peer 범위가 ESLint 9까지입니다.
 - TypeScript는 6.0을 유지하고 컴파일 target은 ES2022입니다. `typescript-eslint`의 지원 범위가 `<6.1.0`입니다.
 - Next.js는 보안 릴리스 대응을 위해 정확한 버전으로 고정합니다.
@@ -250,12 +254,8 @@ npm run check:bundle # 22개 내보낸 경로의 스크립트 용량 예산 검�
   유지하지 않으며, 실제 사용하는 Base UI 상태 스타일은 `globals.css`에 정의합니다.
 - 로컬 정적 서버 `serve`가 고정한 `compression`은 메모리 누수 수정판인 1.8.2 이상으로
   override합니다. 상위 패키지에서 수정판을 사용하면 override를 제거할 수 있습니다.
-- 2026-10-22 검사 기준 `npm audit --omit=dev`는 취약점 0건입니다. 전체 검사에는
-  ESLint의 `eslint-config-next → @next/eslint-plugin-next → fast-glob → micromatch → braces`
-  경로에 높은 등급 5건(같은 원인에서 파생된 경고)이 남아 있습니다.
-  [braces 보안 공지](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)에 수정 버전이 없으며,
-  이 경로는 정적 배포 산출물에 포함되지 않는 개발용 검사 도구입니다.
-  경고를 없애려고 `npm audit fix --force`로 Next.js 검사 설정을 14로 내리지 않습니다.
+- 2026-10-25 검사 기준 `npm audit`(개발 의존성 포함)은 취약점 0건입니다. `serve`가 쓰는
+  `fast-uri`는 URI 해석 취약점 수정판(3.1.9 이상)으로 잠금 파일에서 갱신했습니다.
 
 ## 라이선스
 

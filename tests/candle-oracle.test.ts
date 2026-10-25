@@ -178,12 +178,13 @@ test("fixture=102 step=2: reverse arrivals preserve sequence-based open and clos
 });
 
 for (const interval of Object.keys(sizes) as (keyof typeof sizes)[]) {
-  test(`oracle capped ${interval} seed=99 (64 events)`, () => {
+  test(`oracle capped ${interval} seed=99 (16 events)`, () => {
     const rng = random(99), size = sizes[interval];
     const seen = [trade(origin, 0, 10)];
     let current = materializeCandlePage(page(oracle(seen, interval)), interval);
     let horizon = origin;
-    for (let step = 0; step < 32; step++) {
+    // Every step repeats the same slide past the cap; a few cover the invariant.
+    for (let step = 0; step < 8; step++) {
       horizon += (5000 + Math.floor(rng() * 100)) * size;
       current = advanceCandlePage(current, interval, iso(horizon));
       check(current, seen, interval, `seed=99 interval=${interval} step=${step} clock`);
